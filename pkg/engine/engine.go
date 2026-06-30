@@ -1,0 +1,558 @@
+package engine
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"sort"
+	"sync"
+	"time"
+)
+
+var (
+	ErrNamespaceNotFound = errors.New("namespace not found")
+	ErrTaskNotFound      = errors.New("task not found")
+	ErrInvalidTransition = errors.New("invalid task transition")
+	ErrDuplicateTask     = errors.New("task already exists")
+	ErrDuplicateNamespace = errors.New("namespace already exists")
+)
+
+type Engine struct {
+	mu         sync.RWMutex
+	namespaces map[string]*Namespace
+	tasks      map[string]map[string]*Task
+	history    map[string]map[string][]Event
+	db         *sql.DB // non-nil when SQLite backend is active
+}
+
+type NewEngineConfig struct {
+	// DBPath controls persistence.
+	//   "" (empty)   – pure in-memory maps (current default).
+	//   ":memory:"   – in-memory SQLite (useful for testing).
+	//   "/path/to.db" – persistent SQLite file.
+	DBPath string
+}
+
+type CreateNamespaceRequest struct {
+	ID       string
+	Name     string
+	Metadata map[string]string
+}
+
+type CreateTaskRequest struct {
+	NamespaceID       string
+	ID                string
+	Title             string
+	Description       string
+	AssignedWorker    string
+	AcceptanceCriteria []string
+	OutputFiles       []string
+	Metadata          map[string]string
+}
+
+type StateFilter struct {
+	States map[TaskState]bool
+}
+
+type Namespace struct {
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	CreatedAt time.Time         `json:"created_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
+}
+
+type Task struct {
+	ID                string            `json:"id"`
+	NamespaceID       string            `json:"namespace_id"`
+	Title             string            `json:"title"`
+	Description       string            `json:"description"`
+	State             TaskState         `json:"state"`
+	AssignedWorker    string            `json:"assigned_worker"`
+	AcceptanceCriteria []string          `json:"acceptance_criteria"`
+	OutputFiles       []string          `json:"output_files"`
+	WorkerAgentID     string            `json:"worker_agent_id,omitempty"`
+	ReviewCycle       int               `json:"review_cycle"`
+	CreatedAt         time.Time         `json:"created_at"`
+	UpdatedAt         time.Time         `json:"updated_at"`
+	Metadata          map[string]string `json:"metadata,omitempty"`
+}
+
+type Event struct {
+	TaskID     string            `json:"task_id"`
+	Transition string            `json:"transition"`
+	FromState  TaskState         `json:"from_state"`
+	ToState    TaskState         `json:"to_state"`
+	Timestamp  time.Time         `json:"timestamp"`
+	Actor      string            `json:"actor,omitempty"`
+	Reason     string            `json:"reason,omitempty"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
+}
+
+type TaskState string
+
+const (
+	TaskAssigned      TaskState = "assigned"
+	TaskExecuting     TaskState = "executing"
+	TaskReviewPending TaskState = "review_pending"
+	TaskReworkNeeded  TaskState = "rework_needed"
+	TaskDone          TaskState = "done"
+	TaskCancelled     TaskState = "cancelled"
+)
+
+type TaskTransition string
+
+const (
+	TransStart    TaskTransition = "start"
+	TransSubmit   TaskTransition = "submit"
+	TransPass     TaskTransition = "pass"
+	TransRework   TaskTransition = "rework"
+	TransReassign TaskTransition = "reassign"
+	TransResume   TaskTransition = "resume"
+	TransCancel   TaskTransition = "cancel"
+)
+
+func NewEngine(cfg NewEngineConfig) (*Engine, error) {
+	e := &Engine{
+		namespaces: make(map[string]*Namespace),
+		tasks:      make(map[string]map[string]*Task),
+		history:    make(map[string]map[string][]Event),
+	}
+
+	if cfg.DBPath != "" {
+		db, err := openSQLite(cfg.DBPath)
+		if err != nil {
+			return nil, fmt.Errorf("sqlite init: %w", err)
+		}
+		e.db = db
+
+		// Load existing data so a reopened engine sees prior state.
+		nsMap, err := loadNamespaces(db)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("load namespaces: %w", err)
+		}
+		e.namespaces = nsMap
+
+		taskMap, err := loadTasks(db)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("load tasks: %w", err)
+		}
+		e.tasks = taskMap
+
+		histMap, err := loadHistory(db)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("load history: %w", err)
+		}
+		e.history = histMap
+	}
+
+	return e, nil
+}
+
+func (e *Engine) Close() error {
+	if e.db != nil {
+		return e.db.Close()
+	}
+	return nil
+}
+
+func (e *Engine) CreateNamespace(ctx context.Context, req CreateNamespaceRequest) (*Namespace, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if req.ID == "" {
+		return nil, errors.New("namespace id is required")
+	}
+	if _, ok := e.namespaces[req.ID]; ok {
+		return nil, ErrDuplicateNamespace
+	}
+
+	now := time.Now().UTC()
+	ns := &Namespace{
+		ID:        req.ID,
+		Name:      req.Name,
+		CreatedAt: now,
+		UpdatedAt: now,
+		Metadata:  cloneStringMap(req.Metadata),
+	}
+	e.namespaces[req.ID] = ns
+	e.tasks[req.ID] = make(map[string]*Task)
+	e.history[req.ID] = make(map[string][]Event)
+
+	if e.db != nil {
+		if err := insertNamespace(e.db, ns); err != nil {
+			// Roll back in-memory state on persistence failure.
+			delete(e.namespaces, req.ID)
+			delete(e.tasks, req.ID)
+			delete(e.history, req.ID)
+			return nil, fmt.Errorf("persist namespace: %w", err)
+		}
+	}
+
+	return cloneNamespace(ns), nil
+}
+
+func (e *Engine) GetNamespace(ctx context.Context, nsID string) (*Namespace, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	ns, ok := e.namespaces[nsID]
+	if !ok {
+		return nil, ErrNamespaceNotFound
+	}
+	return cloneNamespace(ns), nil
+}
+
+func (e *Engine) ListNamespaces(ctx context.Context) ([]Namespace, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	out := make([]Namespace, 0, len(e.namespaces))
+	for _, ns := range e.namespaces {
+		out = append(out, *cloneNamespace(ns))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+func (e *Engine) CreateTask(ctx context.Context, req CreateTaskRequest) (*Task, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if _, ok := e.namespaces[req.NamespaceID]; !ok {
+		return nil, ErrNamespaceNotFound
+	}
+	if req.ID == "" {
+		return nil, errors.New("task id is required")
+	}
+	if _, ok := e.tasks[req.NamespaceID][req.ID]; ok {
+		return nil, ErrDuplicateTask
+	}
+
+	now := time.Now().UTC()
+	task := &Task{
+		ID:                req.ID,
+		NamespaceID:       req.NamespaceID,
+		Title:             req.Title,
+		Description:       req.Description,
+		State:             TaskAssigned,
+		AssignedWorker:    req.AssignedWorker,
+		AcceptanceCriteria: cloneStrings(req.AcceptanceCriteria),
+		OutputFiles:       cloneStrings(req.OutputFiles),
+		ReviewCycle:       0,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+		Metadata:          cloneStringMap(req.Metadata),
+	}
+	e.tasks[req.NamespaceID][req.ID] = task
+	ev := Event{
+		TaskID:    req.ID,
+		Transition: string(TransStart),
+		FromState:  TaskAssigned,
+		ToState:    TaskAssigned,
+		Timestamp:  now,
+		Reason:     "task created",
+		Metadata:   cloneStringMap(req.Metadata),
+	}
+	e.appendEventLocked(req.NamespaceID, req.ID, ev)
+
+	if e.db != nil {
+		if err := insertTask(e.db, task); err != nil {
+			return nil, fmt.Errorf("persist task: %w", err)
+		}
+		if err := insertEvent(e.db, req.NamespaceID, req.ID, ev); err != nil {
+			return nil, fmt.Errorf("persist event: %w", err)
+		}
+	}
+
+	return cloneTask(task), nil
+}
+
+func (e *Engine) TransitionTask(ctx context.Context, nsID, taskID string, t TaskTransition, meta map[string]string) (*Task, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	task, err := e.getTaskLocked(nsID, taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate actor_role if provided.
+	if role := meta["actor_role"]; role != "" {
+		if err := validateActorRole(t, role); err != nil {
+			return nil, err
+		}
+	}
+
+	from := task.State
+	to, err := applyTransition(task, t)
+	if err != nil {
+		return nil, err
+	}
+	task.State = to
+	task.UpdatedAt = time.Now().UTC()
+	if t == TransRework {
+		task.ReviewCycle++
+	}
+	if v := meta["worker_agent_id"]; v != "" {
+		task.WorkerAgentID = v
+	}
+	if v := meta["reason"]; v != "" {
+		task.Metadata = ensureMap(task.Metadata)
+		task.Metadata["reason"] = v
+	}
+
+	ev := Event{
+		TaskID:     taskID,
+		Transition: string(t),
+		FromState:  from,
+		ToState:    to,
+		Timestamp:  time.Now().UTC(),
+		Actor:      meta["actor"],
+		Reason:     meta["reason"],
+		Metadata:   cloneStringMap(meta),
+	}
+	e.appendEventLocked(nsID, taskID, ev)
+
+	if e.db != nil {
+		if err := updateTask(e.db, task); err != nil {
+			return nil, fmt.Errorf("persist task update: %w", err)
+		}
+		if err := insertEvent(e.db, nsID, taskID, ev); err != nil {
+			return nil, fmt.Errorf("persist event: %w", err)
+		}
+	}
+
+	return cloneTask(task), nil
+}
+
+func (e *Engine) GetTask(ctx context.Context, nsID, taskID string) (*Task, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	task, err := e.getTaskLocked(nsID, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return cloneTask(task), nil
+}
+
+func (e *Engine) ListTasks(ctx context.Context, nsID string, filter StateFilter) ([]Task, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	if _, ok := e.namespaces[nsID]; !ok {
+		return nil, ErrNamespaceNotFound
+	}
+	out := make([]Task, 0, len(e.tasks[nsID]))
+	for _, task := range e.tasks[nsID] {
+		if len(filter.States) > 0 && !filter.States[task.State] {
+			continue
+		}
+		out = append(out, *cloneTask(task))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+func (e *Engine) GetHistory(ctx context.Context, nsID, taskID string) ([]Event, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	if _, ok := e.namespaces[nsID]; !ok {
+		return nil, ErrNamespaceNotFound
+	}
+	h := e.history[nsID][taskID]
+	out := make([]Event, len(h))
+	copy(out, h)
+	return out, nil
+}
+
+func (e *Engine) getTaskLocked(nsID, taskID string) (*Task, error) {
+	if _, ok := e.namespaces[nsID]; !ok {
+		return nil, ErrNamespaceNotFound
+	}
+	task, ok := e.tasks[nsID][taskID]
+	if !ok {
+		return nil, ErrTaskNotFound
+	}
+	return task, nil
+}
+
+func (e *Engine) appendEventLocked(nsID, taskID string, event Event) {
+	if e.history[nsID] == nil {
+		e.history[nsID] = make(map[string][]Event)
+	}
+	e.history[nsID][taskID] = append(e.history[nsID][taskID], event)
+}
+
+func applyTransition(task *Task, t TaskTransition) (TaskState, error) {
+	switch t {
+	case TransStart:
+		if task.State != TaskAssigned && task.State != TaskReworkNeeded {
+			return "", ErrInvalidTransition
+		}
+		return TaskExecuting, nil
+	case TransSubmit:
+		if task.State != TaskExecuting {
+			return "", ErrInvalidTransition
+		}
+		return TaskReviewPending, nil
+	case TransPass:
+		if task.State != TaskReviewPending {
+			return "", ErrInvalidTransition
+		}
+		return TaskDone, nil
+	case TransRework:
+		if task.State != TaskReviewPending {
+			return "", ErrInvalidTransition
+		}
+		return TaskReworkNeeded, nil
+	case TransReassign:
+		if task.State != TaskReworkNeeded {
+			return "", ErrInvalidTransition
+		}
+		return TaskAssigned, nil
+	case TransResume:
+		if task.State != TaskReworkNeeded {
+			return "", ErrInvalidTransition
+		}
+		return TaskExecuting, nil
+	case TransCancel:
+		return TaskCancelled, nil
+	default:
+		return "", fmt.Errorf("unknown transition %q", t)
+	}
+}
+
+// AvailableTransition describes a transition the caller is allowed to invoke
+// from the current task state.
+type AvailableTransition struct {
+	Transition string `json:"transition"`
+	Role       string `json:"role"`
+	ToState    string `json:"to_state"`
+	Hint       string `json:"hint,omitempty"`
+}
+
+// AvailableTransitions returns the list of transitions that are legal from the
+// task's current state, annotated with the role permitted to invoke each one.
+func AvailableTransitions(task *Task) []AvailableTransition {
+	switch task.State {
+	case TaskAssigned:
+		return []AvailableTransition{
+			{Transition: string(TransStart), Role: "leader", ToState: string(TaskExecuting),
+				Hint: "Leader dispatches the task to the assigned Worker"},
+		}
+	case TaskExecuting:
+		return []AvailableTransition{
+			{Transition: string(TransSubmit), Role: "worker", ToState: string(TaskReviewPending),
+				Hint: "Worker has finished and delivered the output files"},
+			{Transition: string(TransCancel), Role: "leader", ToState: string(TaskCancelled),
+				Hint: "Leader aborts the task"},
+		}
+	case TaskReviewPending:
+		return []AvailableTransition{
+			{Transition: string(TransPass), Role: "reviewer", ToState: string(TaskDone),
+				Hint: "All acceptance criteria pass"},
+			{Transition: string(TransRework), Role: "reviewer", ToState: string(TaskReworkNeeded),
+				Hint: "At least one acceptance criterion failed — Worker needs to redo"},
+		}
+	case TaskReworkNeeded:
+		return []AvailableTransition{
+			{Transition: string(TransResume), Role: "leader", ToState: string(TaskExecuting),
+				Hint: "Leader re-dispatches the task after rework feedback"},
+			{Transition: string(TransReassign), Role: "leader", ToState: string(TaskAssigned),
+				Hint: "Leader reassigns to a different Worker"},
+			{Transition: string(TransCancel), Role: "leader", ToState: string(TaskCancelled),
+				Hint: "Leader aborts the task"},
+		}
+	case TaskDone, TaskCancelled:
+		return nil
+	default:
+		return nil
+	}
+}
+
+// roleAllowedTransitions maps each role to the transitions that role may invoke.
+var roleAllowedTransitions = map[string]map[TaskTransition]bool{
+	"leader": {
+		TransStart:    true,
+		TransResume:   true,
+		TransReassign: true,
+		TransCancel:   true,
+	},
+	"worker": {
+		TransSubmit: true,
+	},
+	"reviewer": {
+		TransPass:   true,
+		TransRework: true,
+	},
+}
+
+func validateActorRole(t TaskTransition, role string) error {
+	allowed, ok := roleAllowedTransitions[role]
+	if !ok {
+		return fmt.Errorf("unknown actor_role %q: valid roles are leader, worker, reviewer", role)
+	}
+	if !allowed[t] {
+		// Build a helpful list of what this role CAN do.
+		canDo := make([]string, 0, 3)
+		for trans := range allowed {
+			canDo = append(canDo, string(trans))
+		}
+		return fmt.Errorf("actor_role %q is not allowed to invoke transition %q; this role can only use: %v", role, string(t), canDo)
+	}
+	return nil
+}
+
+func cloneNamespace(ns *Namespace) *Namespace {
+	if ns == nil {
+		return nil
+	}
+	cpy := *ns
+	cpy.Metadata = cloneStringMap(ns.Metadata)
+	return &cpy
+}
+
+func cloneTask(task *Task) *Task {
+	if task == nil {
+		return nil
+	}
+	cpy := *task
+	cpy.AcceptanceCriteria = cloneStrings(task.AcceptanceCriteria)
+	cpy.OutputFiles = cloneStrings(task.OutputFiles)
+	cpy.Metadata = cloneStringMap(task.Metadata)
+	return &cpy
+}
+
+func cloneStrings(v []string) []string {
+	if v == nil {
+		return nil
+	}
+	cpy := make([]string, len(v))
+	copy(cpy, v)
+	return cpy
+}
+
+func cloneStringMap(v map[string]string) map[string]string {
+	if v == nil {
+		return nil
+	}
+	cpy := make(map[string]string, len(v))
+	for k, val := range v {
+		cpy[k] = val
+	}
+	return cpy
+}
+
+func ensureMap(v map[string]string) map[string]string {
+	if v != nil {
+		return v
+	}
+	return make(map[string]string)
+}
