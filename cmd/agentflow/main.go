@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -123,7 +124,7 @@ func buildComponents() (*runtimeComponents, error) {
 		if tmpDir == "" {
 			tmpDir = os.TempDir()
 		}
-		dbPath = tmpDir + string(os.PathSeparator) + "agentflow.db"
+		dbPath = filepath.Join(tmpDir, "agentflow.db")
 	}
 	backendName := "sqlite-file"
 	if dbPath == ":memory:" {
