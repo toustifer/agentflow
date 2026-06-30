@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/stifer/agentflow/pkg/engine"
+	"github.com/toustifer/agentflow/pkg/engine"
 )
 
 type ToolSpec struct {

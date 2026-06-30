@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/stifer/agentflow/pkg/engine"
+	"github.com/toustifer/agentflow/pkg/engine"
 )
 
 func TestToolRegistryIncludesCoreTools(t *testing.T) {
