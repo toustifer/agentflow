@@ -1,6 +1,6 @@
 # agentflow
 
-Lightweight task state machine engine with MCP stdio interface. Powers the [agent-company](https://github.com/stifer/agent-company) multi-agent orchestration skill for Claude Code.
+Lightweight task state machine engine with MCP stdio interface. Powers the [agent-company](https://github.com/toustifer/agent-company) multi-agent orchestration skill for Claude Code.
 
 ## What it does
 
