@@ -113,7 +113,23 @@ type runtimeComponents struct {
 }
 
 func buildComponents() (*runtimeComponents, error) {
-	cfg := engine.NewEngineConfig{DBPath: ":memory:"}
+	dbPath := os.Getenv("AGENTFLOW_DB_PATH")
+	if dbPath == "" {
+		// In stdio mode, use file DB by default for persistence
+		tmpDir := os.Getenv("TMPDIR")
+		if tmpDir == "" {
+			tmpDir = os.Getenv("TEMP")
+		}
+		if tmpDir == "" {
+			tmpDir = os.TempDir()
+		}
+		dbPath = tmpDir + string(os.PathSeparator) + "agentflow.db"
+	}
+	backendName := "sqlite-file"
+	if dbPath == ":memory:" {
+		backendName = "sqlite-in-memory"
+	}
+	cfg := engine.NewEngineConfig{DBPath: dbPath}
 
 	eng, err := engine.NewEngine(cfg)
 	if err != nil {
@@ -130,7 +146,7 @@ func buildComponents() (*runtimeComponents, error) {
 		engine:      eng,
 		server:      srv,
 		tools:       srv.Tools(),
-		backendName: "sqlite-in-memory",
+		backendName: backendName,
 	}, nil
 }
 

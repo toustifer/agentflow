@@ -229,6 +229,9 @@ func (e *Engine) CreateTask(ctx context.Context, req CreateTaskRequest) (*Task, 
 	if req.ID == "" {
 		return nil, errors.New("task id is required")
 	}
+	if e.tasks[req.NamespaceID] == nil {
+		e.tasks[req.NamespaceID] = make(map[string]*Task)
+	}
 	if _, ok := e.tasks[req.NamespaceID][req.ID]; ok {
 		return nil, ErrDuplicateTask
 	}
