@@ -293,6 +293,22 @@ func (s *Server) handleDAGReport(ctx context.Context, input map[string]any) (map
 	}, nil
 }
 
+func (s *Server) handleDAGFlowchart(ctx context.Context, input map[string]any) (map[string]any, error) {
+	nsID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return nil, err
+	}
+	dagID, err := requiredString(input, "dag_id")
+	if err != nil {
+		return nil, err
+	}
+	chart, err := s.engine.DAGFlowchart(ctx, nsID, dagID)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"flowchart": chart}, nil
+}
+
 // ---------------------------------------------------------------------------
 // Worker handlers
 // ---------------------------------------------------------------------------
