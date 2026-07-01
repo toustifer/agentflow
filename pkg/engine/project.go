@@ -179,4 +179,147 @@ func joinStrings(items []string) string {
 }
 
 // Ensure interface compliance
-var _ = errors.New("unused")
+// ---------------------------------------------------------------------------
+// ProjectReport — cross-DAG project-level summary
+// ---------------------------------------------------------------------------
+
+type ProjectReport struct {
+	TotalDAGs     int                 `json:"total_dags"`
+	TotalTasks    int                 `json:"total_tasks"`
+	DoneTasks     int                 `json:"done_tasks"`
+	ExecutingTasks int                `json:"executing_tasks"`
+	PendingTasks  int                 `json:"pending_tasks"`
+	CompletionPct float64             `json:"completion_pct"`
+	DAGs          []DAGReport         `json:"dags"`
+	Workers       []ProjectWorkerInfo `json:"workers"`
+}
+
+type ProjectWorkerInfo struct {
+	WorkerID   string `json:"worker_id"`
+	TotalTasks int    `json:"total_tasks"`
+	DoneTasks  int    `json:"done_tasks"`
+	Status     string `json:"status"`
+}
+
+// ProjectReport returns a cross-DAG summary for the entire namespace.
+func (e *Engine) ProjectReport(ctx context.Context, nsID string) (*ProjectReport, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	if _, ok := e.namespaces[nsID]; !ok {
+		return nil, ErrNamespaceNotFound
+	}
+
+	dagSummary := make([]DAGReport, 0)
+	workerAgg := make(map[string]*ProjectWorkerInfo)
+
+	totalTasks := 0
+	doneTasks := 0
+	execTasks := 0
+
+	// Walk all DAGs
+	for _, dag := range e.dags[nsID] {
+		var tasks []Task
+		workerTasks := make(map[string]int)
+		workerDone := make(map[string]int)
+
+		for _, t := range e.tasks[nsID] {
+			if t.DAGID == dag.ID {
+				tasks = append(tasks, *cloneTask(t))
+				totalTasks++
+				switch t.State {
+				case TaskDone:
+					doneTasks++
+					workerDone[t.AssignedWorker]++
+				case TaskExecuting, TaskReviewPending, TaskReworkNeeded:
+					execTasks++
+				}
+				workerTasks[t.AssignedWorker]++
+			}
+		}
+
+		// Build worker summary for this DAG
+		dagWorkers := make([]DAGWorkerSummary, 0)
+		for wid, cnt := range workerTasks {
+			dagWorkers = append(dagWorkers, DAGWorkerSummary{
+				WorkerID:   wid,
+				TotalTasks: cnt,
+				DoneTasks:  workerDone[wid],
+				Status:     string(e.workerStatusUnsafe(nsID, wid)),
+			})
+			// Accumulate to project-level
+			if _, ok := workerAgg[wid]; !ok {
+				workerAgg[wid] = &ProjectWorkerInfo{WorkerID: wid}
+			}
+			workerAgg[wid].TotalTasks += cnt
+			workerAgg[wid].DoneTasks += workerDone[wid]
+		}
+
+		pct := 0.0
+		if len(tasks) > 0 {
+			d := 0
+			for _, t := range tasks {
+				if t.State == TaskDone {
+					d++
+				}
+			}
+			pct = float64(d) / float64(len(tasks)) * 100
+		}
+
+		dagSummary = append(dagSummary, DAGReport{
+			DAG:            *cloneDAG(dag),
+			TotalTasks:     len(tasks),
+			DoneTasks:      doneInDAG(tasks),
+			ExecutingTasks: activeInDAG(tasks),
+			PendingTasks:   len(tasks) - doneInDAG(tasks) - activeInDAG(tasks),
+			CompletionPct:  pct,
+			Workers:        dagWorkers,
+		})
+	}
+
+	workers := make([]ProjectWorkerInfo, 0, len(workerAgg))
+	for _, w := range workerAgg {
+		w.Status = string(e.workerStatusUnsafe(nsID, w.WorkerID))
+		workers = append(workers, *w)
+	}
+	sort.Slice(workers, func(i, j int) bool { return workers[i].WorkerID < workers[j].WorkerID })
+
+	pct := 0.0
+	if totalTasks > 0 {
+		pct = float64(doneTasks) / float64(totalTasks) * 100
+	}
+
+	return &ProjectReport{
+		TotalDAGs:      len(dagSummary),
+		TotalTasks:     totalTasks,
+		DoneTasks:      doneTasks,
+		ExecutingTasks: execTasks,
+		PendingTasks:   totalTasks - doneTasks - execTasks,
+		CompletionPct:  pct,
+		DAGs:           dagSummary,
+		Workers:        workers,
+	}, nil
+}
+
+func doneInDAG(tasks []Task) int {
+	c := 0
+	for _, t := range tasks {
+		if t.State == TaskDone {
+			c++
+		}
+	}
+	return c
+}
+
+func activeInDAG(tasks []Task) int {
+	c := 0
+	for _, t := range tasks {
+		switch t.State {
+		case TaskExecuting, TaskReviewPending, TaskReworkNeeded:
+			c++
+		}
+	}
+	return c
+}
+
+var _ = errors.New("unused") // keep import

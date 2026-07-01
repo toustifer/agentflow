@@ -36,6 +36,7 @@ func (s *Server) Tools() []ToolSpec {
 		{Name: "worker_status"},
 		{Name: "project_next_tasks"},
 		{Name: "project_blockers"},
+		{Name: "project_report"},
 		{Name: "flow_ping"},
 	}
 }
@@ -118,6 +119,8 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 		return s.handleProjectNextTasks(ctx, input)
 	case "project_blockers":
 		return s.handleProjectBlockers(ctx, input)
+	case "project_report":
+		return s.handleProjectReport(ctx, input)
 	case "flow_ping":
 		result := map[string]any{"ok": true}
 		s.syncPing(ctx)

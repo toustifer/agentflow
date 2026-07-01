@@ -632,3 +632,57 @@ func workerToMap(w *engine.Worker, status string) map[string]any {
 	}
 	return m
 }
+
+func (s *Server) handleProjectReport(ctx context.Context, input map[string]any) (map[string]any, error) {
+	nsID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return nil, err
+	}
+	report, err := s.engine.ProjectReport(ctx, nsID)
+	if err != nil {
+		return nil, err
+	}
+
+	dags := make([]any, 0, len(report.DAGs))
+	for _, d := range report.DAGs {
+		workers := make([]any, 0, len(d.Workers))
+		for _, w := range d.Workers {
+			workers = append(workers, map[string]any{
+				"worker_id":   w.WorkerID,
+				"total_tasks": w.TotalTasks,
+				"done_tasks":  w.DoneTasks,
+				"status":      w.Status,
+			})
+		}
+		dags = append(dags, map[string]any{
+			"dag":             dagToMap(&d.DAG),
+			"total_tasks":     d.TotalTasks,
+			"done_tasks":      d.DoneTasks,
+			"executing_tasks": d.ExecutingTasks,
+			"pending_tasks":   d.PendingTasks,
+			"completion_pct":  d.CompletionPct,
+			"workers":         workers,
+		})
+	}
+
+	workers := make([]any, 0, len(report.Workers))
+	for _, w := range report.Workers {
+		workers = append(workers, map[string]any{
+			"worker_id":   w.WorkerID,
+			"total_tasks": w.TotalTasks,
+			"done_tasks":  w.DoneTasks,
+			"status":      w.Status,
+		})
+	}
+
+	return map[string]any{
+		"total_dags":      report.TotalDAGs,
+		"total_tasks":     report.TotalTasks,
+		"done_tasks":      report.DoneTasks,
+		"executing_tasks": report.ExecutingTasks,
+		"pending_tasks":   report.PendingTasks,
+		"completion_pct":  report.CompletionPct,
+		"dags":            dags,
+		"workers":         workers,
+	}, nil
+}
