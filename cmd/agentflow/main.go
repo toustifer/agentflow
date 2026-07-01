@@ -28,10 +28,43 @@ func main() {
 		}
 		return
 	}
-
+	if len(os.Args) > 2 && os.Args[1] == "file" {
+		if err := runFile(os.Args[2]); err != nil {
+			log.Fatalf("file: %v", err)
+		}
+		return
+	}
 	if err := runHTTP(); err != nil {
 		log.Fatalf("agentflow startup failed: %v", err)
 	}
+}
+
+func runFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	components, err := buildComponents()
+	if err != nil {
+		return err
+	}
+	defer components.close()
+
+	var req rpcRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return err
+	}
+
+	resp := rpcResponse{JSONRPC: "2.0", ID: req.ID}
+	out, callErr := components.server.Handle(context.Background(), req.Method, req.Params)
+	if callErr != nil {
+		resp.Error = &rpcError{Code: -32603, Message: callErr.Error()}
+	} else {
+		resp.Result = map[string]any{"content": []any{map[string]any{"type": "text", "text": formatToolResult(out)}}}
+	}
+	payload, _ := json.Marshal(resp)
+	fmt.Print(string(payload))
+	return nil
 }
 
 func runHTTP() error {
@@ -116,7 +149,6 @@ type runtimeComponents struct {
 func buildComponents() (*runtimeComponents, error) {
 	dbPath := os.Getenv("AGENTFLOW_DB_PATH")
 	if dbPath == "" {
-		// In stdio mode, use file DB by default for persistence
 		tmpDir := os.Getenv("TMPDIR")
 		if tmpDir == "" {
 			tmpDir = os.Getenv("TEMP")
@@ -168,10 +200,6 @@ func toolNames(tools []lwserver.ToolSpec) []string {
 	return names
 }
 
-// ---------------------------------------------------------------------------
-// MCP stdio protocol
-// ---------------------------------------------------------------------------
-
 type rpcRequest struct {
 	JSONRPC string         `json:"jsonrpc"`
 	Method  string         `json:"method"`
@@ -210,13 +238,8 @@ func serveMCP(ctx context.Context, in io.Reader, out io.Writer, srv *lwserver.Se
 		case "initialize":
 			resp.Result = map[string]any{
 				"protocolVersion": "2024-11-05",
-				"capabilities": map[string]any{
-					"tools": map[string]any{},
-				},
-				"serverInfo": map[string]any{
-					"name":    "agentflow",
-					"version": "0.1.0",
-				},
+				"capabilities":    map[string]any{"tools": map[string]any{}},
+				"serverInfo":      map[string]any{"name": "agentflow", "version": "0.1.0"},
 			}
 		case "tools/list":
 			resp.Result = map[string]any{"tools": srv.Tools()}

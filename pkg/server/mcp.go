@@ -21,6 +21,16 @@ func (s *Server) Tools() []ToolSpec {
 		{Name: "task_get"},
 		{Name: "task_list"},
 		{Name: "task_history"},
+		{Name: "task_query"},
+		{Name: "dag_create"},
+		{Name: "dag_get"},
+		{Name: "dag_list"},
+		{Name: "dag_update"},
+		{Name: "worker_register"},
+		{Name: "worker_get"},
+		{Name: "worker_list"},
+		{Name: "worker_update"},
+		{Name: "worker_status"},
 		{Name: "flow_ping"},
 	}
 }
@@ -73,6 +83,26 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 		}
 		s.syncTask(ctx, result.task)
 		return result.payload, nil
+	case "task_query":
+		return s.handleTaskQuery(ctx, input)
+	case "dag_create":
+		return s.handleDAGCreate(ctx, input)
+	case "dag_get":
+		return s.handleDAGGet(ctx, input)
+	case "dag_list":
+		return s.handleDAGList(ctx, input)
+	case "dag_update":
+		return s.handleDAGUpdate(ctx, input)
+	case "worker_register":
+		return s.handleWorkerRegister(ctx, input)
+	case "worker_get":
+		return s.handleWorkerGet(ctx, input)
+	case "worker_list":
+		return s.handleWorkerList(ctx, input)
+	case "worker_update":
+		return s.handleWorkerUpdate(ctx, input)
+	case "worker_status":
+		return s.handleWorkerStatus(ctx, input)
 	case "flow_ping":
 		result := map[string]any{"ok": true}
 		s.syncPing(ctx)
@@ -301,6 +331,26 @@ func decodeCreateTaskRequest(input map[string]any) (engine.CreateTaskRequest, er
 	if err != nil {
 		return req, err
 	}
+	dagID, err := optionalString(input, "dag_id")
+	if err != nil {
+		return req, err
+	}
+	dependsOn, err := optionalStringSlice(input, "depends_on")
+	if err != nil {
+		return req, err
+	}
+	tags, err := optionalStringSlice(input, "tags")
+	if err != nil {
+		return req, err
+	}
+	priority, err := optionalInt(input, "priority")
+	if err != nil {
+		return req, err
+	}
+	estimatedHours, err := optionalFloat(input, "estimated_hours")
+	if err != nil {
+		return req, err
+	}
 	metadata, err := optionalStringMap(input, "metadata")
 	if err != nil {
 		return req, err
@@ -314,6 +364,11 @@ func decodeCreateTaskRequest(input map[string]any) (engine.CreateTaskRequest, er
 		AssignedWorker:     assignedWorker,
 		AcceptanceCriteria: acceptanceCriteria,
 		OutputFiles:        outputFiles,
+		DAGID:              dagID,
+		DependsOn:          dependsOn,
+		Tags:               tags,
+		Priority:           priority,
+		EstimatedHours:     estimatedHours,
 		Metadata:           metadata,
 	}, nil
 }
@@ -443,6 +498,12 @@ func taskToMap(task *engine.Task) map[string]any {
 		"assigned_worker":       task.AssignedWorker,
 		"acceptance_criteria":   cloneStringsAny(task.AcceptanceCriteria),
 		"output_files":          cloneStringsAny(task.OutputFiles),
+		"dag_id":                task.DAGID,
+		"depends_on":            cloneStringsAny(task.DependsOn),
+		"tags":                  cloneStringsAny(task.Tags),
+		"priority":              task.Priority,
+		"estimated_hours":       task.EstimatedHours,
+		"actual_hours":          task.ActualHours,
 		"worker_agent_id":       task.WorkerAgentID,
 		"review_cycle":          task.ReviewCycle,
 		"created_at":            task.CreatedAt,

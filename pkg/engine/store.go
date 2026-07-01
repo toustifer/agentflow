@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -31,6 +32,12 @@ CREATE TABLE IF NOT EXISTS tasks (
 	assigned_worker     TEXT NOT NULL DEFAULT '',
 	acceptance_criteria TEXT NOT NULL DEFAULT '[]',
 	output_files        TEXT NOT NULL DEFAULT '[]',
+	dag_id              TEXT NOT NULL DEFAULT '',
+	depends_on          TEXT NOT NULL DEFAULT '[]',
+	tags                TEXT NOT NULL DEFAULT '[]',
+	priority            INTEGER NOT NULL DEFAULT 0,
+	estimated_hours     REAL NOT NULL DEFAULT 0,
+	actual_hours        REAL NOT NULL DEFAULT 0,
 	worker_agent_id     TEXT NOT NULL DEFAULT '',
 	review_cycle        INTEGER NOT NULL DEFAULT 0,
 	created_at          TEXT NOT NULL,
@@ -51,6 +58,31 @@ CREATE TABLE IF NOT EXISTS events (
 	actor       TEXT NOT NULL DEFAULT '',
 	reason      TEXT NOT NULL DEFAULT '',
 	metadata    TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS dags (
+	id           TEXT NOT NULL,
+	namespace_id TEXT NOT NULL,
+	title        TEXT NOT NULL,
+	branch       TEXT NOT NULL DEFAULT '',
+	status       TEXT NOT NULL DEFAULT 'planning',
+	created_at   TEXT NOT NULL,
+	updated_at   TEXT NOT NULL,
+	PRIMARY KEY (namespace_id, id),
+	FOREIGN KEY (namespace_id) REFERENCES namespaces(id)
+);
+
+CREATE TABLE IF NOT EXISTS workers (
+	id           TEXT NOT NULL,
+	namespace_id TEXT NOT NULL,
+	name         TEXT NOT NULL,
+	scope        TEXT NOT NULL DEFAULT '',
+	skills       TEXT NOT NULL DEFAULT '[]',
+	metadata     TEXT NOT NULL DEFAULT '{}',
+	created_at   TEXT NOT NULL,
+	updated_at   TEXT NOT NULL,
+	PRIMARY KEY (namespace_id, id),
+	FOREIGN KEY (namespace_id) REFERENCES namespaces(id)
 );`
 
 // openSQLite opens (or creates) a SQLite database at dbPath and ensures the
@@ -66,7 +98,41 @@ func openSQLite(dbPath string) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("create schema: %w", err)
 	}
+
+	// Migration: add new columns to existing tasks tables
+	if err := migrateTasksTable(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate tasks: %w", err)
+	}
+
 	return db, nil
+}
+
+func migrateTasksTable(db *sql.DB) error {
+	cols := []string{
+		"dag_id TEXT NOT NULL DEFAULT ''",
+		"depends_on TEXT NOT NULL DEFAULT '[]'",
+		"tags TEXT NOT NULL DEFAULT '[]'",
+		"priority INTEGER NOT NULL DEFAULT 0",
+		"estimated_hours REAL NOT NULL DEFAULT 0",
+		"actual_hours REAL NOT NULL DEFAULT 0",
+	}
+	for _, c := range cols {
+		// SQLite ALTER TABLE ADD COLUMN is not idempotent; check PRAGMA first.
+		colName := strings.SplitN(c, " ", 2)[0]
+		var count int
+		if err := db.QueryRow(
+			`SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name = ?`, colName,
+		).Scan(&count); err != nil {
+			return fmt.Errorf("check column %s: %w", colName, err)
+		}
+		if count == 0 {
+			if _, err := db.Exec("ALTER TABLE tasks ADD COLUMN " + c); err != nil {
+				return fmt.Errorf("add column %s: %w", colName, err)
+			}
+		}
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -118,13 +184,17 @@ func loadNamespaces(db *sql.DB) (map[string]*Namespace, error) {
 func insertTask(db *sql.DB, task *Task) error {
 	ac := mustMarshalJSON(task.AcceptanceCriteria)
 	of := mustMarshalJSON(task.OutputFiles)
+	deps := mustMarshalJSON(task.DependsOn)
+	tags := mustMarshalJSON(task.Tags)
 	meta := mustMarshalJSON(task.Metadata)
 	_, err := db.Exec(
 		`INSERT INTO tasks (id, namespace_id, title, description, state, assigned_worker,
-		 acceptance_criteria, output_files, worker_agent_id, review_cycle,
-		 created_at, updated_at, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 acceptance_criteria, output_files, dag_id, depends_on, tags, priority,
+		 estimated_hours, actual_hours, worker_agent_id, review_cycle,
+		 created_at, updated_at, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		task.ID, task.NamespaceID, task.Title, task.Description, string(task.State),
-		task.AssignedWorker, ac, of, task.WorkerAgentID, task.ReviewCycle,
+		task.AssignedWorker, ac, of, task.DAGID, deps, tags, task.Priority,
+		task.EstimatedHours, task.ActualHours, task.WorkerAgentID, task.ReviewCycle,
 		task.CreatedAt.Format(time.RFC3339Nano), task.UpdatedAt.Format(time.RFC3339Nano), meta,
 	)
 	return err
@@ -133,13 +203,18 @@ func insertTask(db *sql.DB, task *Task) error {
 func updateTask(db *sql.DB, task *Task) error {
 	ac := mustMarshalJSON(task.AcceptanceCriteria)
 	of := mustMarshalJSON(task.OutputFiles)
+	deps := mustMarshalJSON(task.DependsOn)
+	tags := mustMarshalJSON(task.Tags)
 	meta := mustMarshalJSON(task.Metadata)
 	_, err := db.Exec(
 		`UPDATE tasks SET title=?, description=?, state=?, assigned_worker=?,
-		 acceptance_criteria=?, output_files=?, worker_agent_id=?, review_cycle=?,
+		 acceptance_criteria=?, output_files=?, dag_id=?, depends_on=?, tags=?,
+		 priority=?, estimated_hours=?, actual_hours=?, worker_agent_id=?, review_cycle=?,
 		 updated_at=?, metadata=? WHERE namespace_id=? AND id=?`,
 		task.Title, task.Description, string(task.State),
-		task.AssignedWorker, ac, of, task.WorkerAgentID, task.ReviewCycle,
+		task.AssignedWorker, ac, of, task.DAGID, deps, tags,
+		task.Priority, task.EstimatedHours, task.ActualHours,
+		task.WorkerAgentID, task.ReviewCycle,
 		task.UpdatedAt.Format(time.RFC3339Nano), meta,
 		task.NamespaceID, task.ID,
 	)
@@ -148,7 +223,8 @@ func updateTask(db *sql.DB, task *Task) error {
 
 func loadTasks(db *sql.DB) (map[string]map[string]*Task, error) {
 	rows, err := db.Query(`SELECT id, namespace_id, title, description, state, assigned_worker,
-		acceptance_criteria, output_files, worker_agent_id, review_cycle,
+		acceptance_criteria, output_files, dag_id, depends_on, tags, priority,
+		estimated_hours, actual_hours, worker_agent_id, review_cycle,
 		created_at, updated_at, metadata FROM tasks`)
 	if err != nil {
 		return nil, err
@@ -159,30 +235,39 @@ func loadTasks(db *sql.DB) (map[string]map[string]*Task, error) {
 	for rows.Next() {
 		var (
 			id, nsID, title, desc, stateStr, worker string
-			acStr, ofStr, waID, createdAtStr, updatedAtStr, metaStr string
+			acStr, ofStr, dagID, depsStr, tagsStr, waID, createdAtStr, updatedAtStr, metaStr string
 			reviewCycle int
+			priority int
+			estimatedHours, actualHours float64
 		)
 		if err := rows.Scan(&id, &nsID, &title, &desc, &stateStr, &worker,
-			&acStr, &ofStr, &waID, &reviewCycle,
+			&acStr, &ofStr, &dagID, &depsStr, &tagsStr, &priority,
+			&estimatedHours, &actualHours, &waID, &reviewCycle,
 			&createdAtStr, &updatedAtStr, &metaStr); err != nil {
 			return nil, err
 		}
 		createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
 		updatedAt, _ := time.Parse(time.RFC3339Nano, updatedAtStr)
 		task := &Task{
-			ID:                id,
-			NamespaceID:       nsID,
-			Title:             title,
-			Description:       desc,
-			State:             TaskState(stateStr),
-			AssignedWorker:    worker,
+			ID:                 id,
+			NamespaceID:        nsID,
+			Title:              title,
+			Description:        desc,
+			State:              TaskState(stateStr),
+			AssignedWorker:     worker,
 			AcceptanceCriteria: mustUnmarshalStringSlice(acStr),
-			OutputFiles:       mustUnmarshalStringSlice(ofStr),
-			WorkerAgentID:     waID,
-			ReviewCycle:       reviewCycle,
-			CreatedAt:         createdAt,
-			UpdatedAt:         updatedAt,
-			Metadata:          mustUnmarshalStringMap(metaStr),
+			OutputFiles:        mustUnmarshalStringSlice(ofStr),
+			DAGID:              dagID,
+			DependsOn:          mustUnmarshalStringSlice(depsStr),
+			Tags:               mustUnmarshalStringSlice(tagsStr),
+			Priority:           priority,
+			EstimatedHours:     estimatedHours,
+			ActualHours:        actualHours,
+			WorkerAgentID:      waID,
+			ReviewCycle:        reviewCycle,
+			CreatedAt:          createdAt,
+			UpdatedAt:          updatedAt,
+			Metadata:           mustUnmarshalStringMap(metaStr),
 		}
 		if out[nsID] == nil {
 			out[nsID] = make(map[string]*Task)

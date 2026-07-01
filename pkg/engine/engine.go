@@ -23,6 +23,8 @@ type Engine struct {
 	namespaces map[string]*Namespace
 	tasks      map[string]map[string]*Task
 	history    map[string]map[string][]Event
+	dags       map[string]map[string]*DAG
+	workers    map[string]map[string]*Worker
 	db         *sql.DB // non-nil when SQLite backend is active
 }
 
@@ -41,14 +43,19 @@ type CreateNamespaceRequest struct {
 }
 
 type CreateTaskRequest struct {
-	NamespaceID       string
-	ID                string
-	Title             string
-	Description       string
-	AssignedWorker    string
+	NamespaceID        string
+	ID                 string
+	Title              string
+	Description        string
+	AssignedWorker     string
 	AcceptanceCriteria []string
-	OutputFiles       []string
-	Metadata          map[string]string
+	OutputFiles        []string
+	DAGID              string
+	DependsOn          []string
+	Tags               []string
+	Priority           int
+	EstimatedHours     float64
+	Metadata           map[string]string
 }
 
 type StateFilter struct {
@@ -64,19 +71,25 @@ type Namespace struct {
 }
 
 type Task struct {
-	ID                string            `json:"id"`
-	NamespaceID       string            `json:"namespace_id"`
-	Title             string            `json:"title"`
-	Description       string            `json:"description"`
-	State             TaskState         `json:"state"`
-	AssignedWorker    string            `json:"assigned_worker"`
+	ID                 string            `json:"id"`
+	NamespaceID        string            `json:"namespace_id"`
+	Title              string            `json:"title"`
+	Description        string            `json:"description"`
+	State              TaskState         `json:"state"`
+	AssignedWorker     string            `json:"assigned_worker"`
 	AcceptanceCriteria []string          `json:"acceptance_criteria"`
-	OutputFiles       []string          `json:"output_files"`
-	WorkerAgentID     string            `json:"worker_agent_id,omitempty"`
-	ReviewCycle       int               `json:"review_cycle"`
-	CreatedAt         time.Time         `json:"created_at"`
-	UpdatedAt         time.Time         `json:"updated_at"`
-	Metadata          map[string]string `json:"metadata,omitempty"`
+	OutputFiles        []string          `json:"output_files"`
+	DAGID              string            `json:"dag_id,omitempty"`
+	DependsOn          []string          `json:"depends_on,omitempty"`
+	Tags               []string          `json:"tags,omitempty"`
+	Priority           int               `json:"priority,omitempty"`
+	EstimatedHours     float64           `json:"estimated_hours,omitempty"`
+	ActualHours        float64           `json:"actual_hours,omitempty"`
+	WorkerAgentID      string            `json:"worker_agent_id,omitempty"`
+	ReviewCycle        int               `json:"review_cycle"`
+	CreatedAt          time.Time         `json:"created_at"`
+	UpdatedAt          time.Time         `json:"updated_at"`
+	Metadata           map[string]string `json:"metadata,omitempty"`
 }
 
 type Event struct {
@@ -118,6 +131,8 @@ func NewEngine(cfg NewEngineConfig) (*Engine, error) {
 		namespaces: make(map[string]*Namespace),
 		tasks:      make(map[string]map[string]*Task),
 		history:    make(map[string]map[string][]Event),
+		dags:       make(map[string]map[string]*DAG),
+		workers:    make(map[string]map[string]*Worker),
 	}
 
 	if cfg.DBPath != "" {
@@ -148,6 +163,20 @@ func NewEngine(cfg NewEngineConfig) (*Engine, error) {
 			return nil, fmt.Errorf("load history: %w", err)
 		}
 		e.history = histMap
+
+		dagMap, err := loadDAGs(db)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("load dags: %w", err)
+		}
+		e.dags = dagMap
+
+		workerMap, err := loadWorkers(db)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("load workers: %w", err)
+		}
+		e.workers = workerMap
 	}
 
 	return e, nil
@@ -238,18 +267,28 @@ func (e *Engine) CreateTask(ctx context.Context, req CreateTaskRequest) (*Task, 
 
 	now := time.Now().UTC()
 	task := &Task{
-		ID:                req.ID,
-		NamespaceID:       req.NamespaceID,
-		Title:             req.Title,
-		Description:       req.Description,
-		State:             TaskAssigned,
-		AssignedWorker:    req.AssignedWorker,
+		ID:                 req.ID,
+		NamespaceID:        req.NamespaceID,
+		Title:              req.Title,
+		Description:        req.Description,
+		State:              TaskAssigned,
+		AssignedWorker:     req.AssignedWorker,
 		AcceptanceCriteria: cloneStrings(req.AcceptanceCriteria),
-		OutputFiles:       cloneStrings(req.OutputFiles),
-		ReviewCycle:       0,
-		CreatedAt:         now,
-		UpdatedAt:         now,
-		Metadata:          cloneStringMap(req.Metadata),
+		OutputFiles:        cloneStrings(req.OutputFiles),
+		DAGID:              req.DAGID,
+		DependsOn:          cloneStrings(req.DependsOn),
+		Tags:               cloneStrings(req.Tags),
+		Priority:           req.Priority,
+		EstimatedHours:     req.EstimatedHours,
+		ReviewCycle:        0,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+		Metadata:           cloneStringMap(req.Metadata),
+	}
+	if req.DAGID != "" && len(req.DependsOn) > 0 {
+		if err := e.validateDAGDepsLocked(req.NamespaceID, req.DAGID, req.DependsOn, req.ID); err != nil {
+			return nil, err
+		}
 	}
 	e.tasks[req.NamespaceID][req.ID] = task
 	ev := Event{
@@ -373,6 +412,144 @@ func (e *Engine) GetHistory(ctx context.Context, nsID, taskID string) ([]Event, 
 	out := make([]Event, len(h))
 	copy(out, h)
 	return out, nil
+}
+
+// ---------------------------------------------------------------------------
+// TaskQuery — advanced filtering
+// ---------------------------------------------------------------------------
+
+type TaskQuery struct {
+	NamespaceID    string
+	DAGID          string
+	AssignedWorker string
+	States         []TaskState
+	Tags           []string
+	PriorityGTE    int
+	ReadyOnly      bool
+}
+
+func (e *Engine) QueryTasks(ctx context.Context, q TaskQuery) ([]Task, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	if _, ok := e.namespaces[q.NamespaceID]; !ok {
+		return nil, ErrNamespaceNotFound
+	}
+
+	stateSet := make(map[TaskState]bool, len(q.States))
+	for _, s := range q.States {
+		stateSet[s] = true
+	}
+	tagSet := make(map[string]bool, len(q.Tags))
+	for _, t := range q.Tags {
+		tagSet[t] = true
+	}
+
+	out := make([]Task, 0)
+	for _, t := range e.tasks[q.NamespaceID] {
+		if q.DAGID != "" && t.DAGID != q.DAGID {
+			continue
+		}
+		if q.AssignedWorker != "" && t.AssignedWorker != q.AssignedWorker {
+			continue
+		}
+		if len(stateSet) > 0 && !stateSet[t.State] {
+			continue
+		}
+		if q.PriorityGTE > 0 && t.Priority < q.PriorityGTE {
+			continue
+		}
+		if len(tagSet) > 0 {
+			allMatched := true
+			for _, tag := range t.Tags {
+				if !tagSet[tag] {
+					allMatched = false
+					break
+				}
+			}
+			if !allMatched {
+				continue
+			}
+		}
+		if q.ReadyOnly {
+			// ReadyOnly returns tasks that can be dispatched next:
+			// - state is assigned or rework_needed (not already executing/done)
+			// - all depends_on are in done state
+			if t.State != TaskAssigned && t.State != TaskReworkNeeded {
+				continue
+			}
+			ready := true
+			for _, dep := range t.DependsOn {
+				depTask, ok := e.tasks[q.NamespaceID][dep]
+				if !ok || depTask.State != TaskDone {
+					ready = false
+					break
+				}
+			}
+			if !ready {
+				continue
+			}
+		}
+		out = append(out, *cloneTask(t))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// validateDAGDepsLocked checks for circular deps and missing references.
+// Caller must hold e.mu.
+func (e *Engine) validateDAGDepsLocked(nsID, dagID string, deps []string, taskID string) error {
+	if _, ok := e.dags[nsID][dagID]; !ok {
+		return errors.New("dag not found: " + dagID)
+	}
+	dagTasks := make(map[string]bool)
+	for _, t := range e.tasks[nsID] {
+		if t.DAGID == dagID {
+			dagTasks[t.ID] = true
+		}
+	}
+	for _, dep := range deps {
+		if !dagTasks[dep] {
+			return fmt.Errorf("dependency %q not found in DAG %s", dep, dagID)
+		}
+	}
+
+	adj := make(map[string][]string)
+	for _, t := range e.tasks[nsID] {
+		if t.DAGID == dagID && t.ID != taskID {
+			adj[t.ID] = t.DependsOn
+		}
+	}
+	if taskID != "" {
+		adj[taskID] = deps
+	}
+
+	visited := make(map[string]bool)
+	inStack := make(map[string]bool)
+	var dfs func(id string) bool
+	dfs = func(id string) bool {
+		visited[id] = true
+		inStack[id] = true
+		for _, dep := range adj[id] {
+			if !visited[dep] {
+				if dfs(dep) {
+					return true
+				}
+			} else if inStack[dep] {
+				return true
+			}
+		}
+		inStack[id] = false
+		return false
+	}
+	for id := range adj {
+		if !visited[id] {
+			if dfs(id) {
+				return errors.New("circular dependency detected")
+			}
+		}
+	}
+	return nil
 }
 
 func (e *Engine) getTaskLocked(nsID, taskID string) (*Task, error) {
@@ -529,6 +706,8 @@ func cloneTask(task *Task) *Task {
 	cpy := *task
 	cpy.AcceptanceCriteria = cloneStrings(task.AcceptanceCriteria)
 	cpy.OutputFiles = cloneStrings(task.OutputFiles)
+	cpy.DependsOn = cloneStrings(task.DependsOn)
+	cpy.Tags = cloneStrings(task.Tags)
 	cpy.Metadata = cloneStringMap(task.Metadata)
 	return &cpy
 }
