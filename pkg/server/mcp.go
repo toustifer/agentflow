@@ -37,6 +37,17 @@ func (s *Server) Tools() []ToolSpec {
 		{Name: "project_next_tasks"},
 		{Name: "project_blockers"},
 		{Name: "project_report"},
+		{Name: "worker_handbook_write"},
+		{Name: "worker_handbook_get"},
+		{Name: "worker_handbook_list"},
+		{Name: "find_knowledge"},
+		{Name: "find_pitfalls"},
+		{Name: "worker_diary_write"},
+		{Name: "worker_diary_get"},
+		{Name: "worker_diary_list"},
+		{Name: "leader_diary_write"},
+		{Name: "leader_diary_get"},
+		{Name: "leader_diary_list"},
 		{Name: "flow_ping"},
 	}
 }
@@ -121,6 +132,28 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 		return s.handleProjectBlockers(ctx, input)
 	case "project_report":
 		return s.handleProjectReport(ctx, input)
+	case "worker_handbook_write":
+		return s.handleHandbookWrite(ctx, input)
+	case "worker_handbook_get":
+		return s.handleHandbookGet(ctx, input)
+	case "worker_handbook_list":
+		return s.handleHandbookList(ctx, input)
+	case "find_knowledge":
+		return s.handleFindKnowledge(ctx, input)
+	case "find_pitfalls":
+		return s.handleFindPitfalls(ctx, input)
+	case "worker_diary_write":
+		return s.handleWorkerDiaryWrite(ctx, input)
+	case "worker_diary_get":
+		return s.handleWorkerDiaryGet(ctx, input)
+	case "worker_diary_list":
+		return s.handleWorkerDiaryList(ctx, input)
+	case "leader_diary_write":
+		return s.handleLeaderDiaryWrite(ctx, input)
+	case "leader_diary_get":
+		return s.handleLeaderDiaryGet(ctx, input)
+	case "leader_diary_list":
+		return s.handleLeaderDiaryList(ctx, input)
 	case "flow_ping":
 		result := map[string]any{"ok": true}
 		s.syncPing(ctx)

@@ -25,6 +25,9 @@ type Engine struct {
 	history    map[string]map[string][]Event
 	dags       map[string]map[string]*DAG
 	workers    map[string]map[string]*Worker
+	handbooks  map[string]map[string]*WorkerHandbook
+	workerDiaries map[string]map[string]*WorkerDiary
+	leaderDiaries map[string]map[string]*LeaderDiary
 	db         *sql.DB // non-nil when SQLite backend is active
 }
 
@@ -128,11 +131,14 @@ const (
 
 func NewEngine(cfg NewEngineConfig) (*Engine, error) {
 	e := &Engine{
-		namespaces: make(map[string]*Namespace),
-		tasks:      make(map[string]map[string]*Task),
-		history:    make(map[string]map[string][]Event),
-		dags:       make(map[string]map[string]*DAG),
-		workers:    make(map[string]map[string]*Worker),
+		namespaces:    make(map[string]*Namespace),
+		tasks:         make(map[string]map[string]*Task),
+		history:       make(map[string]map[string][]Event),
+		dags:          make(map[string]map[string]*DAG),
+		workers:       make(map[string]map[string]*Worker),
+		handbooks:     make(map[string]map[string]*WorkerHandbook),
+		workerDiaries: make(map[string]map[string]*WorkerDiary),
+		leaderDiaries: make(map[string]map[string]*LeaderDiary),
 	}
 
 	if cfg.DBPath != "" {
@@ -177,6 +183,24 @@ func NewEngine(cfg NewEngineConfig) (*Engine, error) {
 			return nil, fmt.Errorf("load workers: %w", err)
 		}
 		e.workers = workerMap
+
+			hbMap, err := loadHandbooks(db)
+			if err != nil {
+				return nil, fmt.Errorf("load handbooks: %w", err)
+			}
+			e.handbooks = hbMap
+
+			wdMap, err := loadWorkerDiaries(db)
+			if err != nil {
+				return nil, fmt.Errorf("load worker diaries: %w", err)
+			}
+			e.workerDiaries = wdMap
+
+			ldMap, err := loadLeaderDiaries(db)
+			if err != nil {
+				return nil, fmt.Errorf("load leader diaries: %w", err)
+			}
+			e.leaderDiaries = ldMap
 	}
 
 	return e, nil

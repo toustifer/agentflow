@@ -83,6 +83,41 @@ CREATE TABLE IF NOT EXISTS workers (
 	updated_at   TEXT NOT NULL,
 	PRIMARY KEY (namespace_id, id),
 	FOREIGN KEY (namespace_id) REFERENCES namespaces(id)
+);
+
+CREATE TABLE IF NOT EXISTS worker_handbooks (
+	namespace_id TEXT NOT NULL,
+	worker_id    TEXT NOT NULL,
+	scope        TEXT NOT NULL DEFAULT '',
+	tech_stack   TEXT NOT NULL DEFAULT '[]',
+	knowledge    TEXT NOT NULL DEFAULT '[]',
+	pitfalls     TEXT NOT NULL DEFAULT '[]',
+	created_at   TEXT NOT NULL,
+	updated_at   TEXT NOT NULL,
+	PRIMARY KEY (namespace_id, worker_id),
+	FOREIGN KEY (namespace_id) REFERENCES namespaces(id)
+);
+
+CREATE TABLE IF NOT EXISTS worker_diaries (
+	namespace_id TEXT NOT NULL,
+	worker_id    TEXT NOT NULL,
+	date         TEXT NOT NULL,
+	task_id      TEXT NOT NULL DEFAULT '',
+	content      TEXT NOT NULL,
+	tags         TEXT NOT NULL DEFAULT '[]',
+	created_at   TEXT NOT NULL,
+	PRIMARY KEY (namespace_id, worker_id, date),
+	FOREIGN KEY (namespace_id) REFERENCES namespaces(id)
+);
+
+CREATE TABLE IF NOT EXISTS leader_diaries (
+	namespace_id TEXT NOT NULL,
+	date         TEXT NOT NULL,
+	entries      TEXT NOT NULL DEFAULT '[]',
+	created_at   TEXT NOT NULL,
+	updated_at   TEXT NOT NULL,
+	PRIMARY KEY (namespace_id, date),
+	FOREIGN KEY (namespace_id) REFERENCES namespaces(id)
 );`
 
 // openSQLite opens (or creates) a SQLite database at dbPath and ensures the

@@ -388,6 +388,393 @@ func (s *Server) handleDAGFlowchart(ctx context.Context, input map[string]any) (
 	return map[string]any{"flowchart": chart}, nil
 }
 
+func (s *Server) handleHandbookWrite(ctx context.Context, input map[string]any) (map[string]any, error) {
+	nsID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return nil, err
+	}
+	wid, err := requiredString(input, "worker_id")
+	if err != nil {
+		return nil, err
+	}
+	scope, _ := optionalString(input, "scope")
+	techStack, _ := optionalStringSlice(input, "tech_stack")
+
+	var knowledge []engine.KnowledgeItem
+	if raw, err := optionalList(input, "knowledge"); err == nil {
+		for _, r := range raw {
+			if m, ok := r.(map[string]any); ok {
+				knowledge = append(knowledge, engine.KnowledgeItem{
+					Topic:   stringField(m, "topic"),
+					Content: stringField(m, "content"),
+					Tags:    stringSliceField(m, "tags"),
+					Source:  stringField(m, "source"),
+				})
+			}
+		}
+	}
+
+	var pitfalls []engine.PitfallItem
+	if raw, err := optionalList(input, "pitfalls"); err == nil {
+		for _, r := range raw {
+			if m, ok := r.(map[string]any); ok {
+				pitfalls = append(pitfalls, engine.PitfallItem{
+					Scenario: stringField(m, "scenario"),
+					Problem:  stringField(m, "problem"),
+					Solution: stringField(m, "solution"),
+					Tags:     stringSliceField(m, "tags"),
+					Source:   stringField(m, "source"),
+				})
+			}
+		}
+	}
+
+	hb, err := s.engine.WriteHandbook(ctx, engine.WriteHandbookRequest{
+		NamespaceID: nsID,
+		WorkerID:    wid,
+		Scope:       scope,
+		TechStack:   techStack,
+		Knowledge:   knowledge,
+		Pitfalls:    pitfalls,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return handbookToMap(hb), nil
+}
+
+func (s *Server) handleHandbookGet(ctx context.Context, input map[string]any) (map[string]any, error) {
+	nsID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return nil, err
+	}
+	wid, err := requiredString(input, "worker_id")
+	if err != nil {
+		return nil, err
+	}
+	hb, err := s.engine.GetHandbook(ctx, nsID, wid)
+	if err != nil {
+		return nil, err
+	}
+	return handbookToMap(hb), nil
+}
+
+func (s *Server) handleHandbookList(ctx context.Context, input map[string]any) (map[string]any, error) {
+	nsID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return nil, err
+	}
+	hbs, err := s.engine.ListHandbooks(ctx, nsID)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]any, 0, len(hbs))
+	for _, hb := range hbs {
+		items = append(items, handbookToMap(&hb))
+	}
+	return map[string]any{"handbooks": items}, nil
+}
+
+func (s *Server) handleFindKnowledge(ctx context.Context, input map[string]any) (map[string]any, error) {
+	nsID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return nil, err
+	}
+	query, err := requiredString(input, "query")
+	if err != nil {
+		return nil, err
+	}
+	results, err := s.engine.FindKnowledge(ctx, nsID, query)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]any, 0, len(results))
+	for _, r := range results {
+		items = append(items, map[string]any{
+			"worker_id": r.WorkerID,
+			"topic":     r.Item.Topic,
+			"content":   r.Item.Content,
+			"tags":      r.Item.Tags,
+			"source":    r.Item.Source,
+		})
+	}
+	return map[string]any{"results": items}, nil
+}
+
+func (s *Server) handleFindPitfalls(ctx context.Context, input map[string]any) (map[string]any, error) {
+	nsID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return nil, err
+	}
+	query, err := requiredString(input, "query")
+	if err != nil {
+		return nil, err
+	}
+	results, err := s.engine.FindPitfalls(ctx, nsID, query)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]any, 0, len(results))
+	for _, r := range results {
+		items = append(items, map[string]any{
+			"worker_id": r.WorkerID,
+			"scenario":  r.Item.Scenario,
+			"problem":   r.Item.Problem,
+			"solution":  r.Item.Solution,
+			"tags":      r.Item.Tags,
+			"source":    r.Item.Source,
+		})
+	}
+	return map[string]any{"results": items}, nil
+}
+
+func (s *Server) handleWorkerDiaryWrite(ctx context.Context, input map[string]any) (map[string]any, error) {
+	nsID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return nil, err
+	}
+	wid, err := requiredString(input, "worker_id")
+	if err != nil {
+		return nil, err
+	}
+	date, err := requiredString(input, "date")
+	if err != nil {
+		return nil, err
+	}
+	content, err := requiredString(input, "content")
+	if err != nil {
+		return nil, err
+	}
+	taskID, _ := optionalString(input, "task_id")
+	tags, _ := optionalStringSlice(input, "tags")
+
+	d, err := s.engine.WriteWorkerDiary(ctx, engine.WriteDiaryRequest{
+		NamespaceID: nsID,
+		WorkerID:    wid,
+		Date:        date,
+		TaskID:      taskID,
+		Content:     content,
+		Tags:        tags,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return workerDiaryToMap(d), nil
+}
+
+func (s *Server) handleWorkerDiaryGet(ctx context.Context, input map[string]any) (map[string]any, error) {
+	nsID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return nil, err
+	}
+	wid, err := requiredString(input, "worker_id")
+	if err != nil {
+		return nil, err
+	}
+	date, err := requiredString(input, "date")
+	if err != nil {
+		return nil, err
+	}
+	d, err := s.engine.GetWorkerDiary(ctx, nsID, wid, date)
+	if err != nil {
+		return nil, err
+	}
+	return workerDiaryToMap(d), nil
+}
+
+func (s *Server) handleWorkerDiaryList(ctx context.Context, input map[string]any) (map[string]any, error) {
+	nsID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return nil, err
+	}
+	wid, err := requiredString(input, "worker_id")
+	if err != nil {
+		return nil, err
+	}
+	diaries, err := s.engine.ListWorkerDiaries(ctx, nsID, wid)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]any, 0, len(diaries))
+	for _, d := range diaries {
+		items = append(items, workerDiaryToMap(&d))
+	}
+	return map[string]any{"diaries": items}, nil
+}
+
+func (s *Server) handleLeaderDiaryWrite(ctx context.Context, input map[string]any) (map[string]any, error) {
+	nsID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return nil, err
+	}
+	date, err := requiredString(input, "date")
+	if err != nil {
+		return nil, err
+	}
+	entryType, _ := optionalString(input, "type")
+	dagID, _ := optionalString(input, "dag_id")
+	taskID, _ := optionalString(input, "task_id")
+	title, _ := optionalString(input, "title")
+	content, _ := optionalString(input, "content")
+	tags, _ := optionalStringSlice(input, "tags")
+
+	ld, err := s.engine.WriteLeaderDiary(ctx, engine.WriteLeaderDiaryRequest{
+		NamespaceID: nsID,
+		Date:        date,
+		Entry: engine.DiaryEntry{
+			Type:    entryType,
+			DAGID:   dagID,
+			TaskID:  taskID,
+			Title:   title,
+			Content: content,
+			Tags:    tags,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return leaderDiaryToMap(ld), nil
+}
+
+func (s *Server) handleLeaderDiaryGet(ctx context.Context, input map[string]any) (map[string]any, error) {
+	nsID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return nil, err
+	}
+	date, err := requiredString(input, "date")
+	if err != nil {
+		return nil, err
+	}
+	ld, err := s.engine.GetLeaderDiary(ctx, nsID, date)
+	if err != nil {
+		return nil, err
+	}
+	return leaderDiaryToMap(ld), nil
+}
+
+func (s *Server) handleLeaderDiaryList(ctx context.Context, input map[string]any) (map[string]any, error) {
+	nsID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return nil, err
+	}
+	diaries, err := s.engine.ListLeaderDiaries(ctx, nsID)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]any, 0, len(diaries))
+	for _, ld := range diaries {
+		items = append(items, leaderDiaryToMap(&ld))
+	}
+	return map[string]any{"diaries": items}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Helper field readers
+// ---------------------------------------------------------------------------
+
+func stringField(m map[string]any, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+func stringSliceField(m map[string]any, key string) []string {
+	if raw, ok := m[key].([]any); ok {
+		out := make([]string, 0, len(raw))
+		for _, v := range raw {
+			if s, ok := v.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+func optionalList(input map[string]any, key string) ([]any, error) {
+	v, ok := input[key]
+	if !ok || v == nil {
+		return nil, nil
+	}
+	list, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("field %s is not an array", key)
+	}
+	return list, nil
+}
+
+// ---------------------------------------------------------------------------
+// Map helpers
+// ---------------------------------------------------------------------------
+
+func handbookToMap(hb *engine.WorkerHandbook) map[string]any {
+	knowledge := make([]any, 0, len(hb.Knowledge))
+	for _, k := range hb.Knowledge {
+		knowledge = append(knowledge, map[string]any{
+			"topic":   k.Topic,
+			"content": k.Content,
+			"tags":    k.Tags,
+			"source":  k.Source,
+		})
+	}
+	pitfalls := make([]any, 0, len(hb.Pitfalls))
+	for _, p := range hb.Pitfalls {
+		pitfalls = append(pitfalls, map[string]any{
+			"scenario": p.Scenario,
+			"problem":  p.Problem,
+			"solution": p.Solution,
+			"tags":     p.Tags,
+			"source":   p.Source,
+		})
+	}
+	m := map[string]any{
+		"worker_id":   hb.WorkerID,
+		"namespace_id": hb.NamespaceID,
+		"scope":       hb.Scope,
+		"tech_stack":  hb.TechStack,
+		"knowledge":   knowledge,
+		"pitfalls":    pitfalls,
+		"created_at":  hb.CreatedAt,
+		"updated_at":  hb.UpdatedAt,
+	}
+	return m
+}
+
+func workerDiaryToMap(d *engine.WorkerDiary) map[string]any {
+	return map[string]any{
+		"worker_id":   d.WorkerID,
+		"namespace_id": d.NamespaceID,
+		"date":        d.Date,
+		"task_id":     d.TaskID,
+		"content":     d.Content,
+		"tags":        d.Tags,
+		"created_at":  d.CreatedAt,
+	}
+}
+
+func leaderDiaryToMap(ld *engine.LeaderDiary) map[string]any {
+	entries := make([]any, 0, len(ld.Entries))
+	for _, e := range ld.Entries {
+		entries = append(entries, map[string]any{
+			"type":      e.Type,
+			"dag_id":    e.DAGID,
+			"task_id":   e.TaskID,
+			"title":     e.Title,
+			"content":   e.Content,
+			"tags":      e.Tags,
+			"timestamp": e.Timestamp,
+		})
+	}
+	return map[string]any{
+		"namespace_id": ld.NamespaceID,
+		"date":        ld.Date,
+		"entries":     entries,
+		"created_at":  ld.CreatedAt,
+		"updated_at":  ld.UpdatedAt,
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Worker handlers
 // ---------------------------------------------------------------------------
