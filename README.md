@@ -178,6 +178,12 @@ pkg/
 
 ## 效果
 
+![agentflow 基准测试](agentflow-benchmark.png)
+
+*两小时完整项目调研仅消耗 ~160,000 token，Leader 始终保持清醒决策。*
+
+在一个模拟项目（日记 CLI）的测试中：
+
 在一个模拟项目（日记 CLI）的测试中：
 
 | 指标 | 结果 |
