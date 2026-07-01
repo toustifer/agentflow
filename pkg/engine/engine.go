@@ -600,7 +600,9 @@ func applyTransition(task *Task, t TaskTransition) (TaskState, error) {
 		}
 		return TaskReworkNeeded, nil
 	case TransReassign:
-		if task.State != TaskReworkNeeded {
+		if task.State != TaskReworkNeeded &&
+			task.State != TaskExecuting &&
+			task.State != TaskReviewPending {
 			return "", ErrInvalidTransition
 		}
 		return TaskAssigned, nil
@@ -638,6 +640,8 @@ func AvailableTransitions(task *Task) []AvailableTransition {
 		return []AvailableTransition{
 			{Transition: string(TransSubmit), Role: "worker", ToState: string(TaskReviewPending),
 				Hint: "Worker has finished and delivered the output files"},
+			{Transition: string(TransReassign), Role: "leader", ToState: string(TaskAssigned),
+				Hint: "Leader reassigns to a different Worker"},
 			{Transition: string(TransCancel), Role: "leader", ToState: string(TaskCancelled),
 				Hint: "Leader aborts the task"},
 		}
@@ -647,6 +651,8 @@ func AvailableTransitions(task *Task) []AvailableTransition {
 				Hint: "All acceptance criteria pass"},
 			{Transition: string(TransRework), Role: "reviewer", ToState: string(TaskReworkNeeded),
 				Hint: "At least one acceptance criterion failed — Worker needs to redo"},
+			{Transition: string(TransReassign), Role: "leader", ToState: string(TaskAssigned),
+				Hint: "Leader reassigns to a different Worker"},
 		}
 	case TaskReworkNeeded:
 		return []AvailableTransition{
