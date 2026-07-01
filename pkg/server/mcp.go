@@ -22,6 +22,7 @@ func (s *Server) Tools() []ToolSpec {
 		{Name: "task_list"},
 		{Name: "task_history"},
 		{Name: "task_query"},
+		{Name: "task_create_batch"},
 		{Name: "dag_create"},
 		{Name: "dag_get"},
 		{Name: "dag_list"},
@@ -89,6 +90,8 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 		return result.payload, nil
 	case "task_query":
 		return s.handleTaskQuery(ctx, input)
+	case "task_create_batch":
+		return s.handleTaskCreateBatch(ctx, input)
 	case "dag_create":
 		return s.handleDAGCreate(ctx, input)
 	case "dag_get":

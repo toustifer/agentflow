@@ -160,6 +160,85 @@ func boolInputOrFalse(input map[string]any, key string) bool {
 	return false
 }
 
+func requiredList(input map[string]any, key string) ([]any, error) {
+	v, ok := input[key]
+	if !ok || v == nil {
+		return nil, fmt.Errorf("%w: missing %s", ErrInvalidToolInput, key)
+	}
+	list, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("%w: %s must be an array", ErrInvalidToolInput, key)
+	}
+	return list, nil
+}
+
+func (s *Server) handleTaskCreateBatch(ctx context.Context, input map[string]any) (map[string]any, error) {
+	nsID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return nil, err
+	}
+	dagID, _ := optionalString(input, "dag_id")
+
+	tasksRaw, err := requiredList(input, "tasks")
+	if err != nil {
+		return nil, err
+	}
+
+	var items []engine.BatchTaskItem
+	for i, raw := range tasksRaw {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("tasks[%d] is not an object", i)
+		}
+		taskID, err := requiredString(m, "task_id")
+		if err != nil {
+			return nil, fmt.Errorf("tasks[%d]: %w", i, err)
+		}
+		title, err := requiredString(m, "title")
+		if err != nil {
+			return nil, fmt.Errorf("tasks[%d]: %w", i, err)
+		}
+		worker, _ := optionalString(m, "assigned_worker")
+		desc, _ := optionalString(m, "description")
+		ac, _ := optionalStringSlice(m, "acceptance_criteria")
+		of, _ := optionalStringSlice(m, "output_files")
+		deps, _ := optionalStringSlice(m, "depends_on")
+		tags, _ := optionalStringSlice(m, "tags")
+		priority, _ := optionalInt(m, "priority")
+		hours, _ := optionalFloat(m, "estimated_hours")
+		meta, _ := optionalStringMap(m, "metadata")
+
+		items = append(items, engine.BatchTaskItem{
+			ID:                 taskID,
+			Title:              title,
+			Description:        desc,
+			AssignedWorker:     worker,
+			AcceptanceCriteria: ac,
+			OutputFiles:        of,
+			DependsOn:          deps,
+			Tags:               tags,
+			Priority:           priority,
+			EstimatedHours:     hours,
+			Metadata:           meta,
+		})
+	}
+
+	result, err := s.engine.CreateTaskBatch(ctx, engine.CreateTaskBatchRequest{
+		NamespaceID: nsID,
+		DAGID:       dagID,
+		Tasks:       items,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	tasks := make([]any, 0, len(result.Created))
+	for _, t := range result.Created {
+		tasks = append(tasks, taskToMap(t))
+	}
+	return map[string]any{"tasks": tasks}, nil
+}
+
 // ---------------------------------------------------------------------------
 // DAG handlers
 // ---------------------------------------------------------------------------
