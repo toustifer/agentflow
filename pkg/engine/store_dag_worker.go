@@ -70,8 +70,8 @@ func insertWorker(db *sql.DB, w *Worker) error {
 	skills := mustMarshalJSON(w.Skills)
 	meta := mustMarshalJSON(w.Metadata)
 	_, err := db.Exec(
-		`INSERT INTO workers (id, namespace_id, name, scope, skills, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		w.ID, w.NamespaceID, w.Name, w.Scope, skills, meta,
+		`INSERT INTO workers (id, namespace_id, name, scope, skills, prompt_template, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		w.ID, w.NamespaceID, w.Name, w.Scope, skills, w.PromptTemplate, meta,
 		w.CreatedAt.Format(time.RFC3339Nano), w.UpdatedAt.Format(time.RFC3339Nano),
 	)
 	return err
@@ -81,8 +81,8 @@ func updateWorker(db *sql.DB, w *Worker) error {
 	skills := mustMarshalJSON(w.Skills)
 	meta := mustMarshalJSON(w.Metadata)
 	_, err := db.Exec(
-		`UPDATE workers SET name=?, scope=?, skills=?, metadata=?, updated_at=? WHERE namespace_id=? AND id=?`,
-		w.Name, w.Scope, skills, meta,
+		`UPDATE workers SET name=?, scope=?, skills=?, prompt_template=?, metadata=?, updated_at=? WHERE namespace_id=? AND id=?`,
+		w.Name, w.Scope, skills, w.PromptTemplate, meta,
 		w.UpdatedAt.Format(time.RFC3339Nano),
 		w.NamespaceID, w.ID,
 	)
@@ -90,7 +90,7 @@ func updateWorker(db *sql.DB, w *Worker) error {
 }
 
 func loadWorkers(db *sql.DB) (map[string]map[string]*Worker, error) {
-	rows, err := db.Query(`SELECT id, namespace_id, name, scope, skills, metadata, created_at, updated_at FROM workers`)
+	rows, err := db.Query(`SELECT id, namespace_id, name, scope, skills, prompt_template, metadata, created_at, updated_at FROM workers`)
 	if err != nil {
 		return nil, err
 	}
@@ -99,9 +99,9 @@ func loadWorkers(db *sql.DB) (map[string]map[string]*Worker, error) {
 	out := make(map[string]map[string]*Worker)
 	for rows.Next() {
 		var (
-			id, nsID, name, scope, skillsStr, metaStr, createdAtStr, updatedAtStr string
+			id, nsID, name, scope, skillsStr, promptTpl, metaStr, createdAtStr, updatedAtStr string
 		)
-		if err := rows.Scan(&id, &nsID, &name, &scope, &skillsStr, &metaStr, &createdAtStr, &updatedAtStr); err != nil {
+		if err := rows.Scan(&id, &nsID, &name, &scope, &skillsStr, &promptTpl, &metaStr, &createdAtStr, &updatedAtStr); err != nil {
 			return nil, err
 		}
 		createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
@@ -111,8 +111,9 @@ func loadWorkers(db *sql.DB) (map[string]map[string]*Worker, error) {
 			NamespaceID: nsID,
 			Name:        name,
 			Scope:       scope,
-			Skills:      mustUnmarshalStringSlice(skillsStr),
-			Metadata:    mustUnmarshalStringMap(metaStr),
+			Skills:         mustUnmarshalStringSlice(skillsStr),
+			PromptTemplate: promptTpl,
+			Metadata:       mustUnmarshalStringMap(metaStr),
 			CreatedAt:   createdAt,
 			UpdatedAt:   updatedAt,
 		}

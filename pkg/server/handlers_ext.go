@@ -795,14 +795,16 @@ func (s *Server) handleWorkerRegister(ctx context.Context, input map[string]any)
 	scope, _ := optionalString(input, "scope")
 	skills, _ := optionalStringSlice(input, "skills")
 	metadata, _ := optionalStringMap(input, "metadata")
+	promptTemplate, _ := optionalString(input, "prompt_template")
 
 	w, err := s.engine.RegisterWorker(ctx, engine.RegisterWorkerRequest{
 		NamespaceID: nsID,
 		ID:          workerID,
 		Name:        name,
 		Scope:       scope,
-		Skills:      skills,
-		Metadata:    metadata,
+		Skills:         skills,
+		PromptTemplate: promptTemplate,
+		Metadata:       metadata,
 	})
 	if err != nil {
 		return nil, err
@@ -863,11 +865,13 @@ func (s *Server) handleWorkerUpdate(ctx context.Context, input map[string]any) (
 	if m, err := optionalStringMap(input, "metadata"); err == nil {
 		metadata = m
 	}
+	promptTemplate, _ := optionalString(input, "prompt_template")
 
 	w, err := s.engine.UpdateWorker(ctx, nsID, workerID, engine.UpdateWorkerRequest{
 		Name:     name,
 		Scope:    scope,
 		Skills:   skills,
+		PromptTemplate: promptTemplate,
 		Metadata: metadata,
 	})
 	if err != nil {
@@ -875,6 +879,28 @@ func (s *Server) handleWorkerUpdate(ctx context.Context, input map[string]any) (
 	}
 	status := s.engine.WorkerStatus(ctx, nsID, workerID)
 	return workerToMap(w, string(status)), nil
+}
+
+func (s *Server) handleWorkerPromptGet(ctx context.Context, input map[string]any) (map[string]any, error) {
+	nsID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return nil, err
+	}
+	wid, err := requiredString(input, "worker_id")
+	if err != nil {
+		return nil, err
+	}
+	taskID, _ := optionalString(input, "task_id")
+	title, _ := optionalString(input, "title")
+
+	prompt, err := s.engine.WorkerPromptGet(ctx, nsID, wid, taskID, title)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"worker_id": wid,
+		"prompt":    prompt,
+	}, nil
 }
 
 func (s *Server) handleWorkerStatus(ctx context.Context, input map[string]any) (map[string]any, error) {

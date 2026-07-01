@@ -34,6 +34,7 @@ func (s *Server) Tools() []ToolSpec {
 		{Name: "worker_list"},
 		{Name: "worker_update"},
 		{Name: "worker_status"},
+		{Name: "worker_prompt_get"},
 		{Name: "project_next_tasks"},
 		{Name: "project_blockers"},
 		{Name: "project_report"},
@@ -122,6 +123,8 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 		return s.handleWorkerUpdate(ctx, input)
 	case "worker_status":
 		return s.handleWorkerStatus(ctx, input)
+	case "worker_prompt_get":
+		return s.handleWorkerPromptGet(ctx, input)
 	case "dag_report":
 		return s.handleDAGReport(ctx, input)
 	case "dag_flowchart":

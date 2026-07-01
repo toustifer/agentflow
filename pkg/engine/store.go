@@ -139,6 +139,10 @@ func openSQLite(dbPath string) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate tasks: %w", err)
 	}
+	if err := migrateWorkersTable(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate workers: %w", err)
+	}
 
 	return db, nil
 }
@@ -169,6 +173,27 @@ func migrateTasksTable(db *sql.DB) error {
 	}
 	return nil
 }
+
+func migrateWorkersTable(db *sql.DB) error {
+	cols := []string{
+		"prompt_template TEXT NOT NULL DEFAULT ''",
+	}
+	for _, c := range cols {
+		colName := strings.SplitN(c, " ", 2)[0]
+		var count int
+		qr := "SELECT COUNT(*) FROM pragma_table_info('workers') WHERE name = ?"
+		if err := db.QueryRow(qr, colName).Scan(&count); err != nil {
+			return fmt.Errorf("check column %s: %w", colName, err)
+		}
+		if count == 0 {
+			if _, err := db.Exec("ALTER TABLE workers ADD COLUMN " + c); err != nil {
+				return fmt.Errorf("add column %s: %w", colName, err)
+			}
+		}
+	}
+	return nil
+}
+
 
 // ---------------------------------------------------------------------------
 // Namespace persistence

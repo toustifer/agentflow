@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -20,30 +21,33 @@ const (
 )
 
 type Worker struct {
-	ID          string            `json:"id"`
-	NamespaceID string            `json:"namespace_id"`
-	Name        string            `json:"name"`
-	Scope       string            `json:"scope,omitempty"`
-	Skills      []string          `json:"skills,omitempty"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
-	CreatedAt   time.Time         `json:"created_at"`
-	UpdatedAt   time.Time         `json:"updated_at"`
+	ID             string            `json:"id"`
+	NamespaceID    string            `json:"namespace_id"`
+	Name           string            `json:"name"`
+	Scope          string            `json:"scope,omitempty"`
+	Skills         []string          `json:"skills,omitempty"`
+	PromptTemplate string            `json:"prompt_template,omitempty"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
+	CreatedAt      time.Time         `json:"created_at"`
+	UpdatedAt      time.Time         `json:"updated_at"`
 }
 
 type RegisterWorkerRequest struct {
-	NamespaceID string
-	ID          string
-	Name        string
-	Scope       string
-	Skills      []string
-	Metadata    map[string]string
+	NamespaceID    string
+	ID             string
+	Name           string
+	Scope          string
+	Skills         []string
+	PromptTemplate string
+	Metadata       map[string]string
 }
 
 type UpdateWorkerRequest struct {
-	Name     string
-	Scope    string
-	Skills   []string
-	Metadata map[string]string
+	Name           string
+	Scope          string
+	Skills         []string
+	PromptTemplate string
+	Metadata       map[string]string
 }
 
 // ---------------------------------------------------------------------------
@@ -77,8 +81,9 @@ func (e *Engine) RegisterWorker(ctx context.Context, req RegisterWorkerRequest) 
 		NamespaceID: req.NamespaceID,
 		Name:        req.Name,
 		Scope:       req.Scope,
-		Skills:      cloneStrings(req.Skills),
-		Metadata:    cloneStringMap(req.Metadata),
+		Skills:         cloneStrings(req.Skills),
+		PromptTemplate: req.PromptTemplate,
+		Metadata:       cloneStringMap(req.Metadata),
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -178,6 +183,30 @@ func (e *Engine) WorkerStatus(ctx context.Context, nsID, workerID string) Worker
 	return WorkerIdle
 }
 
+func (e *Engine) WorkerPromptGet(ctx context.Context, nsID, workerID, taskID, taskTitle string) (string, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	if _, ok := e.namespaces[nsID]; !ok {
+		return "", ErrNamespaceNotFound
+	}
+	w, ok := e.workers[nsID][workerID]
+	if !ok {
+		return "", errors.New("worker not found")
+	}
+	if w.PromptTemplate == "" {
+		return "", errors.New("worker has no prompt template configured")
+	}
+
+	tpl := w.PromptTemplate
+	tpl = strings.ReplaceAll(tpl, "{task_id}", taskID)
+	tpl = strings.ReplaceAll(tpl, "{title}", taskTitle)
+	tpl = strings.ReplaceAll(tpl, "{worker_id}", workerID)
+	tpl = strings.ReplaceAll(tpl, "{worker_name}", w.Name)
+	tpl = strings.ReplaceAll(tpl, "{scope}", w.Scope)
+	return tpl, nil
+}
+
 // ---------------------------------------------------------------------------
 // cloning helpers
 // ---------------------------------------------------------------------------
@@ -188,6 +217,7 @@ func cloneWorker(w *Worker) *Worker {
 	}
 	cpy := *w
 	cpy.Skills = cloneStrings(w.Skills)
+	cpy.PromptTemplate = w.PromptTemplate
 	cpy.Metadata = cloneStringMap(w.Metadata)
 	return &cpy
 }
