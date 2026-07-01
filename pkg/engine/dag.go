@@ -238,6 +238,7 @@ func computeDAGStatus(tasks []Task) DAGStatus {
 		return DAGPlanning
 	}
 	anyActive := false
+	anyDone := false
 	allDone := true
 	for _, t := range tasks {
 		switch t.State {
@@ -245,7 +246,7 @@ func computeDAGStatus(tasks []Task) DAGStatus {
 			anyActive = true
 			allDone = false
 		case TaskDone:
-			// ok
+			anyDone = true
 		case TaskCancelled:
 			// ok
 		default: // assigned
@@ -255,10 +256,152 @@ func computeDAGStatus(tasks []Task) DAGStatus {
 	if allDone {
 		return DAGDone
 	}
-	if anyActive {
+	if anyActive || anyDone {
 		return DAGInProgress
 	}
 	return DAGPlanning
+}
+
+// RecomputeAndPersistDAGStatus recalculates the DAG status from its tasks
+// and updates the stored value (both in-memory and DB).
+func (e *Engine) RecomputeAndPersistDAGStatus(ctx context.Context, nsID, dagID string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if _, ok := e.namespaces[nsID]; !ok {
+		return ErrNamespaceNotFound
+	}
+	e.recomputeDAGStatusForTaskLocked(nsID, dagID)
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// DAGReport — structured project report
+// ---------------------------------------------------------------------------
+
+type DAGReport struct {
+	DAG            DAG                `json:"dag"`
+	TotalTasks     int                `json:"total_tasks"`
+	DoneTasks      int                `json:"done_tasks"`
+	ExecutingTasks int                `json:"executing_tasks"`
+	PendingTasks   int                `json:"pending_tasks"`
+	CompletionPct  float64            `json:"completion_pct"`
+	Workers        []DAGWorkerSummary `json:"workers"`
+}
+
+type DAGWorkerSummary struct {
+	WorkerID   string `json:"worker_id"`
+	TotalTasks int    `json:"total_tasks"`
+	DoneTasks  int    `json:"done_tasks"`
+	Status     string `json:"status"`
+}
+
+func (e *Engine) DAGReport(ctx context.Context, nsID, dagID string) (*DAGReport, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	if _, ok := e.namespaces[nsID]; !ok {
+		return nil, ErrNamespaceNotFound
+	}
+	dag, ok := e.dags[nsID][dagID]
+	if !ok {
+		return nil, errors.New("dag not found")
+	}
+
+	var tasks []Task
+	workerTasks := make(map[string][]string)
+	for _, t := range e.tasks[nsID] {
+		if t.DAGID == dagID {
+			tasks = append(tasks, *cloneTask(t))
+			if t.AssignedWorker != "" {
+				workerTasks[t.AssignedWorker] = append(workerTasks[t.AssignedWorker], t.ID)
+			}
+		}
+	}
+
+	doneCount := 0
+	execCount := 0
+	for _, t := range tasks {
+		switch t.State {
+		case TaskDone:
+			doneCount++
+		case TaskExecuting, TaskReviewPending, TaskReworkNeeded:
+			execCount++
+		}
+	}
+	total := len(tasks)
+	pending := total - doneCount - execCount
+	pct := 0.0
+	if total > 0 {
+		pct = float64(doneCount) / float64(total) * 100
+	}
+
+	workers := make([]DAGWorkerSummary, 0, len(workerTasks))
+	for wid, tids := range workerTasks {
+		wDone := 0
+		for _, tid := range tids {
+			if t, ok := e.tasks[nsID][tid]; ok && t.State == TaskDone {
+				wDone++
+			}
+		}
+		ws := e.workerStatusUnsafe(nsID, wid)
+		workers = append(workers, DAGWorkerSummary{
+			WorkerID:   wid,
+			TotalTasks: len(tids),
+			DoneTasks:  wDone,
+			Status:     string(ws),
+		})
+	}
+
+	return &DAGReport{
+		DAG:            *cloneDAG(dag),
+		TotalTasks:     total,
+		DoneTasks:      doneCount,
+		ExecutingTasks: execCount,
+		PendingTasks:   pending,
+		CompletionPct:  pct,
+		Workers:        workers,
+	}, nil
+}
+
+// workerStatusUnsafe is the RLock-free version for callers already holding the lock.
+func (e *Engine) workerStatusUnsafe(nsID, workerID string) WorkerStatus {
+	for _, t := range e.tasks[nsID] {
+		if t.AssignedWorker == workerID {
+			switch t.State {
+			case TaskExecuting, TaskReviewPending, TaskReworkNeeded:
+				return WorkerBusy
+			}
+		}
+	}
+	return WorkerIdle
+}
+
+// recomputeDAGStatusForTaskLocked finds which DAG the task belongs to,
+// recalculates its status, and persists. Caller must hold e.mu.
+func (e *Engine) recomputeDAGStatusForTaskLocked(nsID, dagID string) {
+	if dagID == "" {
+		return
+	}
+	dag, ok := e.dags[nsID][dagID]
+	if !ok {
+		return
+	}
+	var tasks []Task
+	for _, t := range e.tasks[nsID] {
+		if t.DAGID == dagID {
+			tasks = append(tasks, *t)
+		}
+	}
+	computed := computeDAGStatus(tasks)
+	if dag.Status == computed {
+		return
+	}
+	dag.Status = computed
+	dag.UpdatedAt = time.Now().UTC()
+	if e.db != nil {
+		_ = updateDAG(e.db, dag)
+	}
 }
 
 // ValidateDAGDeps checks that all depends_on references exist within the DAG

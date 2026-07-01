@@ -88,7 +88,6 @@ func (s *Server) handleTaskQuery(ctx context.Context, input map[string]any) (map
 	for i := range tasks {
 		items = append(items, taskToMap(&tasks[i]))
 	}
-	// Enrich each task with blocked_by and worker_status
 	enriched := s.enrichTasksWithBlockedBy(ctx, nsID, tasks)
 	for i := range enriched {
 		if i < len(items) {
@@ -103,7 +102,6 @@ func (s *Server) enrichTasksWithBlockedBy(ctx context.Context, nsID string, task
 	out := make([]map[string]any, 0, len(tasks))
 	for i := range tasks {
 		m := taskToMap(&tasks[i])
-		// blocked_by = depends_on whose target is not in TaskDone state
 		var blockedBy []string
 		for _, dep := range tasks[i].DependsOn {
 			depTask, err := s.engine.GetTask(ctx, nsID, dep)
@@ -120,7 +118,6 @@ func (s *Server) enrichTasksWithBlockedBy(ctx context.Context, nsID string, task
 		} else {
 			m["blocked_by"] = []string{}
 		}
-		// Worker status (cross-DAG derived)
 		if w := tasks[i].AssignedWorker; w != "" {
 			m["worker_status"] = string(s.engine.WorkerStatus(ctx, nsID, w))
 		}
@@ -257,6 +254,46 @@ func (s *Server) handleDAGUpdate(ctx context.Context, input map[string]any) (map
 }
 
 // ---------------------------------------------------------------------------
+// DAGReport handler
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleDAGReport(ctx context.Context, input map[string]any) (map[string]any, error) {
+	nsID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return nil, err
+	}
+	dagID, err := requiredString(input, "dag_id")
+	if err != nil {
+		return nil, err
+	}
+
+	report, err := s.engine.DAGReport(ctx, nsID, dagID)
+	if err != nil {
+		return nil, err
+	}
+
+	workers := make([]any, 0, len(report.Workers))
+	for _, w := range report.Workers {
+		workers = append(workers, map[string]any{
+			"worker_id":   w.WorkerID,
+			"total_tasks": w.TotalTasks,
+			"done_tasks":  w.DoneTasks,
+			"status":      w.Status,
+		})
+	}
+
+	return map[string]any{
+		"dag":             dagToMap(&report.DAG),
+		"total_tasks":     report.TotalTasks,
+		"done_tasks":      report.DoneTasks,
+		"executing_tasks": report.ExecutingTasks,
+		"pending_tasks":   report.PendingTasks,
+		"completion_pct":  report.CompletionPct,
+		"workers":         workers,
+	}, nil
+}
+
+// ---------------------------------------------------------------------------
 // Worker handlers
 // ---------------------------------------------------------------------------
 
@@ -374,6 +411,58 @@ func (s *Server) handleWorkerStatus(ctx context.Context, input map[string]any) (
 		"status":       string(status),
 		"checked_at":   time.Now().UTC().Format(time.RFC3339Nano),
 	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Project-level handlers
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleProjectNextTasks(ctx context.Context, input map[string]any) (map[string]any, error) {
+	nsID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return nil, err
+	}
+	tasks, err := s.engine.ProjectNextTasks(ctx, nsID)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]any, 0, len(tasks))
+	for _, t := range tasks {
+		items = append(items, map[string]any{
+			"task_id":         t.TaskID,
+			"title":           t.Title,
+			"dag_id":          t.DAGID,
+			"assigned_worker": t.AssignedWorker,
+			"state":           t.State,
+			"deps_satisfied":  t.DepsSatisfied,
+			"worker_busy":     t.WorkerBusy,
+			"ready":           t.Ready,
+			"reason":          t.Reason,
+		})
+	}
+	return map[string]any{"tasks": items}, nil
+}
+
+func (s *Server) handleProjectBlockers(ctx context.Context, input map[string]any) (map[string]any, error) {
+	nsID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return nil, err
+	}
+	blockers, err := s.engine.ProjectBlockers(ctx, nsID)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]any, 0, len(blockers))
+	for _, b := range blockers {
+		items = append(items, map[string]any{
+			"task_id":    b.TaskID,
+			"title":      b.Title,
+			"dag_id":     b.DAGID,
+			"type":       b.Type,
+			"blocked_by": b.BlockedBy,
+		})
+	}
+	return map[string]any{"blockers": items}, nil
 }
 
 // ---------------------------------------------------------------------------

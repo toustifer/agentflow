@@ -26,11 +26,14 @@ func (s *Server) Tools() []ToolSpec {
 		{Name: "dag_get"},
 		{Name: "dag_list"},
 		{Name: "dag_update"},
+		{Name: "dag_report"},
 		{Name: "worker_register"},
 		{Name: "worker_get"},
 		{Name: "worker_list"},
 		{Name: "worker_update"},
 		{Name: "worker_status"},
+		{Name: "project_next_tasks"},
+		{Name: "project_blockers"},
 		{Name: "flow_ping"},
 	}
 }
@@ -103,6 +106,12 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 		return s.handleWorkerUpdate(ctx, input)
 	case "worker_status":
 		return s.handleWorkerStatus(ctx, input)
+	case "dag_report":
+		return s.handleDAGReport(ctx, input)
+	case "project_next_tasks":
+		return s.handleProjectNextTasks(ctx, input)
+	case "project_blockers":
+		return s.handleProjectBlockers(ctx, input)
 	case "flow_ping":
 		result := map[string]any{"ok": true}
 		s.syncPing(ctx)

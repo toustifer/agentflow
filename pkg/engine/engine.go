@@ -311,8 +311,12 @@ func (e *Engine) CreateTask(ctx context.Context, req CreateTaskRequest) (*Task, 
 		}
 	}
 
+	// Update DAG status if task belongs to one
+	e.recomputeDAGStatusForTaskLocked(req.NamespaceID, req.DAGID)
+
 	return cloneTask(task), nil
 }
+	
 
 func (e *Engine) TransitionTask(ctx context.Context, nsID, taskID string, t TaskTransition, meta map[string]string) (*Task, error) {
 	e.mu.Lock()
@@ -368,6 +372,9 @@ func (e *Engine) TransitionTask(ctx context.Context, nsID, taskID string, t Task
 			return nil, fmt.Errorf("persist event: %w", err)
 		}
 	}
+
+	// Update DAG status if task belongs to one
+	e.recomputeDAGStatusForTaskLocked(nsID, task.DAGID)
 
 	return cloneTask(task), nil
 }
