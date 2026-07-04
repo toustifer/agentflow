@@ -90,8 +90,8 @@ func runHTTP() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{
-			"status":  "ok",
-			"store":   "sqlite-in-memory",
+			"status": "ok",
+			"store":  "sqlite-in-memory",
 			"backend": components.backendName,
 		})
 	})
@@ -219,6 +219,10 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
+// serveMCP runs the MCP server loop.
+// initialize, tools/list, and tools/call follow the MCP protocol.
+// All other methods (direct tool names like "namespace_create" etc.)
+// are dispatched through Server.Handle for the file-mode bridge.
 func serveMCP(ctx context.Context, in io.Reader, out io.Writer, srv *lwserver.Server) error {
 	reader := bufio.NewReader(in)
 	writer := bufio.NewWriter(out)
@@ -252,22 +256,14 @@ func serveMCP(ctx context.Context, in io.Reader, out io.Writer, srv *lwserver.Se
 			} else {
 				resp.Result = map[string]any{"content": []any{map[string]any{"type": "text", "text": formatToolResult(data)}}}
 			}
-		case "flow_ping",
-			"namespace_create",
-			"namespace_list",
-			"task_create",
-			"task_transition",
-			"task_get",
-			"task_list",
-			"task_history":
+		default:
+			// Direct method dispatch for file-mode bridge.
 			data, callErr := srv.Handle(ctx, req.Method, req.Params)
 			if callErr != nil {
 				resp.Error = &rpcError{Code: -32603, Message: callErr.Error()}
 			} else {
 				resp.Result = map[string]any{"content": []any{map[string]any{"type": "text", "text": formatToolResult(data)}}}
 			}
-		default:
-			resp.Error = &rpcError{Code: -32601, Message: fmt.Sprintf("method not found: %s", req.Method)}
 		}
 
 		if err := encodeRPC(writer, resp); err != nil {

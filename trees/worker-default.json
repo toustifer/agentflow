@@ -1,0 +1,49 @@
+{
+  "name": "worker-default",
+  "blackboard": {},
+  "tree": {
+    "type": "Sequence",
+    "children": [
+      {
+        "type": "Action",
+        "name": "doc_search",
+        "properties": { "fn": "doc_search_prepare" }
+      },
+      {
+        "type": "Action",
+        "name": "task_get_confirm",
+        "properties": { "fn": "task_get_confirm" }
+      },
+      {
+        "type": "Action",
+        "name": "enter_worktree",
+        "properties": { "fn": "enter_worktree" }
+      },
+      {
+        "type": "Action",
+        "name": "implement",
+        "properties": { "fn": "implement_code" }
+      },
+      {
+        "type": "Action",
+        "name": "git_commit",
+        "properties": { "fn": "git_commit_changes" }
+      },
+      {
+        "type": "Action",
+        "name": "doc_write",
+        "properties": { "fn": "doc_write_record" }
+      },
+      {
+        "type": "Action",
+        "name": "diary_write",
+        "properties": { "fn": "diary_write_entry" }
+      },
+      {
+        "type": "Action",
+        "name": "task_submit",
+        "properties": { "fn": "task_submit_for_review" }
+      }
+    ]
+  }
+}

@@ -28,6 +28,7 @@ type Engine struct {
 	handbooks  map[string]map[string]*WorkerHandbook
 	workerDiaries map[string]map[string]*WorkerDiary
 	leaderDiaries map[string]map[string]*LeaderDiary
+	projectDocs   map[string][]ProjectDoc
 	db         *sql.DB // non-nil when SQLite backend is active
 }
 
@@ -139,6 +140,7 @@ func NewEngine(cfg NewEngineConfig) (*Engine, error) {
 		handbooks:     make(map[string]map[string]*WorkerHandbook),
 		workerDiaries: make(map[string]map[string]*WorkerDiary),
 		leaderDiaries: make(map[string]map[string]*LeaderDiary),
+		projectDocs:   make(map[string][]ProjectDoc),
 	}
 
 	if cfg.DBPath != "" {
@@ -201,6 +203,12 @@ func NewEngine(cfg NewEngineConfig) (*Engine, error) {
 				return nil, fmt.Errorf("load leader diaries: %w", err)
 			}
 			e.leaderDiaries = ldMap
+
+			docMap, err := loadProjectDocs(db)
+			if err != nil {
+				return nil, fmt.Errorf("load project docs: %w", err)
+			}
+			e.projectDocs = docMap
 	}
 
 	return e, nil
@@ -272,6 +280,50 @@ func (e *Engine) ListNamespaces(ctx context.Context) ([]Namespace, error) {
 	return out, nil
 }
 
+// DeleteNamespace deletes a namespace and all its cascade data.
+// If confirm is false, it returns a descriptive error listing what would be deleted.
+func (e *Engine) DeleteNamespace(ctx context.Context, nsID string, confirm bool) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	ns, ok := e.namespaces[nsID]
+	if !ok {
+		return ErrNamespaceNotFound
+	}
+
+	if !confirm {
+		taskCount := len(e.tasks[nsID])
+		workerCount := len(e.workers[nsID])
+		dagCount := len(e.dags[nsID])
+		eventMap := e.history[nsID]
+		eventCount := 0
+		for _, evs := range eventMap {
+			eventCount += len(evs)
+		}
+		return fmt.Errorf(
+			"⚠️ 删除确认：namespace %q (%s) 将级联删除 %d 个 DAG、%d 个 Task、%d 个 Worker、%d 条事件。\n"+
+				"如需确认删除，请再次调用 namespace_delete 时传入 confirm=true",
+			ns.ID, ns.Name, dagCount, taskCount, workerCount, eventCount,
+		)
+	}
+
+	// Delete from SQLite
+	if e.db != nil {
+		if err := deleteAllForNamespace(e.db, nsID); err != nil {
+			return fmt.Errorf("delete from db: %w", err)
+		}
+	}
+
+	// Delete from in-memory maps
+	delete(e.namespaces, nsID)
+	delete(e.tasks, nsID)
+	delete(e.workers, nsID)
+	delete(e.dags, nsID)
+	delete(e.history, nsID)
+
+	return nil
+}
+
 func (e *Engine) CreateTask(ctx context.Context, req CreateTaskRequest) (*Task, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -340,7 +392,37 @@ func (e *Engine) CreateTask(ctx context.Context, req CreateTaskRequest) (*Task, 
 
 	return cloneTask(task), nil
 }
-	
+
+type UpdateTaskRequest struct {
+	State          TaskState
+	ReviewMetadata map[string]string
+}
+
+func (e *Engine) UpdateTask(ctx context.Context, nsID, taskID string, req UpdateTaskRequest) (*Task, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	task, err := e.getTaskLocked(nsID, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if req.State != "" {
+		task.State = req.State
+	}
+	if req.ReviewMetadata != nil {
+		task.Metadata = ensureMap(task.Metadata)
+		for k, v := range req.ReviewMetadata {
+			task.Metadata[k] = v
+		}
+	}
+	task.UpdatedAt = time.Now().UTC()
+	if e.db != nil {
+		if err := updateTask(e.db, task); err != nil {
+			return nil, fmt.Errorf("persist task update: %w", err)
+		}
+	}
+	return cloneTask(task), nil
+}
 
 func (e *Engine) TransitionTask(ctx context.Context, nsID, taskID string, t TaskTransition, meta map[string]string) (*Task, error) {
 	e.mu.Lock()
@@ -371,9 +453,14 @@ func (e *Engine) TransitionTask(ctx context.Context, nsID, taskID string, t Task
 	if v := meta["worker_agent_id"]; v != "" {
 		task.WorkerAgentID = v
 	}
-	if v := meta["reason"]; v != "" {
+	if len(meta) > 0 {
 		task.Metadata = ensureMap(task.Metadata)
-		task.Metadata["reason"] = v
+		for k, v := range meta {
+			if v == "" {
+				continue
+			}
+			task.Metadata[k] = v
+		}
 	}
 
 	ev := Event{

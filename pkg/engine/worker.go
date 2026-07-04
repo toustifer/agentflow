@@ -149,6 +149,9 @@ func (e *Engine) UpdateWorker(ctx context.Context, nsID, workerID string, req Up
 	if req.Skills != nil {
 		w.Skills = cloneStrings(req.Skills)
 	}
+	if req.PromptTemplate != "" {
+		w.PromptTemplate = req.PromptTemplate
+	}
 	if req.Metadata != nil {
 		w.Metadata = cloneStringMap(req.Metadata)
 	}
@@ -183,11 +186,12 @@ func (e *Engine) WorkerStatus(ctx context.Context, nsID, workerID string) Worker
 	return WorkerIdle
 }
 
-func (e *Engine) WorkerPromptGet(ctx context.Context, nsID, workerID, taskID, taskTitle string) (string, error) {
+func (e *Engine) WorkerPromptGet(ctx context.Context, nsID, workerID, taskID, taskTitle string, asReviewer bool) (string, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
-	if _, ok := e.namespaces[nsID]; !ok {
+	ns, ok := e.namespaces[nsID]
+	if !ok {
 		return "", ErrNamespaceNotFound
 	}
 	w, ok := e.workers[nsID][workerID]
@@ -198,12 +202,85 @@ func (e *Engine) WorkerPromptGet(ctx context.Context, nsID, workerID, taskID, ta
 		return "", errors.New("worker has no prompt template configured")
 	}
 
+	title := taskTitle
+	dagID := ""
+	dagTitle := ""
+	branch := ""
+	workdir := ""
+	repoPath := ""
+	worktreePath := ""
+	baseBranch := ""
+	namespaceName := ns.Name
+	reviewCommit := ""
+	reviewDiff := ""
+	assignedWorkerName := ""
+
+	if ns.Metadata != nil {
+		workdir = ns.Metadata["workdir"]
+		repoPath = ns.Metadata["workdir"]
+		baseBranch = ns.Metadata["git_main_branch"]
+	}
+
+	if taskID != "" {
+		task, ok := e.tasks[nsID][taskID]
+		if !ok {
+			return "", errors.New("task not found")
+		}
+		if title == "" {
+			title = task.Title
+		}
+		dagID = task.DAGID
+		if task.Metadata != nil {
+			if v := task.Metadata["git.branch"]; v != "" {
+				branch = v
+			}
+			if v := task.Metadata["git.repo_path"]; v != "" {
+				repoPath = v
+			}
+			if v := task.Metadata["git.worktree_path"]; v != "" {
+				worktreePath = v
+			}
+			if v := task.Metadata["git.base_branch"]; v != "" {
+				baseBranch = v
+			}
+			if asReviewer {
+				if v := task.Metadata["review.commit"]; v != "" {
+					reviewCommit = v
+				}
+				if v := task.Metadata["review.diff"]; v != "" {
+					reviewDiff = v
+				}
+			}
+			assignedWorkerName = task.AssignedWorker
+		}
+		if dagID != "" {
+			if dag, ok := e.dags[nsID][dagID]; ok {
+				dagTitle = dag.Title
+				if branch == "" {
+					branch = dag.Branch
+				}
+			}
+		}
+	}
+
 	tpl := w.PromptTemplate
 	tpl = strings.ReplaceAll(tpl, "{task_id}", taskID)
-	tpl = strings.ReplaceAll(tpl, "{title}", taskTitle)
+	tpl = strings.ReplaceAll(tpl, "{title}", title)
 	tpl = strings.ReplaceAll(tpl, "{worker_id}", workerID)
 	tpl = strings.ReplaceAll(tpl, "{worker_name}", w.Name)
 	tpl = strings.ReplaceAll(tpl, "{scope}", w.Scope)
+	tpl = strings.ReplaceAll(tpl, "{namespace_id}", nsID)
+	tpl = strings.ReplaceAll(tpl, "{namespace_name}", namespaceName)
+	tpl = strings.ReplaceAll(tpl, "{dag_id}", dagID)
+	tpl = strings.ReplaceAll(tpl, "{dag_title}", dagTitle)
+	tpl = strings.ReplaceAll(tpl, "{branch}", branch)
+	tpl = strings.ReplaceAll(tpl, "{workdir}", workdir)
+	tpl = strings.ReplaceAll(tpl, "{repo_path}", repoPath)
+	tpl = strings.ReplaceAll(tpl, "{worktree_path}", worktreePath)
+	tpl = strings.ReplaceAll(tpl, "{base_branch}", baseBranch)
+	tpl = strings.ReplaceAll(tpl, "{review_commit}", reviewCommit)
+	tpl = strings.ReplaceAll(tpl, "{review.diff}", reviewDiff)
+	tpl = strings.ReplaceAll(tpl, "{assigned_worker}", assignedWorkerName)
 	return tpl, nil
 }
 

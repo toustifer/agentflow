@@ -1,0 +1,79 @@
+{
+  "name": "leader-default",
+  "blackboard": {},
+  "tree": {
+    "type": "ReactiveSequence",
+    "children": [
+      {
+        "type": "Action",
+        "name": "refresh_phase",
+        "properties": { "fn": "refresh_phase" }
+      },
+      {
+        "type": "Fallback",
+        "children": [
+          {
+            "type": "Sequence",
+            "children": [
+              { "type": "Condition", "properties": { "fn": "phase_is_setup" } },
+              { "type": "Action", "properties": { "fn": "setup_actions" } }
+            ]
+          },
+          {
+            "type": "Sequence",
+            "children": [
+              { "type": "Condition", "properties": { "fn": "phase_is_shape" } },
+              { "type": "Action", "properties": { "fn": "shape_actions" } }
+            ]
+          },
+          {
+            "type": "Sequence",
+            "children": [
+              { "type": "Condition", "properties": { "fn": "phase_is_plan" } },
+              { "type": "Action", "properties": { "fn": "plan_actions" } }
+            ]
+          },
+          {
+            "type": "Sequence",
+            "children": [
+              { "type": "Condition", "properties": { "fn": "phase_is_execute" } },
+              {
+                "type": "Fallback",
+                "children": [
+                  {
+                    "type": "Sequence",
+                    "children": [
+                      { "type": "Condition", "properties": { "fn": "has_next_tasks" } },
+                      { "type": "Action", "properties": { "fn": "dispatch_task" } }
+                    ]
+                  },
+                  {
+                    "type": "Sequence",
+                    "children": [
+                      { "type": "Condition", "properties": { "fn": "has_active_tasks" } },
+                      { "type": "Action", "properties": { "fn": "monitor_tasks" } }
+                    ]
+                  },
+                  {
+                    "type": "Sequence",
+                    "children": [
+                      { "type": "Condition", "properties": { "fn": "has_stuck_tasks" } },
+                      { "type": "Action", "properties": { "fn": "report_stuck" } }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "Sequence",
+            "children": [
+              { "type": "Condition", "properties": { "fn": "phase_is_done" } },
+              { "type": "Action", "properties": { "fn": "report_done" } }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

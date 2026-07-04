@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/toustifer/agentflow/pkg/engine"
@@ -892,8 +893,14 @@ func (s *Server) handleWorkerPromptGet(ctx context.Context, input map[string]any
 	}
 	taskID, _ := optionalString(input, "task_id")
 	title, _ := optionalString(input, "title")
+	asReviewer := false
+	if raw, ok := input["as_reviewer"]; ok {
+		if v, ok := raw.(bool); ok {
+			asReviewer = v
+		}
+	}
 
-	prompt, err := s.engine.WorkerPromptGet(ctx, nsID, wid, taskID, title)
+	prompt, err := s.engine.WorkerPromptGet(ctx, nsID, wid, taskID, title, asReviewer)
 	if err != nil {
 		return nil, err
 	}
@@ -918,6 +925,96 @@ func (s *Server) handleWorkerStatus(ctx context.Context, input map[string]any) (
 		"worker_id":    workerID,
 		"status":       string(status),
 		"checked_at":   time.Now().UTC().Format(time.RFC3339Nano),
+	}, nil
+}
+
+func (s *Server) handleGitStatus(ctx context.Context, input map[string]any) (map[string]any, error) {
+	nsID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return nil, err
+	}
+	ns, err := s.engine.GetNamespace(ctx, nsID)
+	if err != nil {
+		return nil, err
+	}
+	repoPath, err := validateGitRepo(ctx, ns.Metadata["workdir"])
+	if err != nil {
+		return nil, err
+	}
+	branch, err := runGit(ctx, repoPath, "branch", "--show-current")
+	if err != nil {
+		return nil, err
+	}
+	headSHA, err := runGit(ctx, repoPath, "rev-parse", "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	statusText, err := runGit(ctx, repoPath, "status", "--short")
+	if err != nil {
+		return nil, err
+	}
+	status := "clean"
+	if strings.TrimSpace(statusText) != "" {
+		status = "dirty"
+	}
+	result := map[string]any{
+		"namespace_id": nsID,
+		"repo_path":    repoPath,
+		"branch":       branch,
+		"head_sha":     headSHA,
+		"status":       status,
+		"workdir":      ns.Metadata["workdir"],
+	}
+	if taskID, _ := optionalString(input, "task_id"); taskID != "" {
+		task, err := s.engine.GetTask(ctx, nsID, taskID)
+		if err != nil {
+			return nil, err
+		}
+		result["task_id"] = taskID
+		result["task_metadata"] = cloneStringMapAny(task.Metadata)
+	}
+	return result, nil
+}
+
+func (s *Server) handleWorktreeGet(ctx context.Context, input map[string]any) (map[string]any, error) {
+	nsID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return nil, err
+	}
+	taskID, err := requiredString(input, "task_id")
+	if err != nil {
+		return nil, err
+	}
+	ns, err := s.engine.GetNamespace(ctx, nsID)
+	if err != nil {
+		return nil, err
+	}
+	task, err := s.engine.GetTask(ctx, nsID, taskID)
+	if err != nil {
+		return nil, err
+	}
+	var dag *engine.DAG
+	if task.DAGID != "" {
+		dag, err = s.engine.GetDAG(ctx, nsID, task.DAGID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	runtime, err := s.getTaskGitRuntime(ctx, ns, dag, task)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"namespace_id":  nsID,
+		"task_id":       taskID,
+		"dag_id":        task.DAGID,
+		"repo_path":     runtime.RepoPath,
+		"worktree_path": runtime.WorktreePath,
+		"branch":        runtime.Branch,
+		"base_branch":   runtime.BaseBranch,
+		"head_sha":      runtime.HeadSHA,
+		"status":        runtime.Status,
+		"metadata":      cloneStringMapAny(task.Metadata),
 	}, nil
 }
 

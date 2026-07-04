@@ -3,8 +3,12 @@ package server
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/toustifer/agentflow/pkg/engine"
@@ -78,13 +82,7 @@ func TestTaskTransitionAdvancesState(t *testing.T) {
 	t.Parallel()
 
 	srv := newTestServer(t)
-	_, err := srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
-		NamespaceID:    "ns-1",
-		ID:             "T-transition",
-		Title:          "execute",
-		AssignedWorker: "worker-b",
-	})
-	require.NoError(t, err)
+	createDagTaskForStart(t, srv, "T-transition")
 
 	result, err := srv.Handle(context.Background(), "task_transition", map[string]any{
 		"namespace_id": "ns-1",
@@ -100,6 +98,72 @@ func TestTaskTransitionAdvancesState(t *testing.T) {
 	task, err := srv.engine.GetTask(context.Background(), "ns-1", "T-transition")
 	require.NoError(t, err)
 	require.Equal(t, engine.TaskExecuting, task.State)
+	require.Equal(t, "feat/test", task.Metadata["git.branch"])
+	require.NotEmpty(t, task.Metadata["git.worktree_path"])
+}
+
+func TestWorkerPromptGetIncludesGitContext(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t)
+	_, err := srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
+		NamespaceID: "ns-1",
+		ID:          "worker-b",
+		Name:        "Builder",
+		PromptTemplate: "task={task_id} branch={branch} repo={repo_path} worktree={worktree_path} dag={dag_title}",
+	})
+	require.NoError(t, err)
+	createDagTaskForStart(t, srv, "T-prompt")
+	_, err = srv.Handle(context.Background(), "task_transition", map[string]any{
+		"namespace_id": "ns-1",
+		"task_id":      "T-prompt",
+		"transition":   "start",
+	})
+	require.NoError(t, err)
+
+	result, err := srv.Handle(context.Background(), "worker_prompt_get", map[string]any{
+		"namespace_id": "ns-1",
+		"worker_id":    "worker-b",
+		"task_id":      "T-prompt",
+	})
+	require.NoError(t, err)
+	prompt := result["prompt"].(string)
+	require.Contains(t, prompt, "branch=feat/test")
+	require.Contains(t, prompt, "repo=")
+	require.Contains(t, prompt, "worktree=")
+	require.Contains(t, prompt, "dag=Test DAG")
+}
+
+func TestGitStatusAndWorktreeGet(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t)
+	createDagTaskForStart(t, srv, "T-status")
+	_, err := srv.Handle(context.Background(), "task_transition", map[string]any{
+		"namespace_id": "ns-1",
+		"task_id":      "T-status",
+		"transition":   "start",
+	})
+	require.NoError(t, err)
+
+	gitResult, err := srv.Handle(context.Background(), "git_status", map[string]any{
+		"namespace_id": "ns-1",
+		"task_id":      "T-status",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "main", gitResult["branch"])
+	require.NotEmpty(t, gitResult["repo_path"])
+	require.NotEmpty(t, gitResult["task_metadata"])
+	require.Equal(t, "clean", gitResult["status"])
+
+	worktreeResult, err := srv.Handle(context.Background(), "worktree_get", map[string]any{
+		"namespace_id": "ns-1",
+		"task_id":      "T-status",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "feat/test", worktreeResult["branch"])
+	require.NotEmpty(t, worktreeResult["worktree_path"])
+	require.Equal(t, "clean", worktreeResult["status"])
 }
 
 func TestFlowPingReturnsSuccess(t *testing.T) {
@@ -185,12 +249,11 @@ func TestHubSyncFailureDoesNotFailTaskCreateAndTransition(t *testing.T) {
 
 	srv := newTestServerWithConfig(t, Config{HubEnabled: true})
 	srv.hub = failingHubSyncer{err: errors.New("hub unavailable")}
+	createDagTaskForStart(t, srv, "T-sync")
 
-	created, err := srv.Handle(context.Background(), "task_create", map[string]any{
-		"namespace_id":    "ns-1",
-		"task_id":         "T-sync",
-		"title":           "sync fallback",
-		"assigned_worker": "worker-sync",
+	created, err := srv.Handle(context.Background(), "task_get", map[string]any{
+		"namespace_id": "ns-1",
+		"task_id":      "T-sync",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "T-sync", created["id"])
@@ -339,6 +402,180 @@ func TestTaskListCallsSyncForEachTask(t *testing.T) {
 	require.Contains(t, tracker.syncedTasks, "T-list-sync-2")
 }
 
+func TestEnsureReadyGitRepoFresh(t *testing.T) {
+	t.Parallel()
+	workdir := filepath.Join(t.TempDir(), "fresh")
+	require.NoError(t, os.MkdirAll(workdir, 0o755))
+	now := time.Now()
+	info, branch, err := ensureReadyGitRepo(context.Background(), workdir, "main", true, "Tester", "tester@example.com")
+	require.NoError(t, err)
+	require.Equal(t, info, workdir)
+	require.Equal(t, "main", branch)
+	_, err = os.Stat(filepath.Join(workdir, ".git"))
+	require.NoError(t, err)
+	if now.After(now.Add(time.Hour)) {
+		t.Fatal("time must not stand still")
+	}
+}
+
+func TestEnsureReadyGitRepoRejects(t *testing.T) {
+	t.Parallel()
+	workdir := filepath.Join(t.TempDir(), "empty")
+	require.NoError(t, os.MkdirAll(workdir, 0o755))
+	_, _, err := ensureReadyGitRepo(context.Background(), workdir, "main", false, "", "")
+	require.Error(t, err)
+}
+
+func TestWriteRulesFile(t *testing.T) {
+	t.Parallel()
+	target := filepath.Join(t.TempDir(), ".claude")
+	_, err := writeRulesFile(target)
+	require.NoError(t, err)
+	got, err := os.ReadFile(filepath.Join(target, "agentflow-git.md"))
+	require.NoError(t, err)
+	text := string(got)
+	require.Contains(t, text, "# agentflow-git.md")
+	require.Contains(t, text, "## Workspace rule")
+	require.Contains(t, text, "## Branch binding")
+	require.Contains(t, text, "## Standard task flow")
+	require.Contains(t, text, "## Forbidden actions")
+	require.Contains(t, text, "## Review handoff contract")
+	require.Contains(t, text, "## Failure handling")
+}
+
+func TestProjectInitFreshProject(t *testing.T) {
+	t.Parallel()
+	workdir := filepath.Join(t.TempDir(), "trip-fable")
+	require.NoError(t, os.MkdirAll(workdir, 0o755))
+
+	srv := buildIsolatedServer(t)
+	result, err := srv.Handle(context.Background(), "project_init", map[string]any{
+		"project_id": "trip-fable",
+		"workdir":    workdir,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "trip-fable", result["namespace_id"])
+	require.Equal(t, workdir, result["repo_path"])
+	_, err = os.Stat(filepath.Join(workdir, ".git"))
+	require.NoError(t, err)
+	rulesPath := result["rules_file_path"].(string)
+	require.FileExists(t, rulesPath)
+}
+
+func TestSubmitCapturesReviewCommitAndDiff(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t)
+	createDagTaskForStart(t, srv, "T-review")
+	_, err := srv.Handle(context.Background(), "task_transition", map[string]any{
+		"namespace_id": "ns-1", "task_id": "T-review",
+		"transition": "start", "actor_role": "leader",
+	})
+	require.NoError(t, err)
+
+	wtPath := srv.findLatestWorktreePath(t, "ns-1", "T-review")
+	require.NoError(t, os.WriteFile(filepath.Join(wtPath, "note.txt"), []byte("hello\n"), 0o644))
+	runGitTest(t, wtPath, "add", "note.txt")
+	runGitTest(t, wtPath, "commit", "-m", "task=T-review: add note")
+	// Register worker-b so diary write and submit succeed
+	_, err = srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
+		NamespaceID: "ns-1", ID: "worker-b", Name: "Builder",
+	})
+	require.NoError(t, err)
+	_, err = srv.Handle(context.Background(), "worker_diary_write", map[string]any{
+		"namespace_id": "ns-1", "worker_id": "worker-b",
+		"date": time.Now().UTC().Format("2006-01-02"),
+		"content": "drafted", "task_id": "T-review",
+	})
+	require.NoError(t, err)
+
+	result, err := srv.Handle(context.Background(), "task_transition", map[string]any{
+		"namespace_id": "ns-1", "task_id": "T-review",
+		"transition": "submit", "actor_role": "worker",
+	})
+	if err != nil {
+		cur, _ := srv.engine.GetTask(context.Background(), "ns-1", "T-review")
+		t.Logf("submit failed; current state=%q history=%+v", cur.State, cur.Metadata)
+	}
+	require.NoError(t, err)
+	require.Equal(t, "review_pending", result["state"])
+
+	task, err := srv.engine.GetTask(context.Background(), "ns-1", "T-review")
+	require.NoError(t, err)
+	require.NotEmpty(t, task.Metadata["review.commit"])
+	require.Contains(t, task.Metadata["review.diff"], "note.txt")
+}
+
+
+func TestWorkerPromptGetReviewerMode(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t)
+	_, err := srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
+		NamespaceID: "ns-1", ID: "reviewer-a",
+		Name: "Reviewer",
+		PromptTemplate: "rev_commit={review_commit} rev_diff={review.diff} worker={assigned_worker} task={task_id}",
+	})
+	require.NoError(t, err)
+	createDagTaskForStart(t, srv, "T-prompt-rev")
+	_, err = srv.Handle(context.Background(), "task_transition", map[string]any{
+		"namespace_id": "ns-1", "task_id": "T-prompt-rev",
+		"transition": "start",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.UpdateTask(context.Background(), "ns-1", "T-prompt-rev", engine.UpdateTaskRequest{
+		State: engine.TaskReviewPending,
+		ReviewMetadata: map[string]string{
+			"review.commit": "abcdef",
+			"review.diff":   "diff --git a/x b/x",
+		},
+	})
+	require.NoError(t, err)
+
+	result, err := srv.Handle(context.Background(), "worker_prompt_get", map[string]any{
+		"namespace_id": "ns-1", "worker_id": "reviewer-a",
+		"task_id": "T-prompt-rev", "as_reviewer": true,
+	})
+	require.NoError(t, err)
+	prompt := result["prompt"].(string)
+	require.Contains(t, prompt, "rev_commit=abcdef")
+	require.Contains(t, prompt, "rev_diff=diff --git")
+	require.Contains(t, prompt, "task=T-prompt-rev")
+}
+
+
+func TestLeaderTickReturnsPhase(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t)
+	result, err := srv.Handle(context.Background(), "leader_tick", map[string]any{
+		"namespace_id": "ns-1",
+	})
+	require.NoError(t, err)
+	require.Contains(t, []string{"setup", "shape", "plan", "execute", "stuck", "done"}, result["phase"])
+	require.Contains(t, []string{"running", "success", "failure"}, result["tree_status"])
+	require.NotEmpty(t, result["progress"])
+}
+
+
+
+func (s *Server) findLatestWorktreePath(t *testing.T, nsID, taskID string) string {
+	t.Helper()
+	task, err := s.engine.GetTask(context.Background(), nsID, taskID)
+	require.NoError(t, err)
+	return task.Metadata["git.worktree_path"]
+}
+
+func buildIsolatedServer(t *testing.T) *Server {
+	t.Helper()
+	eng, err := engine.NewEngine(engine.NewEngineConfig{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eng.Close()) })
+	srv, err := New(eng, Config{})
+	require.NoError(t, err)
+	return srv
+}
+
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	return newTestServerWithConfig(t, Config{})
@@ -351,15 +588,60 @@ func newTestServerWithConfig(t *testing.T, cfg Config) *Server {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, eng.Close()) })
 
+	repoPath := initTestGitRepo(t)
 	_, err = eng.CreateNamespace(context.Background(), engine.CreateNamespaceRequest{
 		ID:   "ns-1",
 		Name: "agent-company",
+		Metadata: map[string]string{
+			"workdir": repoPath,
+		},
 	})
 	require.NoError(t, err)
 
 	srv, err := New(eng, cfg)
 	require.NoError(t, err)
 	return srv
+}
+
+func initTestGitRepo(t *testing.T) string {
+	t.Helper()
+	repoPath := filepath.Join(t.TempDir(), "repo")
+	require.NoError(t, os.MkdirAll(repoPath, 0o755))
+	runGitTest(t, repoPath, "init", "-b", "main")
+	runGitTest(t, repoPath, "config", "user.name", "Agentflow Test")
+	runGitTest(t, repoPath, "config", "user.email", "agentflow@example.com")
+	readmePath := filepath.Join(repoPath, "README.md")
+	require.NoError(t, os.WriteFile(readmePath, []byte("# test\n"), 0o644))
+	runGitTest(t, repoPath, "add", "README.md")
+	runGitTest(t, repoPath, "commit", "-m", "init")
+	return repoPath
+}
+
+func createDagTaskForStart(t *testing.T, srv *Server, taskID string) {
+	t.Helper()
+	_, err := srv.engine.CreateDAG(context.Background(), engine.CreateDAGRequest{
+		NamespaceID: "ns-1",
+		ID:          "dag-1",
+		Title:       "Test DAG",
+		Branch:      "feat/test",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID:    "ns-1",
+		ID:             taskID,
+		Title:          "execute",
+		AssignedWorker: "worker-b",
+		DAGID:          "dag-1",
+	})
+	require.NoError(t, err)
+}
+
+func runGitTest(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(out))
 }
 
 type failingHubSyncer struct {

@@ -1,0 +1,49 @@
+{
+  "name": "reviewer-default",
+  "blackboard": {},
+  "tree": {
+    "type": "Sequence",
+    "children": [
+      {
+        "type": "Action",
+        "name": "fetch_diff",
+        "properties": { "fn": "fetch_work_diff" }
+      },
+      {
+        "type": "Fallback",
+        "children": [
+          {
+            "type": "Sequence",
+            "children": [
+              {
+                "type": "Condition",
+                "properties": { "fn": "review_approved" }
+              },
+              {
+                "type": "Action",
+                "name": "approve_task",
+                "properties": { "fn": "task_review_pass" }
+              }
+            ]
+          },
+          {
+            "type": "Sequence",
+            "children": [
+              {
+                "type": "Inverter",
+                "children": [
+                  { "type": "Condition", "properties": { "fn": "review_approved" } }
+                ]
+              },
+              {
+                "type": "Action",
+                "name": "request_rework",
+                "properties": { "fn": "task_review_rework" }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

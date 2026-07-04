@@ -178,9 +178,14 @@ func TestEngineFilePersistence_TransitionsAndHistory(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	task, err := e1.TransitionTask(context.Background(), "ns-1", "T1", TransStart, map[string]string{"actor": "leader"})
+	task, err := e1.TransitionTask(context.Background(), "ns-1", "T1", TransStart, map[string]string{
+		"actor":             "leader",
+		"git.branch":        "feat/test",
+		"git.worktree_path": "/tmp/worktree",
+	})
 	require.NoError(t, err)
 	require.Equal(t, TaskExecuting, task.State)
+	require.Equal(t, "feat/test", task.Metadata["git.branch"])
 
 	task, err = e1.TransitionTask(context.Background(), "ns-1", "T1", TransSubmit, map[string]string{"actor": "bot", "reason": "done"})
 	require.NoError(t, err)
@@ -196,6 +201,8 @@ func TestEngineFilePersistence_TransitionsAndHistory(t *testing.T) {
 	task, err = e2.GetTask(context.Background(), "ns-1", "T1")
 	require.NoError(t, err)
 	require.Equal(t, TaskReviewPending, task.State)
+	require.Equal(t, "feat/test", task.Metadata["git.branch"])
+	require.Equal(t, "/tmp/worktree", task.Metadata["git.worktree_path"])
 
 	history, err := e2.GetHistory(context.Background(), "ns-1", "T1")
 	require.NoError(t, err)
@@ -365,4 +372,37 @@ func TestEngineFilePersistence_DatabaseFileCreated(t *testing.T) {
 	info, err := os.Stat(dbPath)
 	require.NoError(t, err, "database file should exist after close")
 	require.Greater(t, info.Size(), int64(0), "database file should not be empty")
+}
+
+func TestEngineTransitionMetadataRoundTrip(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "agentflow-meta.db")
+
+	e1, err := NewEngine(NewEngineConfig{DBPath: dbPath})
+	require.NoError(t, err)
+
+	_, err = e1.CreateNamespace(context.Background(), CreateNamespaceRequest{ID: "ns-x", Name: "meta"})
+	require.NoError(t, err)
+	_, err = e1.CreateTask(context.Background(), CreateTaskRequest{NamespaceID: "ns-x", ID: "T-meta", Title: "x"})
+	require.NoError(t, err)
+
+	task, err := e1.TransitionTask(context.Background(), "ns-x", "T-meta", TransStart,
+		map[string]string{
+			"git.branch":    "feat/x",
+			"git.worktree":  "/tmp/wt",
+			"review.commit": "abcdef",
+			"review.diff":   "diff --git",
+		})
+	require.NoError(t, err)
+	require.Equal(t, "abcdef", task.Metadata["review.commit"])
+	require.Equal(t, "diff --git", task.Metadata["review.diff"])
+	require.NoError(t, e1.Close())
+
+	e2, err := NewEngine(NewEngineConfig{DBPath: dbPath})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, e2.Close()) }()
+	task, err = e2.GetTask(context.Background(), "ns-x", "T-meta")
+	require.NoError(t, err)
+	require.Equal(t, "abcdef", task.Metadata["review.commit"])
+	require.Equal(t, "diff --git", task.Metadata["review.diff"])
+	require.Equal(t, "feat/x", task.Metadata["git.branch"])
 }

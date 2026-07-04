@@ -118,6 +118,20 @@ CREATE TABLE IF NOT EXISTS leader_diaries (
 	updated_at   TEXT NOT NULL,
 	PRIMARY KEY (namespace_id, date),
 	FOREIGN KEY (namespace_id) REFERENCES namespaces(id)
+);
+
+CREATE TABLE IF NOT EXISTS project_docs (
+	id           INTEGER PRIMARY KEY AUTOINCREMENT,
+	namespace_id TEXT NOT NULL,
+	section      TEXT NOT NULL DEFAULT '',
+	path         TEXT NOT NULL DEFAULT '',
+	title        TEXT NOT NULL DEFAULT '',
+	content      TEXT NOT NULL DEFAULT '',
+	tags         TEXT NOT NULL DEFAULT '[]',
+	version      INTEGER NOT NULL DEFAULT 1,
+	created_at   TEXT NOT NULL,
+	updated_at   TEXT NOT NULL,
+	FOREIGN KEY (namespace_id) REFERENCES namespaces(id)
 );`
 
 // openSQLite opens (or creates) a SQLite database at dbPath and ensures the
@@ -417,4 +431,21 @@ func mustUnmarshalStringSlice(s string) []string {
 		return nil
 	}
 	return sl
+}
+
+// ---------------------------------------------------------------------------
+// Deletion
+// ---------------------------------------------------------------------------
+
+func deleteAllForNamespace(db *sql.DB, nsID string) error {
+	tables := []string{"leader_diaries", "worker_diaries", "worker_handbooks", "workers", "events", "tasks", "dags"}
+	for _, table := range tables {
+		if _, err := db.Exec("DELETE FROM "+table+" WHERE namespace_id = ?", nsID); err != nil {
+			return fmt.Errorf("delete %s: %w", table, err)
+		}
+	}
+	if _, err := db.Exec("DELETE FROM namespaces WHERE id = ?", nsID); err != nil {
+		return fmt.Errorf("delete namespace: %w", err)
+	}
+	return nil
 }

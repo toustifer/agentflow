@@ -1,11 +1,14 @@
 package server
 
-import "github.com/toustifer/agentflow/pkg/engine"
+import (
+	"github.com/toustifer/agentflow/pkg/engine"
+)
 
 type Server struct {
-	engine *engine.Engine
-	cfg    Config
-	hub    HubSyncer
+	engine        *engine.Engine
+	cfg           Config
+	hub           HubSyncer
+	phaseProvider *btPhaseProvider
 }
 
 func New(e *engine.Engine, cfg Config) (*Server, error) {
@@ -20,6 +23,9 @@ func New(e *engine.Engine, cfg Config) (*Server, error) {
 	if cfg.HubEnabled {
 		srv.hub = noopHubSyncer{}
 	}
+
+	// Lazy-init Python BT bridge on first BT tool call
+	globalBTBridge = nil
 
 	return srv, nil
 }
