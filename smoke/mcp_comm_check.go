@@ -135,7 +135,7 @@ func main() {
 	// 4. Leader starts with actor_role.
 	r = toolCall("task_transition", map[string]any{"namespace_id": "comms-test", "task_id": "T1", "transition": "start", "actor_role": "leader"})
 	t = extract(r)
-	check("start (leader) -> executing", t["state"] == "executing", fmt.Sprintf("state=%v", t["state"]))
+	check("start (leader) -> executing", t["state"] == "executing", fmt.Sprintf("state=%v error=%v", t["state"], t["_error"]))
 	if arr, ok := t["available_transitions"].([]any); ok {
 		check("executing avail has submit+cancel", len(arr) == 2,
 			fmt.Sprintf("got %d: %v", len(arr), arr))
@@ -144,12 +144,16 @@ func main() {
 	// Prepare worktree: get worktree path, write file, commit, write diary.
 	taskDetail := toolCall("task_get", map[string]any{"namespace_id": "comms-test", "task_id": "T1"})
 	td := extract(taskDetail)
-	meta := td["metadata"].(map[string]any)
-	wtPath, _ := meta["git.worktree_path"].(string)
-	if wtPath != "" {
-		os.WriteFile(filepath.Join(wtPath, "work.txt"), []byte("done"), 0o644)
-		runGit(wtPath, "add", ".")
-		runGit(wtPath, "commit", "-m", "implement T1")
+	if td != nil {
+		rawMeta, _ := td["metadata"]
+		if meta, ok := rawMeta.(map[string]any); ok {
+			wtPath, _ := meta["git.worktree_path"].(string)
+			if wtPath != "" {
+				os.WriteFile(filepath.Join(wtPath, "work.txt"), []byte("done"), 0o644)
+				runGit(wtPath, "add", ".")
+				runGit(wtPath, "commit", "-m", "implement T1")
+			}
+		}
 	}
 	diaryDate := time.Now().UTC().Format("2006-01-02")
 	toolCall("worker_diary_write", map[string]any{"namespace_id": "comms-test", "worker_id": "worker-ui", "date": diaryDate, "content": "finished T1", "task_id": "T1"})
@@ -187,11 +191,15 @@ func main() {
 	toolCall("task_transition", map[string]any{"namespace_id": "comms-test", "task_id": "T2", "transition": "start", "actor_role": "leader"})
 	taskDetail2 := toolCall("task_get", map[string]any{"namespace_id": "comms-test", "task_id": "T2"})
 	td2 := extract(taskDetail2)
-	meta2 := td2["metadata"].(map[string]any)
-	if wt2, ok := meta2["git.worktree_path"].(string); ok && wt2 != "" {
-		os.WriteFile(filepath.Join(wt2, "work2.txt"), []byte("done"), 0o644)
-		runGit(wt2, "add", ".")
-		runGit(wt2, "commit", "-m", "implement T2")
+	if td2 != nil {
+		rawMeta2, _ := td2["metadata"]
+		if meta2, ok := rawMeta2.(map[string]any); ok {
+			if wt2, _ := meta2["git.worktree_path"].(string); wt2 != "" {
+				os.WriteFile(filepath.Join(wt2, "work2.txt"), []byte("done"), 0o644)
+				runGit(wt2, "add", ".")
+				runGit(wt2, "commit", "-m", "implement T2")
+			}
+		}
 	}
 	toolCall("worker_diary_write", map[string]any{"namespace_id": "comms-test", "worker_id": "worker-ui", "date": diaryDate, "content": "finished T2", "task_id": "T2"})
 	toolCall("task_transition", map[string]any{"namespace_id": "comms-test", "task_id": "T2", "transition": "submit", "actor_role": "worker"})
