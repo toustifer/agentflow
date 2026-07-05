@@ -148,15 +148,22 @@ func main() {
 		rawMeta, _ := td["metadata"]
 		if meta, ok := rawMeta.(map[string]any); ok {
 			wtPath, _ := meta["git.worktree_path"].(string)
+			check("worktree_path T1", wtPath != "", fmt.Sprintf("path=%q", wtPath))
 			if wtPath != "" {
 				os.WriteFile(filepath.Join(wtPath, "work.txt"), []byte("done"), 0o644)
 				runGit(wtPath, "add", ".")
 				runGit(wtPath, "commit", "-m", "implement T1")
+				check("git commit T1", true, "")
 			}
+		} else {
+			check("worktree_path T1", false, "no metadata map")
 		}
+	} else {
+		check("worktree_path T1", false, "task_get returned nil")
 	}
 	diaryDate := time.Now().UTC().Format("2006-01-02")
-	toolCall("worker_diary_write", map[string]any{"namespace_id": "comms-test", "worker_id": "worker-ui", "date": diaryDate, "content": "finished T1", "task_id": "T1"})
+	r = toolCall("worker_diary_write", map[string]any{"namespace_id": "comms-test", "worker_id": "worker-ui", "date": diaryDate, "content": "finished T1", "task_id": "T1"})
+	check("diary T1", extract(r) != nil, fmt.Sprintf("%v", extract(r)))
 
 	// 5. Worker submits.
 	r = toolCall("task_transition", map[string]any{"namespace_id": "comms-test", "task_id": "T1", "transition": "submit", "actor_role": "worker"})
