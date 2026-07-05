@@ -7,8 +7,10 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func main() {
@@ -92,13 +94,28 @@ func main() {
 		}
 	}
 
-	// 1. Create namespace.
-	r := toolCall("namespace_create", map[string]any{"id": "comms-test", "name": "通信测试"})
+	// 1. Create namespace with a git workdir.
+	tmpDir, _ := os.MkdirTemp("", "agentflow-smoke-*")
+	defer os.RemoveAll(tmpDir)
+	runGit(tmpDir, "init", "-b", "main")
+	runGit(tmpDir, "config", "user.name", "Test")
+	runGit(tmpDir, "config", "user.email", "test@example.com")
+	os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("# smoke\n"), 0o644)
+	runGit(tmpDir, "add", ".")
+	runGit(tmpDir, "commit", "-m", "init")
+
+	r := toolCall("namespace_create", map[string]any{"id": "comms-test", "name": "通信测试", "metadata": map[string]any{"workdir": tmpDir}})
 	ns := extract(r)
 	check("namespace_create", ns != nil && ns["id"] == "comms-test", fmt.Sprintf("%v", ns))
 
+	// Register worker and DAG.
+	r = toolCall("worker_register", map[string]any{"namespace_id": "comms-test", "id": "worker-ui", "name": "Worker UI"})
+	extract(r)
+	r = toolCall("dag_create", map[string]any{"namespace_id": "comms-test", "id": "dag-1", "title": "Smoke DAG", "branch": "feat/test"})
+	extract(r)
+
 	// 2. Create task — verify available_transitions appears.
-	r = toolCall("task_create", map[string]any{"namespace_id": "comms-test", "task_id": "T1", "title": "Hello World 页面", "assigned_worker": "worker-ui", "acceptance_criteria": []any{"页面包含标题", "按钮可点击弹出问候语"}})
+	r = toolCall("task_create", map[string]any{"namespace_id": "comms-test", "task_id": "T1", "title": "Hello World 页面", "assigned_worker": "worker-ui", "dag_id": "dag-1", "acceptance_criteria": []any{"页面包含标题", "按钮可点击弹出问候语"}})
 	t := extract(r)
 	check("task_create", t["state"] == "assigned", fmt.Sprintf("state=%v", t["state"]))
 	avail := t["available_transitions"]
@@ -123,6 +140,19 @@ func main() {
 		check("executing avail has submit+cancel", len(arr) == 2,
 			fmt.Sprintf("got %d: %v", len(arr), arr))
 	}
+
+	// Prepare worktree: get worktree path, write file, commit, write diary.
+	taskDetail := toolCall("task_get", map[string]any{"namespace_id": "comms-test", "task_id": "T1"})
+	td := extract(taskDetail)
+	meta := td["metadata"].(map[string]any)
+	wtPath, _ := meta["git.worktree_path"].(string)
+	if wtPath != "" {
+		os.WriteFile(filepath.Join(wtPath, "work.txt"), []byte("done"), 0o644)
+		runGit(wtPath, "add", ".")
+		runGit(wtPath, "commit", "-m", "implement T1")
+	}
+	diaryDate := time.Now().UTC().Format("2006-01-02")
+	toolCall("worker_diary_write", map[string]any{"namespace_id": "comms-test", "worker_id": "worker-ui", "date": diaryDate, "content": "finished T1", "task_id": "T1"})
 
 	// 5. Worker submits.
 	r = toolCall("task_transition", map[string]any{"namespace_id": "comms-test", "task_id": "T1", "transition": "submit", "actor_role": "worker"})
@@ -152,9 +182,18 @@ func main() {
 		fmt.Sprintf("error=%v", err["_error"]))
 
 	// 8. Full rework cycle.
-	r = toolCall("task_create", map[string]any{"namespace_id": "comms-test", "task_id": "T2", "title": "返工测试", "assigned_worker": "worker-ui"})
+	r = toolCall("task_create", map[string]any{"namespace_id": "comms-test", "task_id": "T2", "title": "返工测试", "assigned_worker": "worker-ui", "dag_id": "dag-1"})
 	extract(r)
 	toolCall("task_transition", map[string]any{"namespace_id": "comms-test", "task_id": "T2", "transition": "start", "actor_role": "leader"})
+	taskDetail2 := toolCall("task_get", map[string]any{"namespace_id": "comms-test", "task_id": "T2"})
+	td2 := extract(taskDetail2)
+	meta2 := td2["metadata"].(map[string]any)
+	if wt2, ok := meta2["git.worktree_path"].(string); ok && wt2 != "" {
+		os.WriteFile(filepath.Join(wt2, "work2.txt"), []byte("done"), 0o644)
+		runGit(wt2, "add", ".")
+		runGit(wt2, "commit", "-m", "implement T2")
+	}
+	toolCall("worker_diary_write", map[string]any{"namespace_id": "comms-test", "worker_id": "worker-ui", "date": diaryDate, "content": "finished T2", "task_id": "T2"})
 	toolCall("task_transition", map[string]any{"namespace_id": "comms-test", "task_id": "T2", "transition": "submit", "actor_role": "worker"})
 	r = toolCall("task_transition", map[string]any{"namespace_id": "comms-test", "task_id": "T2", "transition": "rework", "actor_role": "reviewer"})
 	t = extract(r)
@@ -173,7 +212,7 @@ func main() {
 	check("cancel -> cancelled", t["state"] == "cancelled", fmt.Sprintf("state=%v", t["state"]))
 
 	// 9. Backward compat (no actor_role).
-	r = toolCall("task_create", map[string]any{"namespace_id": "comms-test", "task_id": "T3", "title": "兼容测试", "assigned_worker": "w"})
+	r = toolCall("task_create", map[string]any{"namespace_id": "comms-test", "task_id": "T3", "title": "兼容测试", "assigned_worker": "worker-ui", "dag_id": "dag-1"})
 	extract(r)
 	r = toolCall("task_transition", map[string]any{"namespace_id": "comms-test", "task_id": "T3", "transition": "start"})
 	t = extract(r)
@@ -189,4 +228,13 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("ALL TESTS PASSED!")
+}
+
+func runGit(dir string, args ...string) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "git %v failed: %s\n", args, string(out))
+		os.Exit(1)
+	}
 }
