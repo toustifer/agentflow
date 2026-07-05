@@ -161,13 +161,13 @@ func main() {
 	// 5. Worker submits.
 	r = toolCall("task_transition", map[string]any{"namespace_id": "comms-test", "task_id": "T1", "transition": "submit", "actor_role": "worker"})
 	t = extract(r)
-	check("submit (worker) -> review_pending", t["state"] == "review_pending", fmt.Sprintf("state=%v", t["state"]))
+	check("submit (worker) -> review_pending", t["state"] == "review_pending", fmt.Sprintf("state=%v error=%v", t["state"], t["_error"]))
 
 	// 6. Reviewer passes.
 	r = toolCall("task_transition", map[string]any{"namespace_id": "comms-test", "task_id": "T1", "transition": "pass", "actor_role": "reviewer"})
 	t = extract(r)
-	check("pass (reviewer) -> done", t["state"] == "done", fmt.Sprintf("state=%v", t["state"]))
-	check("done has nil avail", t["available_transitions"] == nil, fmt.Sprintf("%v", t["available_transitions"]))
+	check("pass (reviewer) -> done", t["state"] == "done", fmt.Sprintf("state=%v error=%v", t["state"], t["_error"]))
+	check("done has nil avail", t["available_transitions"] == nil, fmt.Sprintf("%v error=%v", t["available_transitions"], t["_error"]))
 
 	// 7. Negative tests.
 	r = toolCall("task_transition", map[string]any{"namespace_id": "comms-test", "task_id": "T1", "transition": "pass", "actor_role": "worker"})
