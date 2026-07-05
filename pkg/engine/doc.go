@@ -57,6 +57,13 @@ func (e *Engine) WriteProjectDoc(ctx context.Context, nsID string, doc ProjectDo
 			if err := insertProjectDoc(e.db, &doc); err != nil {
 				return nil, fmt.Errorf("insert doc: %w", err)
 			}
+		} else {
+			if e.nextProjectDocID[nsID] == 0 {
+				e.nextProjectDocID[nsID] = nextProjectDocID(e.projectDocs[nsID])
+			} else {
+				e.nextProjectDocID[nsID]++
+			}
+			doc.ID = e.nextProjectDocID[nsID]
 		}
 	} else {
 		// Update existing — bump version
@@ -143,4 +150,14 @@ func (e *Engine) DeleteProjectDoc(ctx context.Context, nsID string, docID int64)
 		}
 	}
 	return fmt.Errorf("doc %d not found", docID)
+}
+
+func nextProjectDocID(docs []ProjectDoc) int64 {
+	var maxID int64
+	for _, doc := range docs {
+		if doc.ID > maxID {
+			maxID = doc.ID
+		}
+	}
+	return maxID + 1
 }

@@ -19,20 +19,49 @@ const (
 	btBridgeMaxFrameBytes  = 4 * 1024 * 1024
 )
 
+type btProviderCloser interface {
+	close()
+}
+
 // BTBridge manages a Python BT service subprocess over JSON-RPC stdio.
 type BTBridge struct {
-	mu               sync.Mutex
-	cmd              *exec.Cmd
-	stdin            io.WriteCloser
-	stdout           *bufio.Reader
-	started          bool
-	nextID           int
-	provider         *btPhaseProvider
-	dispatchProvider *btDispatchProvider
+	mu                    sync.Mutex
+	cmd                   *exec.Cmd
+	stdin                 io.WriteCloser
+	stdout                *bufio.Reader
+	started               bool
+	nextID                int
+	provider              *btPhaseProvider
+	dispatchProvider      *btDispatchProvider
+	monitorProvider       *btMonitorProvider
+	stuckProvider         *btStuckProvider
+	doneProvider          *btDoneProvider
+	taskGetProvider       *btTaskGetProvider
+	enterWorktreeProvider *btEnterWorktreeProvider
+	implementProvider     *btImplementCodeProvider
+	gitCommitProvider     *btGitCommitProvider
+	docWriteProvider      *btDocWriteProvider
+	diaryWriteProvider    *btDiaryWriteProvider
+	submitReviewProvider  *btSubmitForReviewProvider
+	fetchDiffProvider     *btFetchWorkDiffProvider
+	reviewPassProvider    *btReviewPassProvider
+	reviewReworkProvider  *btReviewReworkProvider
 }
 
 func NewBTBridge() *BTBridge {
 	return &BTBridge{}
+}
+
+func closeBTProviders(providers ...btProviderCloser) {
+	for _, provider := range providers {
+		if provider != nil {
+			provider.close()
+		}
+	}
+}
+
+func appendBTProvider[T btProviderCloser](cleanup []btProviderCloser, provider T) []btProviderCloser {
+	return append(cleanup, provider)
 }
 
 func (b *BTBridge) Start(owner *Server) error {
@@ -47,21 +76,98 @@ func (b *BTBridge) Start(owner *Server) error {
 	if err != nil {
 		return fmt.Errorf("start phase provider: %w", err)
 	}
+	cleanupProviders := appendBTProvider(nil, provider)
 	dispatchProvider, err := newBTDispatchProvider(owner)
 	if err != nil {
-		provider.close()
+		closeBTProviders(cleanupProviders...)
 		return fmt.Errorf("start dispatch provider: %w", err)
+	}
+	cleanupProviders = appendBTProvider(cleanupProviders, dispatchProvider)
+	monitorProvider, err := newBTMonitorProvider(owner)
+	if err != nil {
+		closeBTProviders(cleanupProviders...)
+		return fmt.Errorf("start monitor provider: %w", err)
+	}
+	cleanupProviders = appendBTProvider(cleanupProviders, monitorProvider)
+	stuckProvider, err := newBTStuckProvider(owner)
+	if err != nil {
+		closeBTProviders(cleanupProviders...)
+		return fmt.Errorf("start stuck provider: %w", err)
+	}
+	cleanupProviders = appendBTProvider(cleanupProviders, stuckProvider)
+	doneProvider, err := newBTDoneProvider(owner)
+	if err != nil {
+		closeBTProviders(cleanupProviders...)
+		return fmt.Errorf("start done provider: %w", err)
+	}
+	cleanupProviders = appendBTProvider(cleanupProviders, doneProvider)
+	taskGetProvider, err := newBTTaskGetProvider(owner)
+	if err != nil {
+		closeBTProviders(cleanupProviders...)
+		return fmt.Errorf("start task_get provider: %w", err)
+	}
+	cleanupProviders = appendBTProvider(cleanupProviders, taskGetProvider)
+	enterWorktreeProvider, err := newBTEnterWorktreeProvider(owner)
+	if err != nil {
+		closeBTProviders(cleanupProviders...)
+		return fmt.Errorf("start enter_worktree provider: %w", err)
+	}
+	cleanupProviders = appendBTProvider(cleanupProviders, enterWorktreeProvider)
+	implementProvider, err := newBTImplementCodeProvider(owner)
+	if err != nil {
+		closeBTProviders(cleanupProviders...)
+		return fmt.Errorf("start implement_code provider: %w", err)
+	}
+	cleanupProviders = appendBTProvider(cleanupProviders, implementProvider)
+	gitCommitProvider, err := newBTGitCommitProvider(owner)
+	if err != nil {
+		closeBTProviders(cleanupProviders...)
+		return fmt.Errorf("start git_commit_changes provider: %w", err)
+	}
+	cleanupProviders = appendBTProvider(cleanupProviders, gitCommitProvider)
+	docWriteProvider, err := newBTDocWriteProvider(owner)
+	if err != nil {
+		closeBTProviders(cleanupProviders...)
+		return fmt.Errorf("start doc_write_record provider: %w", err)
+	}
+	cleanupProviders = appendBTProvider(cleanupProviders, docWriteProvider)
+	diaryWriteProvider, err := newBTDiaryWriteProvider(owner)
+	if err != nil {
+		closeBTProviders(cleanupProviders...)
+		return fmt.Errorf("start diary_write_entry provider: %w", err)
+	}
+	cleanupProviders = appendBTProvider(cleanupProviders, diaryWriteProvider)
+	submitReviewProvider, err := newBTSubmitForReviewProvider(owner)
+	if err != nil {
+		closeBTProviders(cleanupProviders...)
+		return fmt.Errorf("start task_submit_for_review provider: %w", err)
+	}
+	cleanupProviders = appendBTProvider(cleanupProviders, submitReviewProvider)
+	fetchDiffProvider, err := newBTFetchWorkDiffProvider(owner)
+	if err != nil {
+		closeBTProviders(cleanupProviders...)
+		return fmt.Errorf("start fetch_work_diff provider: %w", err)
+	}
+	cleanupProviders = appendBTProvider(cleanupProviders, fetchDiffProvider)
+	reviewPassProvider, err := newBTReviewPassProvider(owner)
+	if err != nil {
+		closeBTProviders(cleanupProviders...)
+		return fmt.Errorf("start task_review_pass provider: %w", err)
+	}
+	cleanupProviders = appendBTProvider(cleanupProviders, reviewPassProvider)
+	reviewReworkProvider, err := newBTReviewReworkProvider(owner)
+	if err != nil {
+		closeBTProviders(cleanupProviders...)
+		return fmt.Errorf("start task_review_rework provider: %w", err)
 	}
 
 	pythonPath := findPython()
 	serviceArgs := findBTScript()
 	cmd := exec.Command(pythonPath, serviceArgs...)
 
-	if root := findBTDir(); root != "" {
+	root := findBTDir()
+	if root != "" {
 		cmd.Dir = root
-	}
-
-	if root := findBTDir(); root != "" {
 		env := os.Environ()
 		sep := string(os.PathListSeparator)
 		pyPathVal := root
@@ -79,32 +185,54 @@ func (b *BTBridge) Start(owner *Server) error {
 			"AGENTFLOW_BT_PHASE_TOKEN="+provider.token,
 			"AGENTFLOW_BT_DISPATCH_URL="+dispatchProvider.url,
 			"AGENTFLOW_BT_DISPATCH_TOKEN="+dispatchProvider.token,
+			"AGENTFLOW_BT_MONITOR_URL="+monitorProvider.url,
+			"AGENTFLOW_BT_MONITOR_TOKEN="+monitorProvider.token,
+			"AGENTFLOW_BT_STUCK_URL="+stuckProvider.url,
+			"AGENTFLOW_BT_STUCK_TOKEN="+stuckProvider.token,
+			"AGENTFLOW_BT_DONE_URL="+doneProvider.url,
+			"AGENTFLOW_BT_DONE_TOKEN="+doneProvider.token,
+			"AGENTFLOW_BT_TASK_GET_URL="+taskGetProvider.url,
+			"AGENTFLOW_BT_TASK_GET_TOKEN="+taskGetProvider.token,
+			"AGENTFLOW_BT_ENTER_WORKTREE_URL="+enterWorktreeProvider.url,
+			"AGENTFLOW_BT_ENTER_WORKTREE_TOKEN="+enterWorktreeProvider.token,
+			"AGENTFLOW_BT_IMPLEMENT_CODE_URL="+implementProvider.url,
+			"AGENTFLOW_BT_IMPLEMENT_CODE_TOKEN="+implementProvider.token,
+			"AGENTFLOW_BT_GIT_COMMIT_URL="+gitCommitProvider.url,
+			"AGENTFLOW_BT_GIT_COMMIT_TOKEN="+gitCommitProvider.token,
+			"AGENTFLOW_BT_DOC_WRITE_URL="+docWriteProvider.url,
+			"AGENTFLOW_BT_DOC_WRITE_TOKEN="+docWriteProvider.token,
+			"AGENTFLOW_BT_DIARY_WRITE_URL="+diaryWriteProvider.url,
+			"AGENTFLOW_BT_DIARY_WRITE_TOKEN="+diaryWriteProvider.token,
+			"AGENTFLOW_BT_SUBMIT_REVIEW_URL="+submitReviewProvider.url,
+			"AGENTFLOW_BT_SUBMIT_REVIEW_TOKEN="+submitReviewProvider.token,
+			"AGENTFLOW_BT_FETCH_DIFF_URL="+fetchDiffProvider.url,
+			"AGENTFLOW_BT_FETCH_DIFF_TOKEN="+fetchDiffProvider.token,
+			"AGENTFLOW_BT_REVIEW_PASS_URL="+reviewPassProvider.url,
+			"AGENTFLOW_BT_REVIEW_PASS_TOKEN="+reviewPassProvider.token,
+			"AGENTFLOW_BT_REVIEW_REWORK_URL="+reviewReworkProvider.url,
+			"AGENTFLOW_BT_REVIEW_REWORK_TOKEN="+reviewReworkProvider.token,
 		)
 		cmd.Env = env
 	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		provider.close()
-		dispatchProvider.close()
+		closeBTProviders(cleanupProviders...)
 		return fmt.Errorf("bt_service stdin pipe: %w", err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		provider.close()
-		dispatchProvider.close()
+		closeBTProviders(cleanupProviders...)
 		return fmt.Errorf("bt_service stdout pipe: %w", err)
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		provider.close()
-		dispatchProvider.close()
+		closeBTProviders(cleanupProviders...)
 		return fmt.Errorf("bt_service stderr pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
-		provider.close()
-		dispatchProvider.close()
+		closeBTProviders(cleanupProviders...)
 		return fmt.Errorf("start bt_service: %w", err)
 	}
 
@@ -114,6 +242,19 @@ func (b *BTBridge) Start(owner *Server) error {
 	b.started = true
 	b.provider = provider
 	b.dispatchProvider = dispatchProvider
+	b.monitorProvider = monitorProvider
+	b.stuckProvider = stuckProvider
+	b.doneProvider = doneProvider
+	b.taskGetProvider = taskGetProvider
+	b.enterWorktreeProvider = enterWorktreeProvider
+	b.implementProvider = implementProvider
+	b.gitCommitProvider = gitCommitProvider
+	b.docWriteProvider = docWriteProvider
+	b.diaryWriteProvider = diaryWriteProvider
+	b.submitReviewProvider = submitReviewProvider
+	b.fetchDiffProvider = fetchDiffProvider
+	b.reviewPassProvider = reviewPassProvider
+	b.reviewReworkProvider = reviewReworkProvider
 
 	var stderrBuf bytes.Buffer
 	go io.Copy(io.MultiWriter(os.Stderr, &stderrBuf), stderr)
@@ -242,12 +383,38 @@ func (b *BTBridge) stopLocked() {
 		}
 	}
 	if b.provider != nil {
-		b.provider.close()
+		closeBTProviders(
+			b.provider,
+			b.dispatchProvider,
+			b.monitorProvider,
+			b.stuckProvider,
+			b.doneProvider,
+			b.taskGetProvider,
+			b.enterWorktreeProvider,
+			b.implementProvider,
+			b.gitCommitProvider,
+			b.docWriteProvider,
+			b.diaryWriteProvider,
+			b.submitReviewProvider,
+			b.fetchDiffProvider,
+			b.reviewPassProvider,
+			b.reviewReworkProvider,
+		)
 		b.provider = nil
-	}
-	if b.dispatchProvider != nil {
-		b.dispatchProvider.close()
 		b.dispatchProvider = nil
+		b.monitorProvider = nil
+		b.stuckProvider = nil
+		b.doneProvider = nil
+		b.taskGetProvider = nil
+		b.enterWorktreeProvider = nil
+		b.implementProvider = nil
+		b.gitCommitProvider = nil
+		b.docWriteProvider = nil
+		b.diaryWriteProvider = nil
+		b.submitReviewProvider = nil
+		b.fetchDiffProvider = nil
+		b.reviewPassProvider = nil
+		b.reviewReworkProvider = nil
 	}
 	b.cmd = nil
 	b.stdin = nil

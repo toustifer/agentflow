@@ -10,6 +10,11 @@
         "properties": { "fn": "fetch_work_diff" }
       },
       {
+        "type": "Action",
+        "name": "review_decide",
+        "properties": { "fn": "review_decide" }
+      },
+      {
         "type": "Fallback",
         "children": [
           {

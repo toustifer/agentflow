@@ -60,7 +60,7 @@ func (s *Server) prepareTaskGitRuntime(ctx context.Context, ns *engine.Namespace
 	return status, nil
 }
 
-func (s *Server) getTaskGitRuntime(ctx context.Context, ns *engine.Namespace, dag *engine.DAG, task *engine.Task) (*taskGitRuntime, error) {
+func (s *Server) resolveTaskGitRuntime(ctx context.Context, ns *engine.Namespace, dag *engine.DAG, task *engine.Task) (*taskGitRuntime, error) {
 	if ns == nil {
 		return nil, fmt.Errorf("namespace is required")
 	}
@@ -92,7 +92,28 @@ func (s *Server) getTaskGitRuntime(ctx context.Context, ns *engine.Namespace, da
 	if task.Metadata != nil && task.Metadata["git.worktree_path"] != "" {
 		worktreePath = task.Metadata["git.worktree_path"]
 	}
-	return inspectTaskGitRuntime(ctx, repoPath, worktreePath, branch, baseBranch)
+	if _, err := os.Stat(worktreePath); err == nil {
+		return inspectTaskGitRuntime(ctx, repoPath, worktreePath, branch, baseBranch)
+	}
+	return &taskGitRuntime{
+		Branch:       branch,
+		BaseBranch:   baseBranch,
+		RepoPath:     repoPath,
+		WorktreePath: worktreePath,
+		HeadSHA:      "",
+		Status:       "missing",
+	}, nil
+}
+
+func (s *Server) getTaskGitRuntime(ctx context.Context, ns *engine.Namespace, dag *engine.DAG, task *engine.Task) (*taskGitRuntime, error) {
+	runtime, err := s.resolveTaskGitRuntime(ctx, ns, dag, task)
+	if err != nil {
+		return nil, err
+	}
+	if runtime.Status == "missing" {
+		return nil, fmt.Errorf("worktree 不存在: %s", runtime.WorktreePath)
+	}
+	return runtime, nil
 }
 
 func worktreePathForTask(repoPath string, ns *engine.Namespace, dag *engine.DAG, task *engine.Task) string {
@@ -281,12 +302,9 @@ func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 	if err := cmd.Run(); err != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
-			msg = strings.TrimSpace(stdout.String())
-		}
-		if msg == "" {
 			msg = err.Error()
 		}
-		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), msg)
+		return "", fmt.Errorf("git %s failed: %s", strings.Join(args, " "), msg)
 	}
 	return strings.TrimSpace(stdout.String()), nil
 }

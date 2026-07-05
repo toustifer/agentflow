@@ -53,16 +53,16 @@
                       { "type": "Condition", "properties": { "fn": "has_active_tasks" } },
                       { "type": "Action", "properties": { "fn": "monitor_tasks" } }
                     ]
-                  },
-                  {
-                    "type": "Sequence",
-                    "children": [
-                      { "type": "Condition", "properties": { "fn": "has_stuck_tasks" } },
-                      { "type": "Action", "properties": { "fn": "report_stuck" } }
-                    ]
                   }
                 ]
               }
+            ]
+          },
+          {
+            "type": "Sequence",
+            "children": [
+              { "type": "Condition", "properties": { "fn": "phase_is_stuck" } },
+              { "type": "Action", "properties": { "fn": "report_stuck" } }
             ]
           },
           {

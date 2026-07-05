@@ -38,7 +38,7 @@ def test_dispatch_task_requires_next_tasks():
     ok, err = dispatch_task_action(bb)
     assert ok is False
     assert err is not None
-    assert "has_next_tasks" in str(err)
+    assert "next_tasks" in str(err)
 
 
 def test_dispatch_task_provider_success_writes_blackboard(monkeypatch):

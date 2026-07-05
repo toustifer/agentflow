@@ -41,6 +41,7 @@ func (s *Server) Tools() []ToolSpec {
 		{Name: "git_status"},
 		{Name: "worktree_get"},
 		{Name: "project_next_tasks"},
+		{Name: "lifecycle_tick"},
 		{Name: "leader_tick"},
 		{Name: "bt_list_trees"},
 		{Name: "bt_show_tree"},
@@ -156,6 +157,8 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 		return s.handleDAGFlowchart(ctx, input)
 	case "project_next_tasks":
 		return s.handleProjectNextTasks(ctx, input)
+	case "lifecycle_tick":
+		return s.handleLifecycleTick(ctx, input)
 	case "leader_tick":
 		return s.handleLeaderTick(ctx, input)
 	case "bt_list_trees":
@@ -350,13 +353,13 @@ func (s *Server) handleNamespaceDelete(ctx context.Context, input map[string]any
 				ns.ID, ns.Name, dagCount, taskCount, workerCount),
 		)
 		return map[string]any{
-			"warning":    "命名空间将被级联删除，此操作不可恢复",
-			"namespace":  ns.ID,
-			"name":       ns.Name,
-			"dags":       dagCount,
-			"tasks":      taskCount,
-			"workers":    workerCount,
-			"confirm":    "再次调用并传 confirm=true 以确认删除",
+			"warning":   "命名空间将被级联删除，此操作不可恢复",
+			"namespace": ns.ID,
+			"name":      ns.Name,
+			"dags":      dagCount,
+			"tasks":     taskCount,
+			"workers":   workerCount,
+			"confirm":   "再次调用并传 confirm=true 以确认删除",
 		}, nil
 	}
 
@@ -367,11 +370,11 @@ func (s *Server) handleNamespaceDelete(ctx context.Context, input map[string]any
 	}
 
 	return map[string]any{
-		"deleted":  nsID,
-		"name":     ns.Name,
-		"dags":     dagCount,
-		"tasks":    taskCount,
-		"workers":  workerCount,
+		"deleted": nsID,
+		"name":    ns.Name,
+		"dags":    dagCount,
+		"tasks":   taskCount,
+		"workers": workerCount,
 	}, nil
 }
 
@@ -460,8 +463,6 @@ func (s *Server) handleTaskTransition(ctx context.Context, input map[string]any)
 		}
 		today := time.Now().UTC().Format("2006-01-02")
 		if _, err := s.engine.GetWorkerDiary(ctx, namespaceID, task.AssignedWorker, today); err != nil {
-			// 回退 task 状态（忽略回退本身的错误，原始错误更重要）
-			_, _ = s.engine.TransitionTask(ctx, namespaceID, taskID, engine.TransReassign, map[string]string{"actor_role": "leader"})
 			return taskResult{}, fmt.Errorf(
 				"submit 被拒绝：Worker %q 未写 %s 的工作日记。请先调 mcp__agentflow__worker_diary_write 再 submit",
 				task.AssignedWorker, today,
@@ -473,7 +474,19 @@ func (s *Server) handleTaskTransition(ctx context.Context, input map[string]any)
 			dag, _ := s.engine.GetDAG(ctx, namespaceID, task.DAGID)
 			base := task.Metadata["git.base_branch"]
 			branch := task.Metadata["git.branch"]
-			if dag != nil && base == "" { base = "main" }
+			if dag != nil && base == "" {
+				base = "main"
+			}
+			statusText, statusErr := runGit(ctx, wtPath, "status", "--short")
+			if statusErr != nil {
+				return taskResult{}, statusErr
+			}
+			if strings.TrimSpace(statusText) != "" {
+				return taskResult{}, fmt.Errorf(
+					"submit 被拒绝：task %q 的 worktree 仍有未提交改动。请先完成 git commit 再 submit",
+					taskID,
+				)
+			}
 			if branch != "" {
 				if head, err := runGit(ctx, wtPath, "rev-parse", "HEAD"); err == nil {
 					metadata["review.commit"] = head
@@ -484,6 +497,13 @@ func (s *Server) handleTaskTransition(ctx context.Context, input map[string]any)
 					}
 				}
 			}
+		}
+		gitReviewRequired := task.DAGID != "" || (task.Metadata != nil && (task.Metadata["git.worktree_path"] != "" || task.Metadata["git.branch"] != "" || task.Metadata["git.base_branch"] != ""))
+		if gitReviewRequired && metadata["review.commit"] == "" {
+			return taskResult{}, fmt.Errorf(
+				"submit 被拒绝：task %q 缺少 review.commit。请先完成 git_commit_changes 或确保 git worktree metadata 完整",
+				taskID,
+			)
 		}
 	}
 
@@ -732,7 +752,6 @@ func optionalStringSlice(input map[string]any, key string) ([]string, error) {
 	}
 }
 
-
 func requiredInt64(input map[string]any, key string) (int64, error) {
 	v, ok := input[key]
 	if !ok {
@@ -823,14 +842,14 @@ func taskToMap(task *engine.Task) map[string]any {
 
 func eventToMap(event engine.Event) map[string]any {
 	return map[string]any{
-		"task_id":     event.TaskID,
-		"transition":  event.Transition,
-		"from_state":  string(event.FromState),
-		"to_state":    string(event.ToState),
-		"timestamp":   event.Timestamp,
-		"actor":       event.Actor,
-		"reason":      event.Reason,
-		"metadata":    cloneStringMapAny(event.Metadata),
+		"task_id":    event.TaskID,
+		"transition": event.Transition,
+		"from_state": string(event.FromState),
+		"to_state":   string(event.ToState),
+		"timestamp":  event.Timestamp,
+		"actor":      event.Actor,
+		"reason":     event.Reason,
+		"metadata":   cloneStringMapAny(event.Metadata),
 	}
 }
 

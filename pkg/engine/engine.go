@@ -11,25 +11,26 @@ import (
 )
 
 var (
-	ErrNamespaceNotFound = errors.New("namespace not found")
-	ErrTaskNotFound      = errors.New("task not found")
-	ErrInvalidTransition = errors.New("invalid task transition")
-	ErrDuplicateTask     = errors.New("task already exists")
+	ErrNamespaceNotFound  = errors.New("namespace not found")
+	ErrTaskNotFound       = errors.New("task not found")
+	ErrInvalidTransition  = errors.New("invalid task transition")
+	ErrDuplicateTask      = errors.New("task already exists")
 	ErrDuplicateNamespace = errors.New("namespace already exists")
 )
 
 type Engine struct {
-	mu         sync.RWMutex
-	namespaces map[string]*Namespace
-	tasks      map[string]map[string]*Task
-	history    map[string]map[string][]Event
-	dags       map[string]map[string]*DAG
-	workers    map[string]map[string]*Worker
-	handbooks  map[string]map[string]*WorkerHandbook
-	workerDiaries map[string]map[string]*WorkerDiary
-	leaderDiaries map[string]map[string]*LeaderDiary
-	projectDocs   map[string][]ProjectDoc
-	db         *sql.DB // non-nil when SQLite backend is active
+	mu               sync.RWMutex
+	namespaces       map[string]*Namespace
+	tasks            map[string]map[string]*Task
+	history          map[string]map[string][]Event
+	dags             map[string]map[string]*DAG
+	workers          map[string]map[string]*Worker
+	handbooks        map[string]map[string]*WorkerHandbook
+	workerDiaries    map[string]map[string]*WorkerDiary
+	leaderDiaries    map[string]map[string]*LeaderDiary
+	projectDocs      map[string][]ProjectDoc
+	nextProjectDocID map[string]int64
+	db               *sql.DB // non-nil when SQLite backend is active
 }
 
 type NewEngineConfig struct {
@@ -132,15 +133,16 @@ const (
 
 func NewEngine(cfg NewEngineConfig) (*Engine, error) {
 	e := &Engine{
-		namespaces:    make(map[string]*Namespace),
-		tasks:         make(map[string]map[string]*Task),
-		history:       make(map[string]map[string][]Event),
-		dags:          make(map[string]map[string]*DAG),
-		workers:       make(map[string]map[string]*Worker),
-		handbooks:     make(map[string]map[string]*WorkerHandbook),
-		workerDiaries: make(map[string]map[string]*WorkerDiary),
-		leaderDiaries: make(map[string]map[string]*LeaderDiary),
-		projectDocs:   make(map[string][]ProjectDoc),
+		namespaces:       make(map[string]*Namespace),
+		tasks:            make(map[string]map[string]*Task),
+		history:          make(map[string]map[string][]Event),
+		dags:             make(map[string]map[string]*DAG),
+		workers:          make(map[string]map[string]*Worker),
+		handbooks:        make(map[string]map[string]*WorkerHandbook),
+		workerDiaries:    make(map[string]map[string]*WorkerDiary),
+		leaderDiaries:    make(map[string]map[string]*LeaderDiary),
+		projectDocs:      make(map[string][]ProjectDoc),
+		nextProjectDocID: make(map[string]int64),
 	}
 
 	if cfg.DBPath != "" {
@@ -186,29 +188,36 @@ func NewEngine(cfg NewEngineConfig) (*Engine, error) {
 		}
 		e.workers = workerMap
 
-			hbMap, err := loadHandbooks(db)
-			if err != nil {
-				return nil, fmt.Errorf("load handbooks: %w", err)
-			}
-			e.handbooks = hbMap
+		hbMap, err := loadHandbooks(db)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("load handbooks: %w", err)
+		}
+		e.handbooks = hbMap
 
-			wdMap, err := loadWorkerDiaries(db)
-			if err != nil {
-				return nil, fmt.Errorf("load worker diaries: %w", err)
-			}
-			e.workerDiaries = wdMap
+		wdMap, err := loadWorkerDiaries(db)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("load worker diaries: %w", err)
+		}
+		e.workerDiaries = wdMap
 
-			ldMap, err := loadLeaderDiaries(db)
-			if err != nil {
-				return nil, fmt.Errorf("load leader diaries: %w", err)
-			}
-			e.leaderDiaries = ldMap
+		ldMap, err := loadLeaderDiaries(db)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("load leader diaries: %w", err)
+		}
+		e.leaderDiaries = ldMap
 
-			docMap, err := loadProjectDocs(db)
-			if err != nil {
-				return nil, fmt.Errorf("load project docs: %w", err)
-			}
-			e.projectDocs = docMap
+		docMap, err := loadProjectDocs(db)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("load project docs: %w", err)
+		}
+		e.projectDocs = docMap
+		for nsID, docs := range docMap {
+			e.nextProjectDocID[nsID] = nextProjectDocID(docs) - 1
+		}
 	}
 
 	return e, nil
@@ -368,7 +377,7 @@ func (e *Engine) CreateTask(ctx context.Context, req CreateTaskRequest) (*Task, 
 	}
 	e.tasks[req.NamespaceID][req.ID] = task
 	ev := Event{
-		TaskID:    req.ID,
+		TaskID:     req.ID,
 		Transition: string(TransStart),
 		FromState:  TaskAssigned,
 		ToState:    TaskAssigned,

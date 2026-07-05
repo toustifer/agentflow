@@ -11,15 +11,15 @@ import (
 // ---------------------------------------------------------------------------
 
 type NextTask struct {
-	TaskID        string `json:"task_id"`
-	Title         string `json:"title"`
-	DAGID         string `json:"dag_id"`
+	TaskID         string `json:"task_id"`
+	Title          string `json:"title"`
+	DAGID          string `json:"dag_id"`
 	AssignedWorker string `json:"assigned_worker"`
-	State         string `json:"state"`
-	DepsSatisfied bool   `json:"deps_satisfied"`
-	WorkerBusy    bool   `json:"worker_busy"`
-	Ready         bool   `json:"ready"`
-	Reason        string `json:"reason,omitempty"`
+	State          string `json:"state"`
+	DepsSatisfied  bool   `json:"deps_satisfied"`
+	WorkerBusy     bool   `json:"worker_busy"`
+	Ready          bool   `json:"ready"`
+	Reason         string `json:"reason,omitempty"`
 }
 
 // ProjectNextTasks returns all tasks in the namespace that are candidates
@@ -42,7 +42,6 @@ func (e *Engine) ProjectNextTasks(ctx context.Context, nsID string) ([]NextTask,
 			continue
 		}
 
-		// Check deps
 		depsSatisfied := true
 		for _, dep := range t.DependsOn {
 			depTask, ok := e.tasks[nsID][dep]
@@ -52,10 +51,20 @@ func (e *Engine) ProjectNextTasks(ctx context.Context, nsID string) ([]NextTask,
 			}
 		}
 
-		// Check worker availability (cross-DAG)
 		workerBusy := false
 		if t.AssignedWorker != "" {
-			workerBusy = e.workerStatusUnsafe(nsID, t.AssignedWorker) == WorkerBusy
+			for _, other := range e.tasks[nsID] {
+				if other.ID == t.ID || other.AssignedWorker != t.AssignedWorker {
+					continue
+				}
+				switch other.State {
+				case TaskExecuting, TaskReviewPending, TaskReworkNeeded:
+					workerBusy = true
+				}
+				if workerBusy {
+					break
+				}
+			}
 		}
 
 		ready := depsSatisfied && !workerBusy
@@ -75,20 +84,19 @@ func (e *Engine) ProjectNextTasks(ctx context.Context, nsID string) ([]NextTask,
 		}
 
 		out = append(out, NextTask{
-			TaskID:        t.ID,
-			Title:         t.Title,
-			DAGID:         t.DAGID,
+			TaskID:         t.ID,
+			Title:          t.Title,
+			DAGID:          t.DAGID,
 			AssignedWorker: t.AssignedWorker,
-			State:         string(t.State),
-			DepsSatisfied: depsSatisfied,
-			WorkerBusy:    workerBusy,
-			Ready:         ready,
-			Reason:        reason,
+			State:          string(t.State),
+			DepsSatisfied:  depsSatisfied,
+			WorkerBusy:     workerBusy,
+			Ready:          ready,
+			Reason:         reason,
 		})
 	}
 
 	sort.Slice(out, func(i, j int) bool {
-		// Ready tasks first, then by ID
 		if out[i].Ready != out[j].Ready {
 			return out[i].Ready
 		}
@@ -106,8 +114,8 @@ type Blocker struct {
 	TaskID    string `json:"task_id"`
 	Title     string `json:"title"`
 	DAGID     string `json:"dag_id"`
-	Type      string `json:"type"`               // "dependency" or "worker"
-	BlockedBy string `json:"blocked_by,omitempty"` // dep task ID or worker ID
+	Type      string `json:"type"`
+	BlockedBy string `json:"blocked_by,omitempty"`
 }
 
 // ProjectBlockers returns every task that cannot proceed right now,
@@ -127,7 +135,6 @@ func (e *Engine) ProjectBlockers(ctx context.Context, nsID string) ([]Blocker, e
 			continue
 		}
 
-		// Dependency blockers
 		for _, dep := range t.DependsOn {
 			depTask, ok := e.tasks[nsID][dep]
 			if !ok || depTask.State != TaskDone {
@@ -141,26 +148,43 @@ func (e *Engine) ProjectBlockers(ctx context.Context, nsID string) ([]Blocker, e
 			}
 		}
 
-		// Worker blockers (only if deps are satisfied)
-		if t.AssignedWorker != "" && len(t.DependsOn) > 0 {
-			// Only report worker as blocker if deps are already satisfied
-			depsSatisfied := true
-			for _, dep := range t.DependsOn {
-				depTask, ok := e.tasks[nsID][dep]
-				if !ok || depTask.State != TaskDone {
-					depsSatisfied = false
-					break
-				}
+		if t.AssignedWorker == "" {
+			continue
+		}
+
+		depsSatisfied := true
+		for _, dep := range t.DependsOn {
+			depTask, ok := e.tasks[nsID][dep]
+			if !ok || depTask.State != TaskDone {
+				depsSatisfied = false
+				break
 			}
-			if depsSatisfied && e.workerStatusUnsafe(nsID, t.AssignedWorker) == WorkerBusy {
-				out = append(out, Blocker{
-					TaskID:    t.ID,
-					Title:     t.Title,
-					DAGID:     t.DAGID,
-					Type:      "worker",
-					BlockedBy: t.AssignedWorker,
-				})
+		}
+		if !depsSatisfied {
+			continue
+		}
+
+		workerBusy := false
+		for _, other := range e.tasks[nsID] {
+			if other.ID == t.ID || other.AssignedWorker != t.AssignedWorker {
+				continue
 			}
+			switch other.State {
+			case TaskExecuting, TaskReviewPending, TaskReworkNeeded:
+				workerBusy = true
+			}
+			if workerBusy {
+				break
+			}
+		}
+		if workerBusy {
+			out = append(out, Blocker{
+				TaskID:    t.ID,
+				Title:     t.Title,
+				DAGID:     t.DAGID,
+				Type:      "worker",
+				BlockedBy: t.AssignedWorker,
+			})
 		}
 	}
 
@@ -184,14 +208,14 @@ func joinStrings(items []string) string {
 // ---------------------------------------------------------------------------
 
 type ProjectReport struct {
-	TotalDAGs     int                 `json:"total_dags"`
-	TotalTasks    int                 `json:"total_tasks"`
-	DoneTasks     int                 `json:"done_tasks"`
-	ExecutingTasks int                `json:"executing_tasks"`
-	PendingTasks  int                 `json:"pending_tasks"`
-	CompletionPct float64             `json:"completion_pct"`
-	DAGs          []DAGReport         `json:"dags"`
-	Workers       []ProjectWorkerInfo `json:"workers"`
+	TotalDAGs      int                 `json:"total_dags"`
+	TotalTasks     int                 `json:"total_tasks"`
+	DoneTasks      int                 `json:"done_tasks"`
+	ExecutingTasks int                 `json:"executing_tasks"`
+	PendingTasks   int                 `json:"pending_tasks"`
+	CompletionPct  float64             `json:"completion_pct"`
+	DAGs           []DAGReport         `json:"dags"`
+	Workers        []ProjectWorkerInfo `json:"workers"`
 }
 
 type ProjectWorkerInfo struct {
@@ -217,7 +241,6 @@ func (e *Engine) ProjectReport(ctx context.Context, nsID string) (*ProjectReport
 	doneTasks := 0
 	execTasks := 0
 
-	// Walk all DAGs
 	for _, dag := range e.dags[nsID] {
 		var tasks []Task
 		workerTasks := make(map[string]int)
@@ -238,7 +261,6 @@ func (e *Engine) ProjectReport(ctx context.Context, nsID string) (*ProjectReport
 			}
 		}
 
-		// Build worker summary for this DAG
 		dagWorkers := make([]DAGWorkerSummary, 0)
 		for wid, cnt := range workerTasks {
 			dagWorkers = append(dagWorkers, DAGWorkerSummary{
@@ -247,7 +269,6 @@ func (e *Engine) ProjectReport(ctx context.Context, nsID string) (*ProjectReport
 				DoneTasks:  workerDone[wid],
 				Status:     string(e.workerStatusUnsafe(nsID, wid)),
 			})
-			// Accumulate to project-level
 			if _, ok := workerAgg[wid]; !ok {
 				workerAgg[wid] = &ProjectWorkerInfo{WorkerID: wid}
 			}
@@ -322,4 +343,4 @@ func activeInDAG(tasks []Task) int {
 	return c
 }
 
-var _ = errors.New("unused") // keep import
+var _ = errors.New("unused")

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/toustifer/agentflow/pkg/bt"
 )
@@ -11,30 +12,13 @@ import (
 // from the blackboard (set by handleLeaderTick before each tick).
 func RegisterBuiltinNodes(reg *bt.FactoryRegistry) {
 	// ===== Phase condition checks =====
-	reg.RegisterCondition("phase_is_setup", func(ctx context.Context) bool {
-		bb := bt.BlackboardFromContext(ctx)
-		return bb != nil && bb.GetString("phase") == "setup"
-	})
-	reg.RegisterCondition("phase_is_shape", func(ctx context.Context) bool {
-		bb := bt.BlackboardFromContext(ctx)
-		return bb != nil && bb.GetString("phase") == "shape"
-	})
-	reg.RegisterCondition("phase_is_plan", func(ctx context.Context) bool {
-		bb := bt.BlackboardFromContext(ctx)
-		return bb != nil && bb.GetString("phase") == "plan"
-	})
-	reg.RegisterCondition("phase_is_execute", func(ctx context.Context) bool {
-		bb := bt.BlackboardFromContext(ctx)
-		return bb != nil && bb.GetString("phase") == "execute"
-	})
-	reg.RegisterCondition("phase_is_stuck", func(ctx context.Context) bool {
-		bb := bt.BlackboardFromContext(ctx)
-		return bb != nil && bb.GetString("phase") == "stuck"
-	})
-	reg.RegisterCondition("phase_is_done", func(ctx context.Context) bool {
-		bb := bt.BlackboardFromContext(ctx)
-		return bb != nil && bb.GetString("phase") == "done"
-	})
+	for _, phase := range []string{"setup", "shape", "plan", "execute", "stuck", "done"} {
+		phaseName := phase
+		reg.RegisterCondition("phase_is_"+phaseName, func(ctx context.Context) bool {
+			bb := bt.BlackboardFromContext(ctx)
+			return bb != nil && bb.GetString("phase") == phaseName
+		})
+	}
 
 	// ===== Task state conditions =====
 	reg.RegisterCondition("has_next_tasks", func(ctx context.Context) bool {
@@ -48,6 +32,10 @@ func RegisterBuiltinNodes(reg *bt.FactoryRegistry) {
 	reg.RegisterCondition("has_stuck_tasks", func(ctx context.Context) bool {
 		bb := bt.BlackboardFromContext(ctx)
 		return bb != nil && bb.GetBool("has_stuck_tasks")
+	})
+	reg.RegisterCondition("review_decision_present", func(ctx context.Context) bool {
+		bb := bt.BlackboardFromContext(ctx)
+		return bb != nil && bb.Has("review_approved")
 	})
 
 	// ===== Actions =====
@@ -92,33 +80,35 @@ func RegisterBuiltinNodes(reg *bt.FactoryRegistry) {
 		return true, nil
 	})
 
-	// Phase action placeholders
-	reg.RegisterAction("setup_actions", placeholderAction("setup_actions"))
-	reg.RegisterAction("shape_actions", placeholderAction("shape_actions"))
-	reg.RegisterAction("plan_actions", placeholderAction("plan_actions"))
-	reg.RegisterAction("dispatch_task", placeholderAction("dispatch_task"))
-	reg.RegisterAction("monitor_tasks", placeholderAction("monitor_tasks"))
-	reg.RegisterAction("report_stuck", placeholderAction("report_stuck"))
-	reg.RegisterAction("report_done", placeholderAction("report_done"))
-
-	// ===== Worker placeholder functions =====
-	// Allow worker-default.json to deserialize without error.
-	reg.RegisterAction("doc_search_prepare", placeholderAction("doc_search_prepare"))
-	reg.RegisterAction("task_get_confirm", placeholderAction("task_get_confirm"))
-	reg.RegisterAction("enter_worktree", placeholderAction("enter_worktree"))
-	reg.RegisterAction("implement_code", placeholderAction("implement_code"))
-	reg.RegisterAction("git_commit_changes", placeholderAction("git_commit_changes"))
-	reg.RegisterAction("doc_write_record", placeholderAction("doc_write_record"))
-	reg.RegisterAction("diary_write_entry", placeholderAction("diary_write_entry"))
-	reg.RegisterAction("task_submit_for_review", placeholderAction("task_submit_for_review"))
+	for _, name := range []string{
+		"setup_actions",
+		"shape_actions",
+		"plan_actions",
+		"dispatch_task",
+		"monitor_tasks",
+		"report_stuck",
+		"report_done",
+		"doc_search_prepare",
+		"task_get_confirm",
+		"enter_worktree",
+		"implement_code",
+		"git_commit_changes",
+		"doc_write_record",
+		"diary_write_entry",
+		"task_submit_for_review",
+		"fetch_work_diff",
+		"review_decide",
+		"task_review_pass",
+		"task_review_rework",
+	} {
+		reg.RegisterAction(name, placeholderAction(name))
+	}
 
 	// ===== Reviewer placeholder functions =====
 	reg.RegisterCondition("review_approved", func(ctx context.Context) bool {
-		return false
+		bb := bt.BlackboardFromContext(ctx)
+		return bb != nil && bb.GetBool("review_approved")
 	})
-	reg.RegisterAction("fetch_work_diff", placeholderAction("fetch_work_diff"))
-	reg.RegisterAction("task_review_pass", placeholderAction("task_review_pass"))
-	reg.RegisterAction("task_review_rework", placeholderAction("task_review_rework"))
 }
 
 // toMapSlice converts a []any of maps to []map[string]any.
@@ -138,10 +128,11 @@ func toMapSlice(v any) []map[string]any {
 	return nil
 }
 
-// placeholderAction returns a no-op action for worker/reviewer templates.
+// placeholderAction returns a stub action for trees that are only executable via
+// the Python BT sidecar.
 func placeholderAction(name string) func(ctx context.Context) (bool, error) {
 	return func(ctx context.Context) (bool, error) {
-		return true, nil
+		return false, fmt.Errorf("BT action %q requires the Python sidecar runtime", name)
 	}
 }
 
@@ -201,16 +192,16 @@ const leaderDefaultJSON = `{
                       { "type": "Condition", "properties": { "fn": "has_active_tasks" } },
                       { "type": "Action", "properties": { "fn": "monitor_tasks" } }
                     ]
-                  },
-                  {
-                    "type": "Sequence",
-                    "children": [
-                      { "type": "Condition", "properties": { "fn": "has_stuck_tasks" } },
-                      { "type": "Action", "properties": { "fn": "report_stuck" } }
-                    ]
                   }
                 ]
               }
+            ]
+          },
+          {
+            "type": "Sequence",
+            "children": [
+              { "type": "Condition", "properties": { "fn": "phase_is_stuck" } },
+              { "type": "Action", "properties": { "fn": "report_stuck" } }
             ]
           },
           {

@@ -215,6 +215,140 @@ func TestTaskGetListHistoryReturnCorrectResults(t *testing.T) {
 	require.GreaterOrEqual(t, len(historyItems), 1)
 }
 
+func TestLifecycleTickRunsEndToEnd(t *testing.T) {
+	require.NoError(t, os.Setenv("AGENTFLOW_BT_DIR", "D:/myprogram/agentflow"))
+	defer os.Unsetenv("AGENTFLOW_BT_DIR")
+	globalBTBridge = nil
+
+	srv := newTestServer(t)
+	_, err := srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
+		NamespaceID: "ns-1",
+		ID:          "worker-a",
+		Name:        "Worker A",
+		PromptTemplate: "Task {task_id} in {worktree_path} on {branch}",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
+		NamespaceID: "ns-1",
+		ID:          "reviewer-a",
+		Name:        "Reviewer A",
+		PromptTemplate: "rev_commit={review_commit} rev_diff={review.diff} task={task_id}",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateDAG(context.Background(), engine.CreateDAGRequest{
+		NamespaceID: "ns-1",
+		ID:          "dag-1",
+		Title:       "Test DAG",
+		Branch:      "feat/test",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID:    "ns-1",
+		ID:             "T-life",
+		Title:          "lifecycle",
+		AssignedWorker: "worker-a",
+		DAGID:          "dag-1",
+	})
+	require.NoError(t, err)
+
+	result, err := srv.Handle(context.Background(), "lifecycle_tick", map[string]any{
+		"namespace_id":          "ns-1",
+		"task_id":               "T-life",
+		"worker_id":             "worker-a",
+		"reviewer_id":           "reviewer-a",
+		"review_decision_input": "approve",
+		"doc_record_content":    "implemented task 1",
+		"doc_record_title":      "task 1",
+		"diary_entry_content":   "done",
+	})
+	require.NoError(t, err)
+
+	task := result["task"].(map[string]any)
+	require.Equal(t, "done", task["state"])
+
+	leader := result["leader"].(map[string]any)
+	finalLeader := leader["final"].(map[string]any)
+	require.Equal(t, "done", finalLeader["phase"])
+
+	worker := result["worker"].(map[string]any)
+	workerBB := worker["blackboard"].(map[string]any)
+	require.Equal(t, true, workerBB["submitted_for_review"])
+
+	reviewer := result["reviewer"].(map[string]any)
+	reviewerBB := reviewer["blackboard"].(map[string]any)
+	require.Equal(t, "pass", reviewerBB["review_decision"])
+	require.Equal(t, "done", reviewerBB["review_decision_state"])
+
+	if globalBTBridge != nil {
+		globalBTBridge.Stop()
+		globalBTBridge = nil
+	}
+}
+
+func TestLifecycleTickRejectsUndispatchedTask(t *testing.T) {
+	require.NoError(t, os.Setenv("AGENTFLOW_BT_DIR", "D:/myprogram/agentflow"))
+	defer os.Unsetenv("AGENTFLOW_BT_DIR")
+	globalBTBridge = nil
+
+	srv := newTestServer(t)
+	_, err := srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
+		NamespaceID: "ns-1",
+		ID:          "worker-a",
+		Name:        "Worker A",
+		PromptTemplate: "Task {task_id} in {worktree_path} on {branch}",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
+		NamespaceID: "ns-1",
+		ID:          "reviewer-a",
+		Name:        "Reviewer A",
+		PromptTemplate: "rev_commit={review_commit} rev_diff={review.diff} task={task_id}",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateDAG(context.Background(), engine.CreateDAGRequest{
+		NamespaceID: "ns-1",
+		ID:          "dag-1",
+		Title:       "Test DAG",
+		Branch:      "feat/test",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID:    "ns-1",
+		ID:             "T-other",
+		Title:          "other task",
+		AssignedWorker: "worker-a",
+		DAGID:          "dag-1",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID:    "ns-1",
+		ID:             "T-life",
+		Title:          "lifecycle",
+		AssignedWorker: "worker-a",
+		DAGID:          "dag-1",
+		DependsOn:      []string{"T-other"},
+	})
+	require.NoError(t, err)
+
+	_, err = srv.Handle(context.Background(), "lifecycle_tick", map[string]any{
+		"namespace_id":          "ns-1",
+		"task_id":               "T-life",
+		"worker_id":             "worker-a",
+		"reviewer_id":           "reviewer-a",
+		"review_decision_input": "approve",
+		"doc_record_content":    "implemented task 1",
+		"doc_record_title":      "task 1",
+		"diary_entry_content":   "done",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "was not dispatched")
+
+	if globalBTBridge != nil {
+		globalBTBridge.Stop()
+		globalBTBridge = nil
+	}
+}
+
 func TestHubSyncFailureDoesNotFailFlowPing(t *testing.T) {
 	t.Parallel()
 
@@ -504,6 +638,70 @@ func TestSubmitCapturesReviewCommitAndDiff(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, task.Metadata["review.commit"])
 	require.Contains(t, task.Metadata["review.diff"], "note.txt")
+}
+
+
+func TestTaskTransitionSubmitRejectsDirtyWorktree(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t)
+	createDagTaskForStart(t, srv, "T-dirty-submit")
+	_, err := srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
+		NamespaceID: "ns-1", ID: "worker-b", Name: "Builder",
+	})
+	require.NoError(t, err)
+	_, err = srv.Handle(context.Background(), "task_transition", map[string]any{
+		"namespace_id": "ns-1", "task_id": "T-dirty-submit",
+		"transition": "start", "actor_role": "leader",
+	})
+	require.NoError(t, err)
+
+	wtPath := srv.findLatestWorktreePath(t, "ns-1", "T-dirty-submit")
+	require.NoError(t, os.WriteFile(filepath.Join(wtPath, "dirty.txt"), []byte("hello\n"), 0o644))
+	_, err = srv.Handle(context.Background(), "worker_diary_write", map[string]any{
+		"namespace_id": "ns-1", "worker_id": "worker-b",
+		"date": time.Now().UTC().Format("2006-01-02"),
+		"content": "drafted", "task_id": "T-dirty-submit",
+	})
+	require.NoError(t, err)
+
+	_, err = srv.Handle(context.Background(), "task_transition", map[string]any{
+		"namespace_id": "ns-1", "task_id": "T-dirty-submit",
+		"transition": "submit", "actor_role": "worker",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "未提交改动")
+
+	task, err := srv.engine.GetTask(context.Background(), "ns-1", "T-dirty-submit")
+	require.NoError(t, err)
+	require.Equal(t, engine.TaskExecuting, task.State)
+}
+
+func TestTaskTransitionSubmitMissingDiaryKeepsExecutingState(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t)
+	createDagTaskForStart(t, srv, "T-missing-diary")
+	_, err := srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
+		NamespaceID: "ns-1", ID: "worker-b", Name: "Builder",
+	})
+	require.NoError(t, err)
+	_, err = srv.Handle(context.Background(), "task_transition", map[string]any{
+		"namespace_id": "ns-1", "task_id": "T-missing-diary",
+		"transition": "start", "actor_role": "leader",
+	})
+	require.NoError(t, err)
+
+	_, err = srv.Handle(context.Background(), "task_transition", map[string]any{
+		"namespace_id": "ns-1", "task_id": "T-missing-diary",
+		"transition": "submit", "actor_role": "worker",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "未写")
+
+	task, err := srv.engine.GetTask(context.Background(), "ns-1", "T-missing-diary")
+	require.NoError(t, err)
+	require.Equal(t, engine.TaskExecuting, task.State)
 }
 
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/toustifer/agentflow/pkg/engine"
@@ -134,7 +135,7 @@ func (p *btDispatchProvider) handleDispatchTask(w http.ResponseWriter, r *http.R
 			http.Error(w, err.Error(), http.StatusNotFound)
 		case errors.Is(err, engine.ErrInvalidTransition):
 			http.Error(w, err.Error(), http.StatusConflict)
-		case contains(err.Error(), "state"):
+		case strings.Contains(err.Error(), "state"):
 			http.Error(w, err.Error(), http.StatusConflict)
 		default:
 			http.Error(w, err.Error(), http.StatusInternalServerError)
