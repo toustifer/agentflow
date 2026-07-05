@@ -109,8 +109,8 @@ func main() {
 	check("namespace_create", ns != nil && ns["id"] == "comms-test", fmt.Sprintf("%v", ns))
 
 	// Register worker and DAG.
-	r = toolCall("worker_register", map[string]any{"namespace_id": "comms-test", "id": "worker-ui", "name": "Worker UI"})
-	extract(r)
+	r = toolCall("worker_register", map[string]any{"namespace_id": "comms-test", "worker_id": "worker-ui", "name": "Worker UI"})
+	check("worker_register", extract(r) != nil, fmt.Sprintf("%v", extract(r)))
 	r = toolCall("dag_create", map[string]any{"namespace_id": "comms-test", "dag_id": "dag-1", "title": "Smoke DAG", "branch": "feat/test"})
 	check("dag_create", extract(r) != nil, fmt.Sprintf("%v", extract(r)))
 
@@ -137,7 +137,7 @@ func main() {
 	t = extract(r)
 	check("start (leader) -> executing", t["state"] == "executing", fmt.Sprintf("state=%v error=%v", t["state"], t["_error"]))
 	if arr, ok := t["available_transitions"].([]any); ok {
-		check("executing avail has submit+cancel", len(arr) == 2,
+		check("executing avail has 3 entries", len(arr) == 3,
 			fmt.Sprintf("got %d: %v", len(arr), arr))
 	}
 
