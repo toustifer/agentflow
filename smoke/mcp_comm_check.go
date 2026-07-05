@@ -111,8 +111,8 @@ func main() {
 	// Register worker and DAG.
 	r = toolCall("worker_register", map[string]any{"namespace_id": "comms-test", "id": "worker-ui", "name": "Worker UI"})
 	extract(r)
-	r = toolCall("dag_create", map[string]any{"namespace_id": "comms-test", "id": "dag-1", "title": "Smoke DAG", "branch": "feat/test"})
-	extract(r)
+	r = toolCall("dag_create", map[string]any{"namespace_id": "comms-test", "dag_id": "dag-1", "title": "Smoke DAG", "branch": "feat/test"})
+	check("dag_create", extract(r) != nil, fmt.Sprintf("%v", extract(r)))
 
 	// 2. Create task — verify available_transitions appears.
 	r = toolCall("task_create", map[string]any{"namespace_id": "comms-test", "task_id": "T1", "title": "Hello World 页面", "assigned_worker": "worker-ui", "dag_id": "dag-1", "acceptance_criteria": []any{"页面包含标题", "按钮可点击弹出问候语"}})
