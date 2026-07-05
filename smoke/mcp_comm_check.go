@@ -113,6 +113,8 @@ func main() {
 	check("worker_register", extract(r) != nil, fmt.Sprintf("%v", extract(r)))
 	r = toolCall("dag_create", map[string]any{"namespace_id": "comms-test", "dag_id": "dag-1", "title": "Smoke DAG", "branch": "feat/test"})
 	check("dag_create", extract(r) != nil, fmt.Sprintf("%v", extract(r)))
+	r = toolCall("dag_create", map[string]any{"namespace_id": "comms-test", "dag_id": "dag-2", "title": "Rework DAG", "branch": "feat/test2"})
+	check("dag_create dag-2", extract(r) != nil, fmt.Sprintf("%v", extract(r)))
 
 	// 2. Create task — verify available_transitions appears.
 	r = toolCall("task_create", map[string]any{"namespace_id": "comms-test", "task_id": "T1", "title": "Hello World 页面", "assigned_worker": "worker-ui", "dag_id": "dag-1", "acceptance_criteria": []any{"页面包含标题", "按钮可点击弹出问候语"}})
@@ -193,7 +195,7 @@ func main() {
 		fmt.Sprintf("error=%v", err["_error"]))
 
 	// 8. Full rework cycle.
-	r = toolCall("task_create", map[string]any{"namespace_id": "comms-test", "task_id": "T2", "title": "返工测试", "assigned_worker": "worker-ui", "dag_id": "dag-1"})
+	r = toolCall("task_create", map[string]any{"namespace_id": "comms-test", "task_id": "T2", "title": "返工测试", "assigned_worker": "worker-ui", "dag_id": "dag-2"})
 	extract(r)
 	toolCall("task_transition", map[string]any{"namespace_id": "comms-test", "task_id": "T2", "transition": "start", "actor_role": "leader"})
 	taskDetail2 := toolCall("task_get", map[string]any{"namespace_id": "comms-test", "task_id": "T2"})
@@ -227,7 +229,7 @@ func main() {
 	check("cancel -> cancelled", t["state"] == "cancelled", fmt.Sprintf("state=%v", t["state"]))
 
 	// 9. Backward compat (no actor_role).
-	r = toolCall("task_create", map[string]any{"namespace_id": "comms-test", "task_id": "T3", "title": "兼容测试", "assigned_worker": "worker-ui", "dag_id": "dag-1"})
+	r = toolCall("task_create", map[string]any{"namespace_id": "comms-test", "task_id": "T3", "title": "兼容测试", "assigned_worker": "worker-ui", "dag_id": "dag-2"})
 	extract(r)
 	r = toolCall("task_transition", map[string]any{"namespace_id": "comms-test", "task_id": "T3", "transition": "start"})
 	t = extract(r)
