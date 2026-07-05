@@ -441,9 +441,6 @@ func findBTDir() string {
 			}
 		}
 	}
-	if _, err := os.Stat("D:/myprogram/agentflow/bt_service"); err == nil {
-		return "D:/myprogram/agentflow"
-	}
 	if _, err := os.Stat("bt_service"); err == nil {
 		if cwd, err := os.Getwd(); err == nil {
 			return cwd

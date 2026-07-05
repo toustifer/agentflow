@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -14,7 +15,10 @@ import (
 
 func useBTTestEnv(t *testing.T) {
 	t.Helper()
-	require.NoError(t, os.Setenv("AGENTFLOW_BT_DIR", "D:/myprogram/agentflow"))
+	_, file, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	require.NoError(t, os.Setenv("AGENTFLOW_BT_DIR", repoRoot))
 	t.Cleanup(func() {
 		os.Unsetenv("AGENTFLOW_BT_DIR")
 		if globalBTBridge != nil {

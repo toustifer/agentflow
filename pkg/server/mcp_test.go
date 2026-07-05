@@ -216,9 +216,7 @@ func TestTaskGetListHistoryReturnCorrectResults(t *testing.T) {
 }
 
 func TestLifecycleTickRunsEndToEnd(t *testing.T) {
-	require.NoError(t, os.Setenv("AGENTFLOW_BT_DIR", "D:/myprogram/agentflow"))
-	defer os.Unsetenv("AGENTFLOW_BT_DIR")
-	globalBTBridge = nil
+	useBTTestEnv(t)
 
 	srv := newTestServer(t)
 	_, err := srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
@@ -286,9 +284,7 @@ func TestLifecycleTickRunsEndToEnd(t *testing.T) {
 }
 
 func TestLifecycleTickRejectsUndispatchedTask(t *testing.T) {
-	require.NoError(t, os.Setenv("AGENTFLOW_BT_DIR", "D:/myprogram/agentflow"))
-	defer os.Unsetenv("AGENTFLOW_BT_DIR")
-	globalBTBridge = nil
+	useBTTestEnv(t)
 
 	srv := newTestServer(t)
 	_, err := srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{

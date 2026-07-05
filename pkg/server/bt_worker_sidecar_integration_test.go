@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"testing"
 	"time"
 
@@ -12,9 +11,7 @@ import (
 )
 
 func TestWorkerTaskGetConfirmViaPython(t *testing.T) {
-	require.NoError(t, os.Setenv("AGENTFLOW_BT_DIR", "D:/myprogram/agentflow"))
-	defer os.Unsetenv("AGENTFLOW_BT_DIR")
-	globalBTBridge = nil
+	useBTTestEnv(t)
 
 	repoPath := initTestGitRepo(t)
 	eng, err := engine.NewEngine(engine.NewEngineConfig{})
