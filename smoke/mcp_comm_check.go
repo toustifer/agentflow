@@ -18,7 +18,10 @@ func main() {
 	if agentflow == "" {
 		agentflow = `C:\Users\15775\AppData\Local\Temp\agentflow.exe`
 	}
+	dbPath := filepath.Join(os.TempDir(), fmt.Sprintf("agentflow-smoke-%d.db", time.Now().UnixNano()))
+	defer os.Remove(dbPath)
 	cmd := exec.Command(agentflow, "stdio")
+	cmd.Env = append(os.Environ(), "AGENTFLOW_DB_PATH="+dbPath)
 	stdin, _ := cmd.StdinPipe()
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
@@ -64,14 +67,22 @@ func main() {
 			}
 			return nil
 		}
+		isError, _ := result["isError"].(bool)
 		if content, ok := result["content"].([]any); ok && len(content) > 0 {
 			if cm, ok := content[0].(map[string]any); ok {
 				if text, ok := cm["text"].(string); ok {
 					var v map[string]any
-					json.Unmarshal([]byte(text), &v)
-					return v
+					if err := json.Unmarshal([]byte(text), &v); err == nil {
+						return v
+					}
+					if isError {
+						return map[string]any{"_error": text}
+					}
 				}
 			}
+		}
+		if isError {
+			return map[string]any{"_error": "tool call failed"}
 		}
 		return nil
 	}
@@ -94,27 +105,63 @@ func main() {
 		}
 	}
 
-	// 1. Create namespace with a git workdir.
+	// 1. Bootstrap from an existing empty directory via project_init.
 	tmpDir, _ := os.MkdirTemp("", "agentflow-smoke-*")
 	defer os.RemoveAll(tmpDir)
-	runGit(tmpDir, "init", "-b", "main")
-	runGit(tmpDir, "config", "user.name", "Test")
-	runGit(tmpDir, "config", "user.email", "test@example.com")
+
+	r := toolCall("project_init", map[string]any{
+		"project_id": "comms-test",
+		"workdir":    tmpDir,
+		"init_git":   true,
+		"user_name":  "Test",
+		"user_email": "test@example.com",
+	})
+	initProject := extract(r)
+	check("project_init", initProject != nil && initProject["namespace_id"] == "comms-test", fmt.Sprintf("%v", initProject))
+	check("project_init has_head_commit=false", initProject != nil && initProject["has_head_commit"] == false, fmt.Sprintf("has_head=%v", initProject["has_head_commit"]))
+	if initProject != nil {
+		if rulesPath, _ := initProject["rules_file_path"].(string); rulesPath != "" {
+			_, err := os.Stat(rulesPath)
+			check("project_init writes agentflow-git.md", err == nil, fmt.Sprintf("path=%q err=%v", rulesPath, err))
+		} else {
+			check("project_init writes agentflow-git.md", false, "missing rules_file_path")
+		}
+	}
+
+	r = toolCall("project_next_steps", map[string]any{"namespace_id": "comms-test", "workdir": tmpDir})
+	ns := extract(r)
+	check("project_next_steps requires initial commit", ns != nil && ns["phase"] == "setup" && ns["phase_name"] == "等待首个 commit", fmt.Sprintf("%v", ns))
+
+	// Register workers early so we can verify the no-HEAD failure path cleanly.
+	r = toolCall("worker_register", map[string]any{"namespace_id": "comms-test", "worker_id": "worker-ui", "name": "Worker UI", "prompt_template": "Task {task_id} in {worktree_path} on {branch}"})
+	check("worker_register", extract(r) != nil, fmt.Sprintf("%v", extract(r)))
+	r = toolCall("worker_register", map[string]any{"namespace_id": "comms-test", "worker_id": "reviewer-ui", "name": "Reviewer UI", "prompt_template": "rev_commit={review_commit} rev_diff={review.diff} task={task_id}"})
+	check("worker_register reviewer", extract(r) != nil, fmt.Sprintf("%v", extract(r)))
+	r = toolCall("dag_create", map[string]any{"namespace_id": "comms-test", "dag_id": "dag-bootstrap", "title": "Bootstrap Failure DAG", "branch": "feat/bootstrap"})
+	check("dag_create bootstrap", extract(r) != nil, fmt.Sprintf("%v", extract(r)))
+	r = toolCall("task_create", map[string]any{"namespace_id": "comms-test", "task_id": "T-bootstrap", "title": "bootstrap task", "assigned_worker": "worker-ui", "dag_id": "dag-bootstrap"})
+	bootstrapTask := extract(r)
+	check("task_create bootstrap", bootstrapTask != nil && bootstrapTask["state"] == "assigned", fmt.Sprintf("%v", bootstrapTask))
+	r = toolCall("task_transition", map[string]any{"namespace_id": "comms-test", "task_id": "T-bootstrap", "transition": "start", "actor_role": "leader"})
+	bootstrapStart := extract(r)
+	check("start rejects repo without initial commit", bootstrapStart != nil && strings.Contains(fmt.Sprint(bootstrapStart["_error"]), "还没有首个 commit"), fmt.Sprintf("%v", bootstrapStart))
+
+	// Seed the first commit so worktree-based lifecycle can proceed.
 	os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("# smoke\n"), 0o644)
 	runGit(tmpDir, "add", ".")
 	runGit(tmpDir, "commit", "-m", "init")
 
-	r := toolCall("namespace_create", map[string]any{"id": "comms-test", "name": "通信测试", "metadata": map[string]any{"workdir": tmpDir}})
-	ns := extract(r)
-	check("namespace_create", ns != nil && ns["id"] == "comms-test", fmt.Sprintf("%v", ns))
+	r = toolCall("project_next_steps", map[string]any{"namespace_id": "comms-test", "workdir": tmpDir})
+	ns = extract(r)
+	check("project_next_steps advances after initial commit", ns != nil && ns["phase"] == "execute", fmt.Sprintf("%v", ns))
 
 	// Register worker and DAG.
-	r = toolCall("worker_register", map[string]any{"namespace_id": "comms-test", "worker_id": "worker-ui", "name": "Worker UI"})
-	check("worker_register", extract(r) != nil, fmt.Sprintf("%v", extract(r)))
 	r = toolCall("dag_create", map[string]any{"namespace_id": "comms-test", "dag_id": "dag-1", "title": "Smoke DAG", "branch": "feat/test"})
 	check("dag_create", extract(r) != nil, fmt.Sprintf("%v", extract(r)))
 	r = toolCall("dag_create", map[string]any{"namespace_id": "comms-test", "dag_id": "dag-2", "title": "Rework DAG", "branch": "feat/test2"})
 	check("dag_create dag-2", extract(r) != nil, fmt.Sprintf("%v", extract(r)))
+	r = toolCall("dag_create", map[string]any{"namespace_id": "comms-test", "dag_id": "dag-3", "title": "Compat DAG", "branch": "feat/test3"})
+	check("dag_create dag-3", extract(r) != nil, fmt.Sprintf("%v", extract(r)))
 
 	// 2. Create task — verify available_transitions appears.
 	r = toolCall("task_create", map[string]any{"namespace_id": "comms-test", "task_id": "T1", "title": "Hello World 页面", "assigned_worker": "worker-ui", "dag_id": "dag-1", "acceptance_criteria": []any{"页面包含标题", "按钮可点击弹出问候语"}})
@@ -229,7 +276,7 @@ func main() {
 	check("cancel -> cancelled", t["state"] == "cancelled", fmt.Sprintf("state=%v", t["state"]))
 
 	// 9. Backward compat (no actor_role).
-	r = toolCall("task_create", map[string]any{"namespace_id": "comms-test", "task_id": "T3", "title": "兼容测试", "assigned_worker": "worker-ui", "dag_id": "dag-2"})
+	r = toolCall("task_create", map[string]any{"namespace_id": "comms-test", "task_id": "T3", "title": "兼容测试", "assigned_worker": "worker-ui", "dag_id": "dag-3"})
 	extract(r)
 	r = toolCall("task_transition", map[string]any{"namespace_id": "comms-test", "task_id": "T3", "transition": "start"})
 	t = extract(r)

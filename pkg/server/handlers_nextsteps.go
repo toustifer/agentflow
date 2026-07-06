@@ -43,6 +43,35 @@ func (s *Server) handleProjectNextSteps(ctx context.Context, input map[string]an
 	completed := []string{}
 	phase := "setup"
 	phaseName := "未初始化"
+	workdir := getWorkdir(ns)
+	if cwd == "" {
+		cwd = workdir
+	}
+	repoBootstrapActive, hasHeadCommit, err := namespaceRepoBootstrapStatus(ctx, ns)
+	if err != nil {
+		return nil, err
+	}
+
+	if repoBootstrapActive && !hasHeadCommit {
+		return map[string]any{
+			"phase":          "setup",
+			"phase_name":     "等待首个 commit",
+			"progress":       "0%",
+			"completed":      completed,
+			"namespace":      ns.ID,
+			"namespace_name": ns.Name,
+			"workdir":        workdir,
+			"next_steps": []string{
+				"在 repo root 创建一个 seed 文件（例如 README.md）",
+				"执行首个 git commit，确保后续 worktree / review 主链有 HEAD 可用",
+				"完成后重新调用 project_next_steps 继续 bootstrap",
+			},
+			"actions": []string{"project_init", "git_status"},
+		}, nil
+	}
+	if repoBootstrapActive {
+		completed = append(completed, "git 仓库已具备首个 commit")
+	}
 
 	// 检查阶段进展
 	shapePath := filepath.Join(cwd, ".claude", "PROJECT_FINAL_SHAPE.md")
@@ -186,6 +215,39 @@ func (s *Server) handleProjectNextSteps(ctx context.Context, input map[string]an
 	}
 
 	return result, nil
+}
+
+func namespaceRepoBootstrapStatus(ctx context.Context, ns *engine.Namespace) (bool, bool, error) {
+	if ns == nil || ns.Metadata == nil {
+		return false, false, nil
+	}
+	workdir := getWorkdir(ns)
+	if workdir == "" {
+		return false, false, nil
+	}
+	if _, ok := ns.Metadata["git.initialized"]; ok {
+		repoPath, err := validateGitRepo(ctx, workdir)
+		if err != nil {
+			return true, false, nil
+		}
+		hasHead, err := repoHasHeadCommit(ctx, repoPath)
+		if err != nil {
+			return true, false, err
+		}
+		return true, hasHead, nil
+	}
+	if _, err := os.Stat(filepath.Join(workdir, ".git")); err == nil {
+		repoPath, err := validateGitRepo(ctx, workdir)
+		if err != nil {
+			return false, false, nil
+		}
+		hasHead, err := repoHasHeadCommit(ctx, repoPath)
+		if err != nil {
+			return false, false, err
+		}
+		return false, hasHead, nil
+	}
+	return false, false, nil
 }
 
 func getWorkdir(ns *engine.Namespace) string {

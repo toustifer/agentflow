@@ -54,6 +54,18 @@ func (s *Server) handleLifecycleTick(ctx context.Context, input map[string]any) 
 	if initialTask.AssignedWorker != workerID {
 		return nil, fmt.Errorf("lifecycle_tick rejected: task %q is assigned to worker %q, not %q", taskID, initialTask.AssignedWorker, workerID)
 	}
+	if _, err := s.engine.GetWorker(ctx, namespaceID, workerID); err != nil {
+		return nil, fmt.Errorf("lifecycle_tick rejected: worker %q not found: %w", workerID, err)
+	}
+	if _, err := s.engine.GetWorker(ctx, namespaceID, reviewerID); err != nil {
+		return nil, fmt.Errorf("lifecycle_tick rejected: reviewer %q not found: %w", reviewerID, err)
+	}
+	if _, err := s.engine.WorkerPromptGet(ctx, namespaceID, workerID, taskID, initialTask.Title, false); err != nil {
+		return nil, fmt.Errorf("lifecycle_tick rejected: worker %q prompt preflight failed: %w", workerID, err)
+	}
+	if _, err := s.engine.WorkerPromptGet(ctx, namespaceID, reviewerID, taskID, initialTask.Title, true); err != nil {
+		return nil, fmt.Errorf("lifecycle_tick rejected: reviewer %q prompt preflight failed: %w", reviewerID, err)
+	}
 	if initialTask.State != engine.TaskExecuting && initialTask.State != engine.TaskReviewPending && initialTask.State != engine.TaskDone {
 		return nil, fmt.Errorf("lifecycle_tick rejected: task %q was not dispatched by leader_tick and is still in state %q", taskID, initialTask.State)
 	}

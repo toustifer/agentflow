@@ -46,6 +46,13 @@ func (s *Server) prepareTaskGitRuntime(ctx context.Context, ns *engine.Namespace
 	if err != nil {
 		return nil, err
 	}
+	hasHead, err := repoHasHeadCommit(ctx, repoPath)
+	if err != nil {
+		return nil, err
+	}
+	if !hasHead {
+		return nil, fmt.Errorf("start 被拒绝：git repo %q 还没有首个 commit。请先在 repo root 创建 seed 文件并提交首个 commit，再进入 worktree 主链", repoPath)
+	}
 	worktreePath := worktreePathForTask(repoPath, ns, dag, task)
 	if err := os.MkdirAll(filepath.Dir(worktreePath), 0o755); err != nil {
 		return nil, fmt.Errorf("create worktree parent: %w", err)
@@ -239,6 +246,20 @@ func inspectTaskGitRuntime(ctx context.Context, repoPath, worktreePath, expected
 		HeadSHA:      headSHA,
 		Status:       status,
 	}, nil
+}
+
+func repoHasHeadCommit(ctx context.Context, repoPath string) (bool, error) {
+	if repoPath == "" {
+		return false, fmt.Errorf("git repo path is empty")
+	}
+	_, err := runGit(ctx, repoPath, "rev-parse", "HEAD")
+	if err == nil {
+		return true, nil
+	}
+	if strings.Contains(err.Error(), "ambiguous argument 'HEAD'") || strings.Contains(err.Error(), "unknown revision or path not in the working tree") || strings.Contains(err.Error(), "Needed a single revision") {
+		return false, nil
+	}
+	return false, err
 }
 
 func gitRefExists(ctx context.Context, repoPath, ref string) error {

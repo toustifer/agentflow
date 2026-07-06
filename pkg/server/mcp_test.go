@@ -345,6 +345,59 @@ func TestLifecycleTickRejectsUndispatchedTask(t *testing.T) {
 	}
 }
 
+func TestLifecycleTickRejectsMissingPromptTemplate(t *testing.T) {
+	useBTTestEnv(t)
+
+	srv := newTestServer(t)
+	_, err := srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
+		NamespaceID: "ns-1",
+		ID:          "worker-a",
+		Name:        "Worker A",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
+		NamespaceID: "ns-1",
+		ID:          "reviewer-a",
+		Name:        "Reviewer A",
+		PromptTemplate: "rev_commit={review_commit} rev_diff={review.diff} task={task_id}",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateDAG(context.Background(), engine.CreateDAGRequest{
+		NamespaceID: "ns-1",
+		ID:          "dag-1",
+		Title:       "Test DAG",
+		Branch:      "feat/test",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID:    "ns-1",
+		ID:             "T-life-missing-prompt",
+		Title:          "lifecycle",
+		AssignedWorker: "worker-a",
+		DAGID:          "dag-1",
+	})
+	require.NoError(t, err)
+
+	_, err = srv.Handle(context.Background(), "lifecycle_tick", map[string]any{
+		"namespace_id":          "ns-1",
+		"task_id":               "T-life-missing-prompt",
+		"worker_id":             "worker-a",
+		"reviewer_id":           "reviewer-a",
+		"review_decision_input": "approve",
+		"doc_record_content":    "implemented task 1",
+		"doc_record_title":      "task 1",
+		"diary_entry_content":   "done",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "worker \"worker-a\" prompt preflight failed")
+	require.Contains(t, err.Error(), "worker has no prompt template configured")
+
+	if globalBTBridge != nil {
+		globalBTBridge.Stop()
+		globalBTBridge = nil
+	}
+}
+
 func TestHubSyncFailureDoesNotFailFlowPing(t *testing.T) {
 	t.Parallel()
 
@@ -588,12 +641,91 @@ func TestProjectInitFreshProject(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "trip-fable", result["namespace_id"])
 	evalWorkdir, err := filepath.EvalSymlinks(workdir)
-		require.NoError(t, err)
-		require.Equal(t, evalWorkdir, result["repo_path"])
+	require.NoError(t, err)
+	require.Equal(t, evalWorkdir, result["repo_path"])
 	_, err = os.Stat(filepath.Join(workdir, ".git"))
 	require.NoError(t, err)
 	rulesPath := result["rules_file_path"].(string)
 	require.FileExists(t, rulesPath)
+	require.Equal(t, false, result["has_head_commit"])
+}
+
+func TestProjectNextStepsFreshProjectRequiresInitialCommit(t *testing.T) {
+	t.Parallel()
+	workdir := filepath.Join(t.TempDir(), "fresh-next-steps")
+	require.NoError(t, os.MkdirAll(workdir, 0o755))
+
+	srv := buildIsolatedServer(t)
+	_, err := srv.Handle(context.Background(), "project_init", map[string]any{
+		"project_id": "fresh-next-steps",
+		"workdir":    workdir,
+	})
+	require.NoError(t, err)
+
+	result, err := srv.Handle(context.Background(), "project_next_steps", map[string]any{
+		"namespace_id": "fresh-next-steps",
+		"workdir":      workdir,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "setup", result["phase"])
+	require.Equal(t, "等待首个 commit", result["phase_name"])
+	nextSteps, ok := result["next_steps"].([]string)
+	require.True(t, ok)
+	require.NotEmpty(t, nextSteps)
+	require.Contains(t, nextSteps[1], "首个 git commit")
+	actions, ok := result["actions"].([]string)
+	require.True(t, ok)
+	require.Equal(t, []string{"project_init", "git_status"}, actions)
+}
+
+func TestTaskTransitionStartRejectsRepoWithoutInitialCommit(t *testing.T) {
+	t.Parallel()
+
+	eng, err := engine.NewEngine(engine.NewEngineConfig{})
+	require.NoError(t, err)
+	defer eng.Close()
+
+	workdir := filepath.Join(t.TempDir(), "fresh-no-head")
+	require.NoError(t, os.MkdirAll(workdir, 0o755))
+	runGitTest(t, workdir, "init", "-b", "main")
+	runGitTest(t, workdir, "config", "user.name", "Agentflow Test")
+	runGitTest(t, workdir, "config", "user.email", "agentflow@example.com")
+
+	_, err = eng.CreateNamespace(context.Background(), engine.CreateNamespaceRequest{
+		ID:   "ns-no-head",
+		Name: "no-head",
+		Metadata: map[string]string{
+			"workdir":         workdir,
+			"git_main_branch": "main",
+		},
+	})
+	require.NoError(t, err)
+	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{
+		NamespaceID: "ns-no-head",
+		ID:          "dag-1",
+		Title:       "DAG",
+		Branch:      "feat/test",
+	})
+	require.NoError(t, err)
+	_, err = eng.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID:    "ns-no-head",
+		ID:             "T1",
+		Title:          "task",
+		AssignedWorker: "worker-a",
+		DAGID:          "dag-1",
+	})
+	require.NoError(t, err)
+
+	srv, err := New(eng, Config{})
+	require.NoError(t, err)
+	_, err = srv.Handle(context.Background(), "task_transition", map[string]any{
+		"namespace_id": "ns-no-head",
+		"task_id":      "T1",
+		"transition":   "start",
+		"actor_role":   "leader",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "还没有首个 commit")
 }
 
 func TestSubmitCapturesReviewCommitAndDiff(t *testing.T) {

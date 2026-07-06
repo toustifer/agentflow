@@ -121,6 +121,10 @@ func (s *Server) handleProjectInit(ctx context.Context, input map[string]any) (p
 	if err != nil {
 		return projectInitResult{}, err
 	}
+	hasHeadCommit, err := repoHasHeadCommit(ctx, repoPath)
+	if err != nil {
+		return projectInitResult{}, err
+	}
 
 	resolvedWorktreeRoot := worktreeRoot
 	if resolvedWorktreeRoot == "" {
@@ -132,10 +136,11 @@ func (s *Server) handleProjectInit(ctx context.Context, input map[string]any) (p
 		ID:   projectID,
 		Name: projectName,
 		Metadata: map[string]string{
-			"workdir":         repoPath,
-			"git_main_branch": branch,
-			"worktree_root":   resolvedWorktreeRoot,
-			"git.initialized": gitInitializedMarker(initGit),
+			"workdir":          repoPath,
+			"git_main_branch":  branch,
+			"worktree_root":    resolvedWorktreeRoot,
+			"git.initialized":  gitInitializedMarker(initGit),
+			"git.has_head":     boolString(hasHeadCommit),
 		},
 	})
 	if err != nil {
@@ -158,8 +163,16 @@ func (s *Server) handleProjectInit(ctx context.Context, input map[string]any) (p
 			"worktree_root":   resolvedWorktreeRoot,
 			"rules_file_path": filepath.Join(claudeDir, "agentflow-git.md"),
 			"git_initialized": initGit,
+			"has_head_commit": hasHeadCommit,
 		},
 	}, nil
+}
+
+func boolString(v bool) string {
+	if v {
+		return "true"
+	}
+	return "false"
 }
 
 func gitInitializedMarker(initGit bool) string {
