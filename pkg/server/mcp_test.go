@@ -112,6 +112,20 @@ func TestTaskTransitionAdvancesState(t *testing.T) {
 	require.NotEmpty(t, task.Metadata["git.worktree_path"])
 }
 
+func TestWorkerRegisterRequiresPromptTemplate(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t)
+
+	_, err := srv.Handle(context.Background(), "worker_register", map[string]any{
+		"namespace_id": "ns-1",
+		"worker_id":    "worker-missing-prompt",
+		"name":         "Worker Missing Prompt",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "prompt_template is required")
+}
+
 func TestWorkerPromptGetIncludesGitContext(t *testing.T) {
 	t.Parallel()
 

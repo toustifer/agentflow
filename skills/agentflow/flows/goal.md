@@ -61,6 +61,13 @@ shape flow 完成后，先确认当前 repo 已经有首个 commit，可作为 w
 - 如果还没有首个 commit：先提交 `README.md`、`.claude/PROJECT_FINAL_SHAPE.md`、`.gitignore`
 - 完成后再继续：`worker_register -> dag_create -> task_create_batch`
 
+在 `worker_register` 阶段，要把 `prompt_template` 作为 worker 定义的一部分一起配好。
+
+注册完 worker 后，先做一次 prompt preflight：
+- 对每个将参与当前 DAG 的 worker 调一次 `worker_prompt_get`
+- 只要有一个 worker 缺模板或 prompt 展开失败，就先停住修好
+- 不要等到第一条 task `start` 之后才发现 `worker has no prompt template configured`
+
 ## Plan
 
 当 `shape` 已确认、worker 已就位后：

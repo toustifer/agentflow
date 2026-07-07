@@ -797,6 +797,9 @@ func (s *Server) handleWorkerRegister(ctx context.Context, input map[string]any)
 	skills, _ := optionalStringSlice(input, "skills")
 	metadata, _ := optionalStringMap(input, "metadata")
 	promptTemplate, _ := optionalString(input, "prompt_template")
+	if strings.TrimSpace(promptTemplate) == "" {
+		return nil, fmt.Errorf("%w: prompt_template is required", ErrInvalidToolInput)
+	}
 
 	w, err := s.engine.RegisterWorker(ctx, engine.RegisterWorkerRequest{
 		NamespaceID: nsID,
