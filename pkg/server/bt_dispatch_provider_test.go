@@ -31,9 +31,10 @@ func TestDispatchTaskOnceTransitionsAssignedTask(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = eng.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
-		NamespaceID: "ns-1",
-		ID:          "worker-a",
-		Name:        "Worker A",
+		NamespaceID:    "ns-1",
+		ID:             "worker-a",
+		Name:           "Worker A",
+		PromptTemplate: "Task {task_id} in {worktree_path} on {branch}",
 	})
 	require.NoError(t, err)
 	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{
@@ -59,6 +60,13 @@ func TestDispatchTaskOnceTransitionsAssignedTask(t *testing.T) {
 	require.Equal(t, "worker-a", resp.AssignedWorker)
 	require.Equal(t, "feat/test", resp.Branch)
 	require.NotEmpty(t, resp.WorktreePath)
+	require.NotNil(t, resp.WorkerLaunch)
+	require.Equal(t, true, resp.WorkerLaunch["required"])
+	require.Equal(t, false, resp.WorkerLaunch["started"])
+	require.Equal(t, "launch_worker_manually", resp.WorkerLaunch["leader_next_action"])
+	require.Equal(t, "worker-a", resp.WorkerLaunch["worker_id"])
+	require.Equal(t, "T1", resp.WorkerLaunch["task_id"])
+	require.NotEmpty(t, resp.WorkerLaunch["prompt_template"])
 
 	task, err := eng.GetTask(context.Background(), "ns-1", "T1")
 	require.NoError(t, err)
@@ -86,9 +94,10 @@ func TestDispatchTaskOnceIsIdempotentForExecutingTask(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = eng.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
-		NamespaceID: "ns-1",
-		ID:          "worker-a",
-		Name:        "Worker A",
+		NamespaceID:    "ns-1",
+		ID:             "worker-a",
+		Name:           "Worker A",
+		PromptTemplate: "Task {task_id} in {worktree_path} on {branch}",
 	})
 	require.NoError(t, err)
 	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{
@@ -115,6 +124,9 @@ func TestDispatchTaskOnceIsIdempotentForExecutingTask(t *testing.T) {
 	require.Equal(t, first.State, second.State)
 	require.Equal(t, first.WorktreePath, second.WorktreePath)
 	require.Equal(t, first.Branch, second.Branch)
+	require.Equal(t, first.WorkerLaunch["leader_next_action"], second.WorkerLaunch["leader_next_action"])
+	require.Equal(t, first.WorkerLaunch["worker_id"], second.WorkerLaunch["worker_id"])
+	require.Equal(t, first.WorkerLaunch["task_id"], second.WorkerLaunch["task_id"])
 }
 
 func TestDispatchTaskOnceRejectsCompletedTask(t *testing.T) {

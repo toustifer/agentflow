@@ -2,13 +2,14 @@
 
 项目编排引擎调度器。`/agentflow` 是唯一公开入口。
 
-`setup` / `goal` / `resume` / `shape` 现在都作为本 bundle 内部 flow 持有：
+`setup` / `intake` / `goal` / `resume` / `shape` 现在都作为本 bundle 内部 flow 持有：
 
 ```text
 agentflow/
   SKILL.md
   flows/
     setup.md
+    intake.md
     goal.md
     resume.md
     shape.md
@@ -36,10 +37,10 @@ agentflow/
 
 ```text
 如果 agentflow MCP 不可用      -> 读取 flows/setup.md
-/agentflow goal [目标]         -> 读取 flows/goal.md 并按 goal flow 推进
+/agentflow goal [目标]         -> 先读取 flows/intake.md，再读取 flows/goal.md
 /agentflow resume              -> 读取 flows/resume.md 并按 resume flow 推进
 /agentflow [无]                -> 默认读取 flows/resume.md
-其他                             -> 全部当作 goal，读取 flows/goal.md
+其他                             -> 全部当作 goal，先读取 flows/intake.md，再读取 flows/goal.md
 ```
 
 ## 路由规则
@@ -50,8 +51,9 @@ agentflow/
    - 如果不可用：读取 `flows/setup.md`
 
 2. 如果 args 以 `goal` 开头
-   - 读取 `flows/goal.md`
-   - 按 goal flow 推进新项目或新功能
+   - 先读取 `flows/intake.md`
+   - 再读取 `flows/goal.md`
+   - 只有 intake 接受后，才按 goal flow 进入 shape / plan / execute
 
 3. 如果 args 以 `resume` 开头
    - 读取 `flows/resume.md`
@@ -62,11 +64,13 @@ agentflow/
 
 5. 其他
    - 全部当作 goal
-   - 读取 `flows/goal.md`
+   - 先读取 `flows/intake.md`
+   - 再读取 `flows/goal.md`
 
 ## Shape 约束
 
 当 goal flow 进入 `shape` 阶段时：
+- 前提是 `intake` 已给出 accepted / enter_shape
 - 必须读取 `flows/shape.md`
 - 不得调用通用 `brainstorming`
 - 正式产物必须写入 `.claude/PROJECT_FINAL_SHAPE.md`

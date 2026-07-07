@@ -452,7 +452,13 @@ func (s *Server) handleTaskTransition(ctx context.Context, input map[string]any)
 		if err != nil {
 			return taskResult{}, err
 		}
-		return taskResult{task: task, payload: taskToMap(task)}, nil
+		payload := taskToMap(task)
+		briefing, err := s.buildWorkerLaunchBriefing(ctx, ns, task)
+		if err != nil {
+			return taskResult{}, err
+		}
+		payload["worker_launch"] = briefing
+		return taskResult{task: task, payload: payload}, nil
 	}
 
 	// 校验 2：submit 时必须已有 worker_diary

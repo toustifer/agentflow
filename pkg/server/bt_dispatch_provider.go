@@ -19,11 +19,12 @@ type dispatchTaskRequest struct {
 }
 
 type dispatchTaskResponse struct {
-	TaskID         string `json:"task_id"`
-	State          string `json:"state"`
-	AssignedWorker string `json:"assigned_worker,omitempty"`
-	WorktreePath   string `json:"worktree_path,omitempty"`
-	Branch         string `json:"branch,omitempty"`
+	TaskID         string         `json:"task_id"`
+	State          string         `json:"state"`
+	AssignedWorker string         `json:"assigned_worker,omitempty"`
+	WorktreePath   string         `json:"worktree_path,omitempty"`
+	Branch         string         `json:"branch,omitempty"`
+	WorkerLaunch   map[string]any `json:"worker_launch,omitempty"`
 }
 
 type btDispatchProvider struct {
@@ -104,6 +105,17 @@ func (s *Server) dispatchTaskOnce(ctx context.Context, namespaceID, taskID strin
 	if task.Metadata != nil {
 		resp.WorktreePath = task.Metadata["git.worktree_path"]
 		resp.Branch = task.Metadata["git.branch"]
+	}
+	if task.State == engine.TaskExecuting {
+		ns, err := s.engine.GetNamespace(ctx, namespaceID)
+		if err != nil {
+			return dispatchTaskResponse{}, err
+		}
+		briefing, err := s.buildWorkerLaunchBriefing(ctx, ns, task)
+		if err != nil {
+			return dispatchTaskResponse{}, err
+		}
+		resp.WorkerLaunch = briefing
 	}
 	return resp, nil
 }

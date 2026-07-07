@@ -6,6 +6,8 @@
 
 ## 边界
 
+这个 flow 只在 `intake` 已接受需求后进入。
+
 这个 flow 可以做完整设计讨论，不需要刻意轻量化；但它与通用正式 spec 流的边界必须非常清楚：
 
 - 允许：探索上下文、逐步提问、比较方案、呈现设计、迭代修改
@@ -66,6 +68,7 @@ shape flow 的目标不是输出 formal spec，而是：
 - 有没有 README / docs / 调研文档
 - 最近提交和当前 repo 状态
 - 是否已经有 `.claude/PROJECT_FINAL_SHAPE.md`
+- `intake` 刚刚确认的约束和范围边界是什么
 
 ### Step 2. 必要时反问关键问题
 

@@ -94,6 +94,16 @@ func TestTaskTransitionAdvancesState(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, "executing", result["state"])
+	workerLaunch, ok := result["worker_launch"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, workerLaunch["required"])
+	require.Equal(t, false, workerLaunch["started"])
+	require.Equal(t, "launch_worker_manually", workerLaunch["leader_next_action"])
+	require.Equal(t, "worker-b", workerLaunch["worker_id"])
+	require.Equal(t, "T-transition", workerLaunch["task_id"])
+	require.Equal(t, "feat/test", workerLaunch["branch"])
+	require.NotEmpty(t, workerLaunch["worktree_path"])
+	require.NotEmpty(t, workerLaunch["prompt_template"])
 
 	task, err := srv.engine.GetTask(context.Background(), "ns-1", "T-transition")
 	require.NoError(t, err)
@@ -350,9 +360,10 @@ func TestLifecycleTickRejectsMissingPromptTemplate(t *testing.T) {
 
 	srv := newTestServer(t)
 	_, err := srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
-		NamespaceID: "ns-1",
-		ID:          "worker-a",
-		Name:        "Worker A",
+		NamespaceID:     "ns-1",
+		ID:              "worker-a",
+		Name:            "Worker A",
+		PromptTemplate:  "Task {task_id} in {worktree_path} on {branch}",
 	})
 	require.NoError(t, err)
 	_, err = srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
@@ -949,7 +960,17 @@ func initTestGitRepo(t *testing.T) string {
 
 func createDagTaskForStart(t *testing.T, srv *Server, taskID string) {
 	t.Helper()
-	_, err := srv.engine.CreateDAG(context.Background(), engine.CreateDAGRequest{
+	var err error
+	if _, err = srv.engine.GetWorker(context.Background(), "ns-1", "worker-b"); err != nil {
+		_, err = srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
+			NamespaceID:    "ns-1",
+			ID:             "worker-b",
+			Name:           "Worker B",
+			PromptTemplate: "Task {task_id} in {worktree_path} on {branch}",
+		})
+		require.NoError(t, err)
+	}
+	_, err = srv.engine.CreateDAG(context.Background(), engine.CreateDAGRequest{
 		NamespaceID: "ns-1",
 		ID:          "dag-1",
 		Title:       "Test DAG",

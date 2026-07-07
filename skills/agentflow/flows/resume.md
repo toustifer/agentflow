@@ -41,12 +41,13 @@ mcp__agentflow__project_next_tasks(namespace_id)
 
 - 有 ready task：按 goal flow 的 dispatch 模板继续派发
 - 没有 ready task 但项目未完成：说明阻塞原因
-- DAG / 项目全部完成：问用户是否要加新功能，再切回 goal flow
+- DAG / 项目全部完成：问用户是否要加新功能；如果要加，先回到 `intake`，再视结论切回 goal flow
 
 ## 与 Goal Flow 的关系
 
 resume flow 不负责重新出 shape，除非：
 - 当前项目缺 `.claude/PROJECT_FINAL_SHAPE.md`
 - 或用户明确要求重做产品边界
+- 或用户要引入一个新需求，且 intake 判断应重新进入 shape
 
 否则 resume 的职责只是恢复并继续推进已有项目。

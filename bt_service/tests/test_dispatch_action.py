@@ -51,6 +51,11 @@ def test_dispatch_task_provider_success_writes_blackboard(monkeypatch):
             "assigned_worker": "worker-a",
             "worktree_path": "D:/tmp/worktree/T1",
             "branch": "feat/test",
+            "worker_launch": {
+                "required": True,
+                "started": False,
+                "leader_next_action": "launch_worker_manually",
+            },
         }
 
     monkeypatch.setattr("bt_service.server.builtin.dispatch_task", fake_dispatch)
