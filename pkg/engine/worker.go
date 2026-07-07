@@ -21,33 +21,51 @@ const (
 )
 
 type Worker struct {
-	ID             string            `json:"id"`
-	NamespaceID    string            `json:"namespace_id"`
-	Name           string            `json:"name"`
-	Scope          string            `json:"scope,omitempty"`
-	Skills         []string          `json:"skills,omitempty"`
-	PromptTemplate string            `json:"prompt_template,omitempty"`
-	Metadata       map[string]string `json:"metadata,omitempty"`
-	CreatedAt      time.Time         `json:"created_at"`
-	UpdatedAt      time.Time         `json:"updated_at"`
+	ID               string            `json:"id"`
+	NamespaceID      string            `json:"namespace_id"`
+	Name             string            `json:"name"`
+	Kind             string            `json:"kind,omitempty"`
+	Scope            string            `json:"scope,omitempty"`
+	Skills           []string          `json:"skills,omitempty"`
+	TaskTags         []string          `json:"task_tags,omitempty"`
+	PromptTemplate   string            `json:"prompt_template,omitempty"`
+	RequiredReads    []string          `json:"required_reads,omitempty"`
+	RecommendedMCP   []string          `json:"recommended_mcp,omitempty"`
+	LaunchMode       string            `json:"launch_mode,omitempty"`
+	HandoffTargets   []string          `json:"handoff_targets,omitempty"`
+	Metadata         map[string]string `json:"metadata,omitempty"`
+	CreatedAt        time.Time         `json:"created_at"`
+	UpdatedAt        time.Time         `json:"updated_at"`
 }
 
 type RegisterWorkerRequest struct {
-	NamespaceID    string
-	ID             string
-	Name           string
-	Scope          string
-	Skills         []string
-	PromptTemplate string
-	Metadata       map[string]string
+	NamespaceID      string
+	ID               string
+	Name             string
+	Kind             string
+	Scope            string
+	Skills           []string
+	TaskTags         []string
+	PromptTemplate   string
+	RequiredReads    []string
+	RecommendedMCP   []string
+	LaunchMode       string
+	HandoffTargets   []string
+	Metadata         map[string]string
 }
 
 type UpdateWorkerRequest struct {
-	Name           string
-	Scope          string
-	Skills         []string
-	PromptTemplate string
-	Metadata       map[string]string
+	Name             string
+	Kind             string
+	Scope            string
+	Skills           []string
+	TaskTags         []string
+	PromptTemplate   string
+	RequiredReads    []string
+	RecommendedMCP   []string
+	LaunchMode       string
+	HandoffTargets   []string
+	Metadata         map[string]string
 }
 
 // ---------------------------------------------------------------------------
@@ -77,15 +95,21 @@ func (e *Engine) RegisterWorker(ctx context.Context, req RegisterWorkerRequest) 
 
 	now := time.Now().UTC()
 	w := &Worker{
-		ID:          req.ID,
-		NamespaceID: req.NamespaceID,
-		Name:        req.Name,
-		Scope:       req.Scope,
+		ID:             req.ID,
+		NamespaceID:    req.NamespaceID,
+		Name:           req.Name,
+		Kind:           req.Kind,
+		Scope:          req.Scope,
 		Skills:         cloneStrings(req.Skills),
+		TaskTags:       cloneStrings(req.TaskTags),
 		PromptTemplate: req.PromptTemplate,
+		RequiredReads:  cloneStrings(req.RequiredReads),
+		RecommendedMCP: cloneStrings(req.RecommendedMCP),
+		LaunchMode:     req.LaunchMode,
+		HandoffTargets: cloneStrings(req.HandoffTargets),
 		Metadata:       cloneStringMap(req.Metadata),
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 	e.workers[req.NamespaceID][req.ID] = w
 
@@ -143,14 +167,32 @@ func (e *Engine) UpdateWorker(ctx context.Context, nsID, workerID string, req Up
 	if req.Name != "" {
 		w.Name = req.Name
 	}
+	if req.Kind != "" {
+		w.Kind = req.Kind
+	}
 	if req.Scope != "" {
 		w.Scope = req.Scope
 	}
 	if req.Skills != nil {
 		w.Skills = cloneStrings(req.Skills)
 	}
+	if req.TaskTags != nil {
+		w.TaskTags = cloneStrings(req.TaskTags)
+	}
 	if req.PromptTemplate != "" {
 		w.PromptTemplate = req.PromptTemplate
+	}
+	if req.RequiredReads != nil {
+		w.RequiredReads = cloneStrings(req.RequiredReads)
+	}
+	if req.RecommendedMCP != nil {
+		w.RecommendedMCP = cloneStrings(req.RecommendedMCP)
+	}
+	if req.LaunchMode != "" {
+		w.LaunchMode = req.LaunchMode
+	}
+	if req.HandoffTargets != nil {
+		w.HandoffTargets = cloneStrings(req.HandoffTargets)
 	}
 	if req.Metadata != nil {
 		w.Metadata = cloneStringMap(req.Metadata)
@@ -294,7 +336,11 @@ func cloneWorker(w *Worker) *Worker {
 	}
 	cpy := *w
 	cpy.Skills = cloneStrings(w.Skills)
+	cpy.TaskTags = cloneStrings(w.TaskTags)
 	cpy.PromptTemplate = w.PromptTemplate
+	cpy.RequiredReads = cloneStrings(w.RequiredReads)
+	cpy.RecommendedMCP = cloneStrings(w.RecommendedMCP)
+	cpy.HandoffTargets = cloneStrings(w.HandoffTargets)
 	cpy.Metadata = cloneStringMap(w.Metadata)
 	return &cpy
 }

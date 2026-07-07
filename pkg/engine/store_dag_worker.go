@@ -68,10 +68,14 @@ func loadDAGs(db *sql.DB) (map[string]map[string]*DAG, error) {
 
 func insertWorker(db *sql.DB, w *Worker) error {
 	skills := mustMarshalJSON(w.Skills)
+	taskTags := mustMarshalJSON(w.TaskTags)
+	requiredReads := mustMarshalJSON(w.RequiredReads)
+	recommendedMCP := mustMarshalJSON(w.RecommendedMCP)
+	handoffTargets := mustMarshalJSON(w.HandoffTargets)
 	meta := mustMarshalJSON(w.Metadata)
 	_, err := db.Exec(
-		`INSERT INTO workers (id, namespace_id, name, scope, skills, prompt_template, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		w.ID, w.NamespaceID, w.Name, w.Scope, skills, w.PromptTemplate, meta,
+		`INSERT INTO workers (id, namespace_id, name, kind, scope, skills, task_tags, prompt_template, required_reads, recommended_mcp, launch_mode, handoff_targets, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		w.ID, w.NamespaceID, w.Name, w.Kind, w.Scope, skills, taskTags, w.PromptTemplate, requiredReads, recommendedMCP, w.LaunchMode, handoffTargets, meta,
 		w.CreatedAt.Format(time.RFC3339Nano), w.UpdatedAt.Format(time.RFC3339Nano),
 	)
 	return err
@@ -79,10 +83,14 @@ func insertWorker(db *sql.DB, w *Worker) error {
 
 func updateWorker(db *sql.DB, w *Worker) error {
 	skills := mustMarshalJSON(w.Skills)
+	taskTags := mustMarshalJSON(w.TaskTags)
+	requiredReads := mustMarshalJSON(w.RequiredReads)
+	recommendedMCP := mustMarshalJSON(w.RecommendedMCP)
+	handoffTargets := mustMarshalJSON(w.HandoffTargets)
 	meta := mustMarshalJSON(w.Metadata)
 	_, err := db.Exec(
-		`UPDATE workers SET name=?, scope=?, skills=?, prompt_template=?, metadata=?, updated_at=? WHERE namespace_id=? AND id=?`,
-		w.Name, w.Scope, skills, w.PromptTemplate, meta,
+		`UPDATE workers SET name=?, kind=?, scope=?, skills=?, task_tags=?, prompt_template=?, required_reads=?, recommended_mcp=?, launch_mode=?, handoff_targets=?, metadata=?, updated_at=? WHERE namespace_id=? AND id=?`,
+		w.Name, w.Kind, w.Scope, skills, taskTags, w.PromptTemplate, requiredReads, recommendedMCP, w.LaunchMode, handoffTargets, meta,
 		w.UpdatedAt.Format(time.RFC3339Nano),
 		w.NamespaceID, w.ID,
 	)
@@ -90,7 +98,7 @@ func updateWorker(db *sql.DB, w *Worker) error {
 }
 
 func loadWorkers(db *sql.DB) (map[string]map[string]*Worker, error) {
-	rows, err := db.Query(`SELECT id, namespace_id, name, scope, skills, prompt_template, metadata, created_at, updated_at FROM workers`)
+	rows, err := db.Query(`SELECT id, namespace_id, name, kind, scope, skills, task_tags, prompt_template, required_reads, recommended_mcp, launch_mode, handoff_targets, metadata, created_at, updated_at FROM workers`)
 	if err != nil {
 		return nil, err
 	}
@@ -99,23 +107,29 @@ func loadWorkers(db *sql.DB) (map[string]map[string]*Worker, error) {
 	out := make(map[string]map[string]*Worker)
 	for rows.Next() {
 		var (
-			id, nsID, name, scope, skillsStr, promptTpl, metaStr, createdAtStr, updatedAtStr string
+			id, nsID, name, kind, scope, skillsStr, taskTagsStr, promptTpl, requiredReadsStr, recommendedMCPStr, launchMode, handoffTargetsStr, metaStr, createdAtStr, updatedAtStr string
 		)
-		if err := rows.Scan(&id, &nsID, &name, &scope, &skillsStr, &promptTpl, &metaStr, &createdAtStr, &updatedAtStr); err != nil {
+		if err := rows.Scan(&id, &nsID, &name, &kind, &scope, &skillsStr, &taskTagsStr, &promptTpl, &requiredReadsStr, &recommendedMCPStr, &launchMode, &handoffTargetsStr, &metaStr, &createdAtStr, &updatedAtStr); err != nil {
 			return nil, err
 		}
 		createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
 		updatedAt, _ := time.Parse(time.RFC3339Nano, updatedAtStr)
 		w := &Worker{
-			ID:          id,
-			NamespaceID: nsID,
-			Name:        name,
-			Scope:       scope,
-			Skills:         mustUnmarshalStringSlice(skillsStr),
-			PromptTemplate: promptTpl,
-			Metadata:       mustUnmarshalStringMap(metaStr),
-			CreatedAt:   createdAt,
-			UpdatedAt:   updatedAt,
+			ID:               id,
+			NamespaceID:      nsID,
+			Name:             name,
+			Kind:             kind,
+			Scope:            scope,
+			Skills:           mustUnmarshalStringSlice(skillsStr),
+			TaskTags:         mustUnmarshalStringSlice(taskTagsStr),
+			PromptTemplate:   promptTpl,
+			RequiredReads:    mustUnmarshalStringSlice(requiredReadsStr),
+			RecommendedMCP:   mustUnmarshalStringSlice(recommendedMCPStr),
+			LaunchMode:       launchMode,
+			HandoffTargets:   mustUnmarshalStringSlice(handoffTargetsStr),
+			Metadata:         mustUnmarshalStringMap(metaStr),
+			CreatedAt:        createdAt,
+			UpdatedAt:        updatedAt,
 		}
 		if out[nsID] == nil {
 			out[nsID] = make(map[string]*Worker)

@@ -27,19 +27,33 @@ type workerLaunchBriefing struct {
 }
 
 func (s *Server) buildWorkerLaunchBriefing(ctx context.Context, ns *engine.Namespace, task *engine.Task) (map[string]any, error) {
+	w, err := s.engine.GetWorker(ctx, ns.ID, task.AssignedWorker)
+	if err != nil {
+		return nil, err
+	}
 	prompt, err := s.engine.WorkerPromptGet(ctx, ns.ID, task.AssignedWorker, task.ID, task.Title, false)
 	if err != nil {
 		return nil, err
 	}
 
-	requiredReads := make([]string, 0, 1)
-	if ns != nil && ns.Metadata != nil {
+	requiredReads := cloneStringSlice(w.RequiredReads)
+	if len(requiredReads) == 0 && ns != nil && ns.Metadata != nil {
 		if workdir := ns.Metadata["workdir"]; workdir != "" {
 			shapePath := filepath.Join(workdir, ".claude", "PROJECT_FINAL_SHAPE.md")
 			if _, err := os.Stat(shapePath); err == nil {
 				requiredReads = append(requiredReads, shapePath)
 			}
 		}
+	}
+
+	launchMode := w.LaunchMode
+	if launchMode == "" {
+		launchMode = "manual_subagent"
+	}
+
+	recommendedMCP := cloneStringSlice(w.RecommendedMCP)
+	if len(recommendedMCP) == 0 {
+		recommendedMCP = []string{"doc_search", "worker_handbook_get", "find_knowledge", "find_pitfalls"}
 	}
 
 	briefing := workerLaunchBriefing{
@@ -52,15 +66,10 @@ func (s *Server) buildWorkerLaunchBriefing(ctx context.Context, ns *engine.Names
 		TaskTitle:        task.Title,
 		WorktreePath:     task.Metadata["git.worktree_path"],
 		Branch:           task.Metadata["git.branch"],
-		DispatchMode:     "manual_subagent",
+		DispatchMode:     launchMode,
 		PromptTemplate:   prompt,
 		RequiredReads:    requiredReads,
-		RecommendedMCP: []string{
-			"doc_search",
-			"worker_handbook_get",
-			"find_knowledge",
-			"find_pitfalls",
-		},
+		RecommendedMCP:   recommendedMCP,
 		RecommendedSkills: []string{},
 		LaunchInstructions: []string{
 			"Read required_reads first.",
@@ -93,5 +102,14 @@ func stringSliceToAny(values []string) []any {
 	for _, value := range values {
 		out = append(out, value)
 	}
+	return out
+}
+
+func cloneStringSlice(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	out := make([]string, len(values))
+	copy(out, values)
 	return out
 }

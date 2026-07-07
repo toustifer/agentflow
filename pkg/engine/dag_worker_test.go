@@ -175,16 +175,29 @@ func TestWorkerCRUD(t *testing.T) {
 
 	// Register
 	w, err := e.RegisterWorker(context.Background(), RegisterWorkerRequest{
-		NamespaceID: "ns-1",
-		ID:          "worker-auth",
-		Name:        "认证服务",
-		Scope:       "登录/注册/OAuth",
-		Skills:      []string{"go", "postgres"},
+		NamespaceID:    "ns-1",
+		ID:             "worker-auth",
+		Name:           "认证服务",
+		Kind:           "worker",
+		Scope:          "登录/注册/OAuth",
+		Skills:         []string{"go", "postgres"},
+		TaskTags:       []string{"auth", "backend"},
+		PromptTemplate: "Task {task_id}",
+		RequiredReads:  []string{".claude/PROJECT_FINAL_SHAPE.md"},
+		RecommendedMCP: []string{"doc_search"},
+		LaunchMode:     "manual_subagent",
+		HandoffTargets: []string{"reviewer-default"},
 	})
 	require.NoError(t, err)
 	require.Equal(t, "worker-auth", w.ID)
 	require.Equal(t, "认证服务", w.Name)
 	require.Equal(t, []string{"go", "postgres"}, w.Skills)
+	require.Equal(t, "worker", w.Kind)
+	require.Equal(t, []string{"auth", "backend"}, w.TaskTags)
+	require.Equal(t, []string{".claude/PROJECT_FINAL_SHAPE.md"}, w.RequiredReads)
+	require.Equal(t, []string{"doc_search"}, w.RecommendedMCP)
+	require.Equal(t, "manual_subagent", w.LaunchMode)
+	require.Equal(t, []string{"reviewer-default"}, w.HandoffTargets)
 
 	// Get
 	_, err = e.GetWorker(context.Background(), "ns-1", "worker-auth")
@@ -197,12 +210,24 @@ func TestWorkerCRUD(t *testing.T) {
 
 	// Update
 	w2, err := e.UpdateWorker(context.Background(), "ns-1", "worker-auth", UpdateWorkerRequest{
-		Name:  "认证与权限",
-		Scope: "登录/注册/权限/OAuth",
+		Name:             "认证与权限",
+		Kind:             "reviewer",
+		Scope:            "登录/注册/权限/OAuth",
+		TaskTags:         []string{"auth", "review"},
+		RequiredReads:    []string{".claude/IMPLEMENTATION_BRIEF.md"},
+		RecommendedMCP:   []string{"doc_search", "find_pitfalls"},
+		LaunchMode:       "auto_subagent",
+		HandoffTargets:   []string{"worker-auth"},
 	})
 	require.NoError(t, err)
 	require.Equal(t, "认证与权限", w2.Name)
 	require.Equal(t, "登录/注册/权限/OAuth", w2.Scope)
+	require.Equal(t, "reviewer", w2.Kind)
+	require.Equal(t, []string{"auth", "review"}, w2.TaskTags)
+	require.Equal(t, []string{".claude/IMPLEMENTATION_BRIEF.md"}, w2.RequiredReads)
+	require.Equal(t, []string{"doc_search", "find_pitfalls"}, w2.RecommendedMCP)
+	require.Equal(t, "auto_subagent", w2.LaunchMode)
+	require.Equal(t, []string{"worker-auth"}, w2.HandoffTargets)
 }
 
 func TestWorkerStatusFromTasks(t *testing.T) {
@@ -215,7 +240,7 @@ func TestWorkerStatusFromTasks(t *testing.T) {
 	_, err = e.CreateNamespace(context.Background(), CreateNamespaceRequest{ID: "ns-1", Name: "test"})
 	require.NoError(t, err)
 	_, err = e.RegisterWorker(context.Background(), RegisterWorkerRequest{
-		NamespaceID: "ns-1", ID: "worker-x", Name: "X",
+		NamespaceID:    "ns-1", ID: "worker-x", Name: "X", PromptTemplate: "Task {task_id}",
 	})
 	require.NoError(t, err)
 

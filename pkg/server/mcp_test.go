@@ -104,6 +104,9 @@ func TestTaskTransitionAdvancesState(t *testing.T) {
 	require.Equal(t, "feat/test", workerLaunch["branch"])
 	require.NotEmpty(t, workerLaunch["worktree_path"])
 	require.NotEmpty(t, workerLaunch["prompt_template"])
+	require.Equal(t, []any{".claude/PROJECT_FINAL_SHAPE.md"}, workerLaunch["required_reads"])
+	require.Equal(t, []any{"doc_search"}, workerLaunch["recommended_mcp"])
+	require.Equal(t, "manual_subagent", workerLaunch["dispatch_mode"])
 
 	task, err := srv.engine.GetTask(context.Background(), "ns-1", "T-transition")
 	require.NoError(t, err)
@@ -124,6 +127,34 @@ func TestWorkerRegisterRequiresPromptTemplate(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "prompt_template is required")
+}
+
+func TestWorkerRegisterReturnsSchedulingFields(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t)
+
+	result, err := srv.Handle(context.Background(), "worker_register", map[string]any{
+		"namespace_id":    "ns-1",
+		"worker_id":       "worker-scheduler",
+		"name":            "Scheduler Worker",
+		"kind":            "explorer",
+		"scope":           "Research map providers.",
+		"skills":          []any{"research", "maps"},
+		"task_tags":       []any{"research", "maps"},
+		"prompt_template": "Task {task_id}",
+		"required_reads":  []any{".claude/PROJECT_FINAL_SHAPE.md"},
+		"recommended_mcp": []any{"doc_search", "find_knowledge"},
+		"launch_mode":     "manual_subagent",
+		"handoff_targets": []any{"route-data"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "explorer", result["kind"])
+	require.Equal(t, "manual_subagent", result["launch_mode"])
+	require.Equal(t, []string{"research", "maps"}, result["task_tags"])
+	require.Equal(t, []string{".claude/PROJECT_FINAL_SHAPE.md"}, result["required_reads"])
+	require.Equal(t, []string{"doc_search", "find_knowledge"}, result["recommended_mcp"])
+	require.Equal(t, []string{"route-data"}, result["handoff_targets"])
 }
 
 func TestWorkerPromptGetIncludesGitContext(t *testing.T) {
@@ -980,7 +1011,12 @@ func createDagTaskForStart(t *testing.T, srv *Server, taskID string) {
 			NamespaceID:    "ns-1",
 			ID:             "worker-b",
 			Name:           "Worker B",
+			Kind:           "worker",
+			TaskTags:       []string{"planning"},
 			PromptTemplate: "Task {task_id} in {worktree_path} on {branch}",
+			RequiredReads:  []string{".claude/PROJECT_FINAL_SHAPE.md"},
+			RecommendedMCP: []string{"doc_search"},
+			LaunchMode:     "manual_subagent",
 		})
 		require.NoError(t, err)
 	}

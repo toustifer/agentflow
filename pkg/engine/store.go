@@ -191,6 +191,12 @@ func migrateTasksTable(db *sql.DB) error {
 func migrateWorkersTable(db *sql.DB) error {
 	cols := []string{
 		"prompt_template TEXT NOT NULL DEFAULT ''",
+		"kind TEXT NOT NULL DEFAULT ''",
+		"task_tags TEXT NOT NULL DEFAULT '[]'",
+		"required_reads TEXT NOT NULL DEFAULT '[]'",
+		"recommended_mcp TEXT NOT NULL DEFAULT '[]'",
+		"launch_mode TEXT NOT NULL DEFAULT ''",
+		"handoff_targets TEXT NOT NULL DEFAULT '[]'",
 	}
 	for _, c := range cols {
 		colName := strings.SplitN(c, " ", 2)[0]

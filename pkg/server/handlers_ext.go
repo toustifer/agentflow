@@ -794,7 +794,13 @@ func (s *Server) handleWorkerRegister(ctx context.Context, input map[string]any)
 		return nil, err
 	}
 	scope, _ := optionalString(input, "scope")
+	kind, _ := optionalString(input, "kind")
 	skills, _ := optionalStringSlice(input, "skills")
+	taskTags, _ := optionalStringSlice(input, "task_tags")
+	requiredReads, _ := optionalStringSlice(input, "required_reads")
+	recommendedMCP, _ := optionalStringSlice(input, "recommended_mcp")
+	handoffTargets, _ := optionalStringSlice(input, "handoff_targets")
+	launchMode, _ := optionalString(input, "launch_mode")
 	metadata, _ := optionalStringMap(input, "metadata")
 	promptTemplate, _ := optionalString(input, "prompt_template")
 	if strings.TrimSpace(promptTemplate) == "" {
@@ -802,12 +808,18 @@ func (s *Server) handleWorkerRegister(ctx context.Context, input map[string]any)
 	}
 
 	w, err := s.engine.RegisterWorker(ctx, engine.RegisterWorkerRequest{
-		NamespaceID: nsID,
-		ID:          workerID,
-		Name:        name,
-		Scope:       scope,
+		NamespaceID:    nsID,
+		ID:             workerID,
+		Name:           name,
+		Kind:           kind,
+		Scope:          scope,
 		Skills:         skills,
+		TaskTags:       taskTags,
 		PromptTemplate: promptTemplate,
+		RequiredReads:  requiredReads,
+		RecommendedMCP: recommendedMCP,
+		LaunchMode:     launchMode,
+		HandoffTargets: handoffTargets,
 		Metadata:       metadata,
 	})
 	if err != nil {
@@ -860,23 +872,47 @@ func (s *Server) handleWorkerUpdate(ctx context.Context, input map[string]any) (
 		return nil, err
 	}
 	name, _ := optionalString(input, "name")
+	kind, _ := optionalString(input, "kind")
 	scope, _ := optionalString(input, "scope")
 	var skills []string
 	if s, err := optionalStringSlice(input, "skills"); err == nil {
 		skills = s
+	}
+	var taskTags []string
+	if s, err := optionalStringSlice(input, "task_tags"); err == nil {
+		taskTags = s
+	}
+	var requiredReads []string
+	if s, err := optionalStringSlice(input, "required_reads"); err == nil {
+		requiredReads = s
+	}
+	var recommendedMCP []string
+	if s, err := optionalStringSlice(input, "recommended_mcp"); err == nil {
+		recommendedMCP = s
+	}
+	var handoffTargets []string
+	if s, err := optionalStringSlice(input, "handoff_targets"); err == nil {
+		handoffTargets = s
 	}
 	var metadata map[string]string
 	if m, err := optionalStringMap(input, "metadata"); err == nil {
 		metadata = m
 	}
 	promptTemplate, _ := optionalString(input, "prompt_template")
+	launchMode, _ := optionalString(input, "launch_mode")
 
 	w, err := s.engine.UpdateWorker(ctx, nsID, workerID, engine.UpdateWorkerRequest{
-		Name:     name,
-		Scope:    scope,
-		Skills:   skills,
+		Name:           name,
+		Kind:           kind,
+		Scope:          scope,
+		Skills:         skills,
+		TaskTags:       taskTags,
 		PromptTemplate: promptTemplate,
-		Metadata: metadata,
+		RequiredReads:  requiredReads,
+		RecommendedMCP: recommendedMCP,
+		LaunchMode:     launchMode,
+		HandoffTargets: handoffTargets,
+		Metadata:       metadata,
 	})
 	if err != nil {
 		return nil, err
@@ -1129,13 +1165,20 @@ func dagGraphToMap(g *engine.DAGGraph) map[string]any {
 
 func workerToMap(w *engine.Worker, status string) map[string]any {
 	m := map[string]any{
-		"id":           w.ID,
-		"namespace_id": w.NamespaceID,
-		"name":         w.Name,
-		"scope":        w.Scope,
-		"skills":       w.Skills,
-		"created_at":   w.CreatedAt,
-		"updated_at":   w.UpdatedAt,
+		"id":               w.ID,
+		"namespace_id":     w.NamespaceID,
+		"name":             w.Name,
+		"kind":             w.Kind,
+		"scope":            w.Scope,
+		"skills":           w.Skills,
+		"task_tags":        w.TaskTags,
+		"prompt_template":  w.PromptTemplate,
+		"required_reads":   w.RequiredReads,
+		"recommended_mcp":  w.RecommendedMCP,
+		"launch_mode":      w.LaunchMode,
+		"handoff_targets":  w.HandoffTargets,
+		"created_at":       w.CreatedAt,
+		"updated_at":       w.UpdatedAt,
 	}
 	if len(w.Metadata) > 0 {
 		m["metadata"] = w.Metadata
