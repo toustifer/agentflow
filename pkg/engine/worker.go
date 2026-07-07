@@ -33,6 +33,10 @@ type Worker struct {
 	RecommendedMCP   []string          `json:"recommended_mcp,omitempty"`
 	LaunchMode       string            `json:"launch_mode,omitempty"`
 	HandoffTargets   []string          `json:"handoff_targets,omitempty"`
+	RecoveryPolicy   []string          `json:"recovery_policy,omitempty"`
+	FallbackMCP      []string          `json:"fallback_mcp,omitempty"`
+	StuckPlaybook    string            `json:"stuck_playbook,omitempty"`
+	EscalationMode   string            `json:"escalation_mode,omitempty"`
 	Metadata         map[string]string `json:"metadata,omitempty"`
 	CreatedAt        time.Time         `json:"created_at"`
 	UpdatedAt        time.Time         `json:"updated_at"`
@@ -51,6 +55,10 @@ type RegisterWorkerRequest struct {
 	RecommendedMCP   []string
 	LaunchMode       string
 	HandoffTargets   []string
+	RecoveryPolicy   []string
+	FallbackMCP      []string
+	StuckPlaybook    string
+	EscalationMode   string
 	Metadata         map[string]string
 }
 
@@ -65,6 +73,10 @@ type UpdateWorkerRequest struct {
 	RecommendedMCP   []string
 	LaunchMode       string
 	HandoffTargets   []string
+	RecoveryPolicy   []string
+	FallbackMCP      []string
+	StuckPlaybook    string
+	EscalationMode   string
 	Metadata         map[string]string
 }
 
@@ -107,6 +119,10 @@ func (e *Engine) RegisterWorker(ctx context.Context, req RegisterWorkerRequest) 
 		RecommendedMCP: cloneStrings(req.RecommendedMCP),
 		LaunchMode:     req.LaunchMode,
 		HandoffTargets: cloneStrings(req.HandoffTargets),
+		RecoveryPolicy: cloneStrings(req.RecoveryPolicy),
+		FallbackMCP:    cloneStrings(req.FallbackMCP),
+		StuckPlaybook:  req.StuckPlaybook,
+		EscalationMode: req.EscalationMode,
 		Metadata:       cloneStringMap(req.Metadata),
 		CreatedAt:      now,
 		UpdatedAt:      now,
@@ -193,6 +209,18 @@ func (e *Engine) UpdateWorker(ctx context.Context, nsID, workerID string, req Up
 	}
 	if req.HandoffTargets != nil {
 		w.HandoffTargets = cloneStrings(req.HandoffTargets)
+	}
+	if req.RecoveryPolicy != nil {
+		w.RecoveryPolicy = cloneStrings(req.RecoveryPolicy)
+	}
+	if req.FallbackMCP != nil {
+		w.FallbackMCP = cloneStrings(req.FallbackMCP)
+	}
+	if req.StuckPlaybook != "" {
+		w.StuckPlaybook = req.StuckPlaybook
+	}
+	if req.EscalationMode != "" {
+		w.EscalationMode = req.EscalationMode
 	}
 	if req.Metadata != nil {
 		w.Metadata = cloneStringMap(req.Metadata)
@@ -341,6 +369,8 @@ func cloneWorker(w *Worker) *Worker {
 	cpy.RequiredReads = cloneStrings(w.RequiredReads)
 	cpy.RecommendedMCP = cloneStrings(w.RecommendedMCP)
 	cpy.HandoffTargets = cloneStrings(w.HandoffTargets)
+	cpy.RecoveryPolicy = cloneStrings(w.RecoveryPolicy)
+	cpy.FallbackMCP = cloneStrings(w.FallbackMCP)
 	cpy.Metadata = cloneStringMap(w.Metadata)
 	return &cpy
 }

@@ -19,15 +19,21 @@ type reportStuckRequest struct {
 }
 
 type reportStuckResponse struct {
-	TaskID               string           `json:"task_id"`
-	Title                string           `json:"title,omitempty"`
-	State                string           `json:"state"`
-	AssignedWorker       string           `json:"assigned_worker,omitempty"`
-	DAGID                string           `json:"dag_id,omitempty"`
-	AvailableTransitions []string         `json:"available_transitions,omitempty"`
-	Blockers             []map[string]any `json:"blockers,omitempty"`
-	BlockerSummary       map[string]any   `json:"blocker_summary,omitempty"`
-	SuggestedActions     []string         `json:"suggested_actions,omitempty"`
+	TaskID                 string           `json:"task_id"`
+	Title                  string           `json:"title,omitempty"`
+	State                  string           `json:"state"`
+	AssignedWorker         string           `json:"assigned_worker,omitempty"`
+	DAGID                  string           `json:"dag_id,omitempty"`
+	AvailableTransitions   []string         `json:"available_transitions,omitempty"`
+	Blockers               []map[string]any `json:"blockers,omitempty"`
+	BlockerSummary         map[string]any   `json:"blocker_summary,omitempty"`
+	SuggestedActions       []string         `json:"suggested_actions,omitempty"`
+	RecoveryPolicy         []string         `json:"recovery_policy,omitempty"`
+	FallbackMCP            []string         `json:"fallback_mcp,omitempty"`
+	StuckPlaybook          string           `json:"stuck_playbook,omitempty"`
+	EscalationMode         string           `json:"escalation_mode,omitempty"`
+	OwnershipExpected      bool             `json:"ownership_expected"`
+	ReassignmentExceptional bool            `json:"reassignment_exceptional"`
 }
 
 type btStuckProvider struct {
@@ -95,9 +101,14 @@ func (s *Server) reportStuckOnce(ctx context.Context, namespaceID, taskID string
 		}
 	}
 
-	suggestedActions := []string{"task_get"}
+	suggestedActions := []string{"task_get", "worker_prompt_get", "worker_handbook_get", "find_knowledge", "find_pitfalls"}
 	if len(items) > 0 {
 		suggestedActions = append(suggestedActions, "project_blockers")
+	}
+
+	worker, workerErr := s.engine.GetWorker(ctx, namespaceID, task.AssignedWorker)
+	if workerErr != nil {
+		worker = nil
 	}
 
 	return reportStuckResponse{
@@ -113,8 +124,42 @@ func (s *Server) reportStuckOnce(ctx context.Context, namespaceID, taskID string
 			"dependency": dependencyCount,
 			"worker":     workerCount,
 		},
-		SuggestedActions: suggestedActions,
+		SuggestedActions:        suggestedActions,
+		RecoveryPolicy:          workerRecoveryPolicy(worker),
+		FallbackMCP:             workerFallbackMCP(worker),
+		StuckPlaybook:           workerStuckPlaybook(worker),
+		EscalationMode:          workerEscalationMode(worker),
+		OwnershipExpected:       task.AssignedWorker != "",
+		ReassignmentExceptional: true,
 	}, nil
+}
+
+func workerRecoveryPolicy(w *engine.Worker) []string {
+	if w == nil {
+		return nil
+	}
+	return cloneStringSlice(w.RecoveryPolicy)
+}
+
+func workerFallbackMCP(w *engine.Worker) []string {
+	if w == nil {
+		return nil
+	}
+	return cloneStringSlice(w.FallbackMCP)
+}
+
+func workerStuckPlaybook(w *engine.Worker) string {
+	if w == nil {
+		return ""
+	}
+	return w.StuckPlaybook
+}
+
+func workerEscalationMode(w *engine.Worker) string {
+	if w == nil {
+		return ""
+	}
+	return w.EscalationMode
 }
 
 func (p *btStuckProvider) handleReportStuck(w http.ResponseWriter, r *http.Request) {

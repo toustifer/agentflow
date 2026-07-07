@@ -800,6 +800,10 @@ func (s *Server) handleWorkerRegister(ctx context.Context, input map[string]any)
 	requiredReads, _ := optionalStringSlice(input, "required_reads")
 	recommendedMCP, _ := optionalStringSlice(input, "recommended_mcp")
 	handoffTargets, _ := optionalStringSlice(input, "handoff_targets")
+	recoveryPolicy, _ := optionalStringSlice(input, "recovery_policy")
+	fallbackMCP, _ := optionalStringSlice(input, "fallback_mcp")
+	stuckPlaybook, _ := optionalString(input, "stuck_playbook")
+	escalationMode, _ := optionalString(input, "escalation_mode")
 	launchMode, _ := optionalString(input, "launch_mode")
 	metadata, _ := optionalStringMap(input, "metadata")
 	promptTemplate, _ := optionalString(input, "prompt_template")
@@ -820,6 +824,10 @@ func (s *Server) handleWorkerRegister(ctx context.Context, input map[string]any)
 		RecommendedMCP: recommendedMCP,
 		LaunchMode:     launchMode,
 		HandoffTargets: handoffTargets,
+		RecoveryPolicy: recoveryPolicy,
+		FallbackMCP:    fallbackMCP,
+		StuckPlaybook:  stuckPlaybook,
+		EscalationMode: escalationMode,
 		Metadata:       metadata,
 	})
 	if err != nil {
@@ -894,6 +902,16 @@ func (s *Server) handleWorkerUpdate(ctx context.Context, input map[string]any) (
 	if s, err := optionalStringSlice(input, "handoff_targets"); err == nil {
 		handoffTargets = s
 	}
+	var recoveryPolicy []string
+	if s, err := optionalStringSlice(input, "recovery_policy"); err == nil {
+		recoveryPolicy = s
+	}
+	var fallbackMCP []string
+	if s, err := optionalStringSlice(input, "fallback_mcp"); err == nil {
+		fallbackMCP = s
+	}
+	stuckPlaybook, _ := optionalString(input, "stuck_playbook")
+	escalationMode, _ := optionalString(input, "escalation_mode")
 	var metadata map[string]string
 	if m, err := optionalStringMap(input, "metadata"); err == nil {
 		metadata = m
@@ -912,6 +930,10 @@ func (s *Server) handleWorkerUpdate(ctx context.Context, input map[string]any) (
 		RecommendedMCP: recommendedMCP,
 		LaunchMode:     launchMode,
 		HandoffTargets: handoffTargets,
+		RecoveryPolicy: recoveryPolicy,
+		FallbackMCP:    fallbackMCP,
+		StuckPlaybook:  stuckPlaybook,
+		EscalationMode: escalationMode,
 		Metadata:       metadata,
 	})
 	if err != nil {
@@ -1177,6 +1199,10 @@ func workerToMap(w *engine.Worker, status string) map[string]any {
 		"recommended_mcp":  w.RecommendedMCP,
 		"launch_mode":      w.LaunchMode,
 		"handoff_targets":  w.HandoffTargets,
+		"recovery_policy":  w.RecoveryPolicy,
+		"fallback_mcp":     w.FallbackMCP,
+		"stuck_playbook":   w.StuckPlaybook,
+		"escalation_mode":  w.EscalationMode,
 		"created_at":       w.CreatedAt,
 		"updated_at":       w.UpdatedAt,
 	}

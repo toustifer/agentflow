@@ -107,6 +107,10 @@ func TestTaskTransitionAdvancesState(t *testing.T) {
 	require.Equal(t, []any{".claude/PROJECT_FINAL_SHAPE.md"}, workerLaunch["required_reads"])
 	require.Equal(t, []any{"doc_search"}, workerLaunch["recommended_mcp"])
 	require.Equal(t, "manual_subagent", workerLaunch["dispatch_mode"])
+	require.Equal(t, []any{"reread_required_reads", "deeper_research", "escalate"}, workerLaunch["recovery_policy"])
+	require.Equal(t, []any{"find_knowledge"}, workerLaunch["fallback_mcp"])
+	require.Equal(t, "Retry locally before escalating.", workerLaunch["stuck_playbook"])
+	require.Equal(t, "leader_then_user", workerLaunch["escalation_mode"])
 
 	task, err := srv.engine.GetTask(context.Background(), "ns-1", "T-transition")
 	require.NoError(t, err)
@@ -147,6 +151,10 @@ func TestWorkerRegisterReturnsSchedulingFields(t *testing.T) {
 		"recommended_mcp": []any{"doc_search", "find_knowledge"},
 		"launch_mode":     "manual_subagent",
 		"handoff_targets": []any{"route-data"},
+		"recovery_policy": []any{"search_docs", "deeper_research", "escalate"},
+		"fallback_mcp":    []any{"worker_handbook_get", "find_pitfalls"},
+		"stuck_playbook":  "Read docs first, then research deeper, then escalate.",
+		"escalation_mode": "leader_then_user",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "explorer", result["kind"])
@@ -155,6 +163,10 @@ func TestWorkerRegisterReturnsSchedulingFields(t *testing.T) {
 	require.Equal(t, []string{".claude/PROJECT_FINAL_SHAPE.md"}, result["required_reads"])
 	require.Equal(t, []string{"doc_search", "find_knowledge"}, result["recommended_mcp"])
 	require.Equal(t, []string{"route-data"}, result["handoff_targets"])
+	require.Equal(t, []string{"search_docs", "deeper_research", "escalate"}, result["recovery_policy"])
+	require.Equal(t, []string{"worker_handbook_get", "find_pitfalls"}, result["fallback_mcp"])
+	require.Equal(t, "Read docs first, then research deeper, then escalate.", result["stuck_playbook"])
+	require.Equal(t, "leader_then_user", result["escalation_mode"])
 }
 
 func TestWorkerPromptGetIncludesGitContext(t *testing.T) {
@@ -1017,6 +1029,10 @@ func createDagTaskForStart(t *testing.T, srv *Server, taskID string) {
 			RequiredReads:  []string{".claude/PROJECT_FINAL_SHAPE.md"},
 			RecommendedMCP: []string{"doc_search"},
 			LaunchMode:     "manual_subagent",
+			RecoveryPolicy: []string{"reread_required_reads", "deeper_research", "escalate"},
+			FallbackMCP:    []string{"find_knowledge"},
+			StuckPlaybook:  "Retry locally before escalating.",
+			EscalationMode: "leader_then_user",
 		})
 		require.NoError(t, err)
 	}

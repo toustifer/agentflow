@@ -9,20 +9,24 @@ import (
 )
 
 type workerLaunchBriefing struct {
-	Required          bool     `json:"required"`
-	Started           bool     `json:"started"`
-	LeaderNextAction  string   `json:"leader_next_action"`
-	Warning           string   `json:"warning"`
-	WorkerID          string   `json:"worker_id"`
-	TaskID            string   `json:"task_id"`
-	TaskTitle         string   `json:"task_title"`
-	WorktreePath      string   `json:"worktree_path,omitempty"`
-	Branch            string   `json:"branch,omitempty"`
-	DispatchMode      string   `json:"dispatch_mode"`
-	PromptTemplate    string   `json:"prompt_template"`
-	RequiredReads     []string `json:"required_reads"`
-	RecommendedMCP    []string `json:"recommended_mcp"`
-	RecommendedSkills []string `json:"recommended_skills"`
+	Required           bool     `json:"required"`
+	Started            bool     `json:"started"`
+	LeaderNextAction   string   `json:"leader_next_action"`
+	Warning            string   `json:"warning"`
+	WorkerID           string   `json:"worker_id"`
+	TaskID             string   `json:"task_id"`
+	TaskTitle          string   `json:"task_title"`
+	WorktreePath       string   `json:"worktree_path,omitempty"`
+	Branch             string   `json:"branch,omitempty"`
+	DispatchMode       string   `json:"dispatch_mode"`
+	PromptTemplate     string   `json:"prompt_template"`
+	RequiredReads      []string `json:"required_reads"`
+	RecommendedMCP     []string `json:"recommended_mcp"`
+	RecommendedSkills  []string `json:"recommended_skills"`
+	RecoveryPolicy     []string `json:"recovery_policy"`
+	FallbackMCP        []string `json:"fallback_mcp"`
+	StuckPlaybook      string   `json:"stuck_playbook"`
+	EscalationMode     string   `json:"escalation_mode"`
 	LaunchInstructions []string `json:"launch_instructions"`
 }
 
@@ -55,6 +59,10 @@ func (s *Server) buildWorkerLaunchBriefing(ctx context.Context, ns *engine.Names
 	if len(recommendedMCP) == 0 {
 		recommendedMCP = []string{"doc_search", "worker_handbook_get", "find_knowledge", "find_pitfalls"}
 	}
+	recoveryPolicy := cloneStringSlice(w.RecoveryPolicy)
+	fallbackMCP := cloneStringSlice(w.FallbackMCP)
+	stuckPlaybook := w.StuckPlaybook
+	escalationMode := w.EscalationMode
 
 	briefing := workerLaunchBriefing{
 		Required:         true,
@@ -71,10 +79,15 @@ func (s *Server) buildWorkerLaunchBriefing(ctx context.Context, ns *engine.Names
 		RequiredReads:    requiredReads,
 		RecommendedMCP:   recommendedMCP,
 		RecommendedSkills: []string{},
+		RecoveryPolicy:   recoveryPolicy,
+		FallbackMCP:      fallbackMCP,
+		StuckPlaybook:    stuckPlaybook,
+		EscalationMode:   escalationMode,
 		LaunchInstructions: []string{
 			"Read required_reads first.",
 			"Launch a subagent in the prepared worktree.",
 			"Pass prompt_template together with task context.",
+			"Keep task ownership when blocked and follow recovery_policy before escalating.",
 			"Do not assume this MCP call already started the worker.",
 		},
 	}
@@ -93,6 +106,10 @@ func (s *Server) buildWorkerLaunchBriefing(ctx context.Context, ns *engine.Names
 		"required_reads":      stringSliceToAny(briefing.RequiredReads),
 		"recommended_mcp":     stringSliceToAny(briefing.RecommendedMCP),
 		"recommended_skills":  stringSliceToAny(briefing.RecommendedSkills),
+		"recovery_policy":     stringSliceToAny(briefing.RecoveryPolicy),
+		"fallback_mcp":        stringSliceToAny(briefing.FallbackMCP),
+		"stuck_playbook":      briefing.StuckPlaybook,
+		"escalation_mode":     briefing.EscalationMode,
 		"launch_instructions": stringSliceToAny(briefing.LaunchInstructions),
 	}, nil
 }

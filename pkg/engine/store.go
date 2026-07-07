@@ -197,6 +197,10 @@ func migrateWorkersTable(db *sql.DB) error {
 		"recommended_mcp TEXT NOT NULL DEFAULT '[]'",
 		"launch_mode TEXT NOT NULL DEFAULT ''",
 		"handoff_targets TEXT NOT NULL DEFAULT '[]'",
+		"recovery_policy TEXT NOT NULL DEFAULT '[]'",
+		"fallback_mcp TEXT NOT NULL DEFAULT '[]'",
+		"stuck_playbook TEXT NOT NULL DEFAULT ''",
+		"escalation_mode TEXT NOT NULL DEFAULT ''",
 	}
 	for _, c := range cols {
 		colName := strings.SplitN(c, " ", 2)[0]
