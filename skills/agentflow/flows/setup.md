@@ -95,3 +95,7 @@ setup flow 不应该：
 成功后：
 - 如果当前是新项目，回到 goal flow
 - 如果当前是已有项目，回到 resume flow
+
+注意：
+- `setup` 只负责 MCP 可用性，不负责已有 repo 的 project bootstrap
+- 已有内容项目第一次接入 agentflow，应走 `init`

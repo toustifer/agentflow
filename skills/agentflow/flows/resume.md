@@ -4,6 +4,8 @@
 
 用途：当用户执行 `/agentflow resume`，或 `/agentflow` 在当前目录下发现已有 namespace/project 上下文时，主入口应按此 flow 推进。
 
+新绑定成功的已有内容项目，如果已经拥有 phase / DAG / task 上下文，也可以从 `init` 直接切入本 flow。
+
 目标不是假装自己是 Claude 内建 `/resume`，而是尽量做到同样的体验顺序：
 
 ```text

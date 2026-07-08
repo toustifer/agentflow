@@ -4,6 +4,8 @@
 
 用途：当用户执行 `/agentflow goal [目标描述]`，或 `/agentflow [目标描述]` 且当前目录还没有进入现有项目恢复流时，主入口应先经过 `intake`，再按此 flow 推进。
 
+新绑定成功但尚未形成 shape / DAG 的已有内容项目，也可以先从 `init` 转入 `intake -> goal`。
+
 ## Intake 前置
 
 在进入本 flow 之前，主入口必须先读取 `flows/intake.md`。

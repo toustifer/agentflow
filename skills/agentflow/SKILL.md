@@ -2,13 +2,14 @@
 
 项目编排引擎调度器。`/agentflow` 是唯一公开入口。
 
-`setup` / `intake` / `goal` / `resume` / `shape` 现在都作为本 bundle 内部 flow 持有：
+`setup` / `init` / `intake` / `goal` / `resume` / `shape` 现在都作为本 bundle 内部 flow 持有：
 
 ```text
 agentflow/
   SKILL.md
   flows/
     setup.md
+    init.md
     intake.md
     goal.md
     resume.md
@@ -37,6 +38,7 @@ agentflow/
 
 ```text
 如果 agentflow MCP 不可用      -> 读取 flows/setup.md
+/agentflow init [项目名]        -> 读取 flows/init.md
 /agentflow goal [目标]         -> 先读取 flows/intake.md，再读取 flows/goal.md
 /agentflow resume              -> 读取 flows/resume.md 并按 resume flow 推进
 /agentflow [无]                -> 默认读取 flows/resume.md
@@ -50,21 +52,26 @@ agentflow/
 1. 先确认 agentflow MCP 是否可用
    - 如果不可用：读取 `flows/setup.md`
 
-2. 如果 args 以 `goal` 开头
+2. 如果 args 以 `init` 开头
+   - 读取 `flows/init.md`
+   - 先判断当前已有内容项目是否已被 agentflow 接管
+   - 未接管则走 `project_init`，之后再进入 `resume` 或 `intake`
+
+3. 如果 args 以 `goal` 开头
    - 先读取 `flows/intake.md`
    - 再读取 `flows/goal.md`
    - 只有 intake 接受后，才按 goal flow 进入 shape / plan / execute
 
-3. 如果 args 以 `resume` 开头
+4. 如果 args 以 `resume` 开头
    - 读取 `flows/resume.md`
    - 先恢复项目 snapshot 和 DAG 列表
    - 再按 resume flow 决定继续哪条线
 
-4. 如果 args 为空
+5. 如果 args 为空
    - 默认读取 `flows/resume.md`
    - 默认走同一套项目恢复流程
 
-5. 其他
+6. 其他
    - 全部当作 goal
    - 先读取 `flows/intake.md`
    - 再读取 `flows/goal.md`
