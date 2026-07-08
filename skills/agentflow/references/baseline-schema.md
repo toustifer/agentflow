@@ -1,6 +1,6 @@
 # Baseline Schema
 
-`/agentflow-init` 产出的 baseline 至少应包含这些信息。
+`/agentflow init` 产出的 baseline 至少应包含这些信息。
 
 ## Required Sections
 

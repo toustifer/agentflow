@@ -1,6 +1,6 @@
 # Init Analysis Checklist
 
-`/agentflow-init` 在做现有代码库初始化时，至少按下面顺序收集事实。
+`/agentflow init` 在做现有代码库初始化时，至少按下面顺序收集事实。
 
 ## 1. Project Overview
 
