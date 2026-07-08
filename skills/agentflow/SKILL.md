@@ -57,10 +57,12 @@ agentflow/
 
 3. 如果 args 以 `resume` 开头
    - 读取 `flows/resume.md`
-   - 按 resume flow 恢复已有项目
+   - 先恢复项目 snapshot 和 DAG 列表
+   - 再按 resume flow 决定继续哪条线
 
 4. 如果 args 为空
    - 默认读取 `flows/resume.md`
+   - 默认走同一套项目恢复流程
 
 5. 其他
    - 全部当作 goal
