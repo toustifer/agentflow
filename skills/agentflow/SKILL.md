@@ -54,8 +54,8 @@ agentflow/
 
 2. 如果 args 以 `init` 开头
    - 读取 `flows/init.md`
-   - 先判断当前已有内容项目是否已被 agentflow 接管
-   - 未接管则走 `project_init`，之后再进入 `resume` 或 `intake`
+   - 把它当作已有内容项目首次接入请求
+   - 当前主 skill 只做轻桥接，重初始化逻辑交给独立 `/agentflow-init`
 
 3. 如果 args 以 `goal` 开头
    - 先读取 `flows/intake.md`
