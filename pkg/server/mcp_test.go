@@ -14,6 +14,114 @@ import (
 	"github.com/toustifer/agentflow/pkg/engine"
 )
 
+func TestProjectNextTasksKeepsWorkerBusyObservableButNotBlocking(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t)
+	_, err := srv.engine.CreateDAG(context.Background(), engine.CreateDAGRequest{
+		NamespaceID: "ns-1", ID: "dag-1", Title: "Test DAG", Branch: "feat/test",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
+		NamespaceID: "ns-1", ID: "worker-x", Name: "Worker X", PromptTemplate: "Task {task_id}",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID: "ns-1", ID: "T1", Title: "first", DAGID: "dag-1", AssignedWorker: "worker-x",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID: "ns-1", ID: "T2", Title: "second", DAGID: "dag-1", AssignedWorker: "worker-x",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.TransitionTask(context.Background(), "ns-1", "T1", engine.TransStart, map[string]string{"actor_role": "leader"})
+	require.NoError(t, err)
+
+	result, err := srv.Handle(context.Background(), "project_next_tasks", map[string]any{"namespace_id": "ns-1"})
+	require.NoError(t, err)
+	tasks := result["tasks"].([]any)
+	require.Len(t, tasks, 1)
+	item := tasks[0].(map[string]any)
+	require.Equal(t, "T2", item["task_id"])
+	require.Equal(t, true, item["deps_satisfied"])
+	require.Equal(t, true, item["worker_busy"])
+	require.Equal(t, true, item["ready"])
+	require.Equal(t, "", item["reason"])
+}
+
+func TestProjectBlockersExcludeWorkerBusy(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t)
+	_, err := srv.engine.CreateDAG(context.Background(), engine.CreateDAGRequest{
+		NamespaceID: "ns-1", ID: "dag-1", Title: "Test DAG", Branch: "feat/test",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
+		NamespaceID: "ns-1", ID: "worker-x", Name: "Worker X", PromptTemplate: "Task {task_id}",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID: "ns-1", ID: "T0", Title: "dep", DAGID: "dag-1", AssignedWorker: "worker-x",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID: "ns-1", ID: "T1", Title: "first", DAGID: "dag-1", AssignedWorker: "worker-x",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID: "ns-1", ID: "T2", Title: "second", DAGID: "dag-1", AssignedWorker: "worker-x", DependsOn: []string{"T0"},
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.TransitionTask(context.Background(), "ns-1", "T1", engine.TransStart, map[string]string{"actor_role": "leader"})
+	require.NoError(t, err)
+
+	result, err := srv.Handle(context.Background(), "project_blockers", map[string]any{"namespace_id": "ns-1"})
+	require.NoError(t, err)
+	blockers := result["blockers"].([]any)
+	require.Len(t, blockers, 1)
+	item := blockers[0].(map[string]any)
+	require.Equal(t, "dependency", item["type"])
+	require.Equal(t, "T2", item["task_id"])
+	require.Equal(t, "T0", item["blocked_by"])
+}
+
+func TestLeaderTickDoesNotEnterStuckOnSharedWorkerConcurrency(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t)
+	_, err := srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
+		NamespaceID: "ns-1", ID: "worker-x", Name: "Worker X", PromptTemplate: "Task {task_id}",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateDAG(context.Background(), engine.CreateDAGRequest{
+		NamespaceID: "ns-1", ID: "dag-1", Title: "First DAG", Branch: "feat/first",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateDAG(context.Background(), engine.CreateDAGRequest{
+		NamespaceID: "ns-1", ID: "dag-2", Title: "Second DAG", Branch: "feat/second",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID: "ns-1", ID: "T-shared-1", Title: "first", DAGID: "dag-1", AssignedWorker: "worker-x",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID: "ns-1", ID: "T-shared-2", Title: "second", DAGID: "dag-2", AssignedWorker: "worker-x",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.TransitionTask(context.Background(), "ns-1", "T-shared-1", engine.TransStart, map[string]string{"actor_role": "leader"})
+	require.NoError(t, err)
+
+	result, err := srv.Handle(context.Background(), "leader_tick", map[string]any{"namespace_id": "ns-1"})
+	require.NoError(t, err)
+	require.Equal(t, "execute", result["phase"])
+	nextTasks, ok := result["next_tasks"].([]map[string]any)
+	require.True(t, ok)
+	require.NotEmpty(t, nextTasks)
+	require.Equal(t, "T-shared-2", nextTasks[0]["task_id"])
+}
+
 func TestToolRegistryIncludesCoreTools(t *testing.T) {
 	t.Parallel()
 

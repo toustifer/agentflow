@@ -67,7 +67,7 @@ func (e *Engine) ProjectNextTasks(ctx context.Context, nsID string) ([]NextTask,
 			}
 		}
 
-		ready := depsSatisfied && !workerBusy
+		ready := depsSatisfied
 
 		var reason string
 		if !depsSatisfied {
@@ -79,8 +79,6 @@ func (e *Engine) ProjectNextTasks(ctx context.Context, nsID string) ([]NextTask,
 				}
 			}
 			reason = "blocked by: " + joinStrings(blockedBy)
-		} else if workerBusy {
-			reason = "worker " + t.AssignedWorker + " is busy on another task"
 		}
 
 		out = append(out, NextTask{
@@ -119,7 +117,7 @@ type Blocker struct {
 }
 
 // ProjectBlockers returns every task that cannot proceed right now,
-// along with the reason (dependency not met or worker busy).
+// along with the reason (currently unmet dependencies only).
 func (e *Engine) ProjectBlockers(ctx context.Context, nsID string) ([]Blocker, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
@@ -146,45 +144,6 @@ func (e *Engine) ProjectBlockers(ctx context.Context, nsID string) ([]Blocker, e
 					BlockedBy: dep,
 				})
 			}
-		}
-
-		if t.AssignedWorker == "" {
-			continue
-		}
-
-		depsSatisfied := true
-		for _, dep := range t.DependsOn {
-			depTask, ok := e.tasks[nsID][dep]
-			if !ok || depTask.State != TaskDone {
-				depsSatisfied = false
-				break
-			}
-		}
-		if !depsSatisfied {
-			continue
-		}
-
-		workerBusy := false
-		for _, other := range e.tasks[nsID] {
-			if other.ID == t.ID || other.AssignedWorker != t.AssignedWorker {
-				continue
-			}
-			switch other.State {
-			case TaskExecuting, TaskReviewPending, TaskReworkNeeded:
-				workerBusy = true
-			}
-			if workerBusy {
-				break
-			}
-		}
-		if workerBusy {
-			out = append(out, Blocker{
-				TaskID:    t.ID,
-				Title:     t.Title,
-				DAGID:     t.DAGID,
-				Type:      "worker",
-				BlockedBy: t.AssignedWorker,
-			})
 		}
 	}
 

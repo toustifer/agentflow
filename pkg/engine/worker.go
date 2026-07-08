@@ -236,8 +236,9 @@ func (e *Engine) UpdateWorker(ctx context.Context, nsID, workerID string, req Up
 	return cloneWorker(w), nil
 }
 
-// WorkerStatus computes whether a worker is busy or idle by scanning
-// all tasks across all DAGs in the namespace.
+// WorkerStatus reports whether a worker currently has active tasks across
+// all DAGs in the namespace. This is an observational signal for leader/UI
+// surfaces, not a dispatch lock.
 func (e *Engine) WorkerStatus(ctx context.Context, nsID, workerID string) WorkerStatus {
 	e.mu.RLock()
 	defer e.mu.RUnlock()

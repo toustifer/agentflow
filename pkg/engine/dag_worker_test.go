@@ -259,7 +259,7 @@ func TestWorkerStatusFromTasks(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, WorkerBusy, e.WorkerStatus(context.Background(), "ns-1", "worker-x"))
 
-	// Submit → still busy (review_pending)
+	// Submit → still busy as an observational status while review is pending
 	_, err = e.TransitionTask(context.Background(), "ns-1", "T1", TransSubmit, map[string]string{"actor_role": "worker"})
 	require.NoError(t, err)
 	require.Equal(t, WorkerBusy, e.WorkerStatus(context.Background(), "ns-1", "worker-x"))
@@ -268,6 +268,76 @@ func TestWorkerStatusFromTasks(t *testing.T) {
 	_, err = e.TransitionTask(context.Background(), "ns-1", "T1", TransPass, map[string]string{"actor_role": "reviewer"})
 	require.NoError(t, err)
 	require.Equal(t, WorkerIdle, e.WorkerStatus(context.Background(), "ns-1", "worker-x"))
+}
+
+func TestProjectNextTasksDoesNotGateOnWorkerBusy(t *testing.T) {
+	t.Parallel()
+
+	e, err := NewEngine(NewEngineConfig{})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, e.Close()) }()
+
+	_, err = e.CreateNamespace(context.Background(), CreateNamespaceRequest{ID: "ns-1", Name: "test"})
+	require.NoError(t, err)
+	_, err = e.RegisterWorker(context.Background(), RegisterWorkerRequest{
+		NamespaceID: "ns-1", ID: "worker-x", Name: "X", PromptTemplate: "Task {task_id}",
+	})
+	require.NoError(t, err)
+	_, err = e.CreateTask(context.Background(), CreateTaskRequest{
+		NamespaceID: "ns-1", ID: "T1", Title: "first", AssignedWorker: "worker-x",
+	})
+	require.NoError(t, err)
+	_, err = e.CreateTask(context.Background(), CreateTaskRequest{
+		NamespaceID: "ns-1", ID: "T2", Title: "second", AssignedWorker: "worker-x",
+	})
+	require.NoError(t, err)
+	_, err = e.TransitionTask(context.Background(), "ns-1", "T1", TransStart, map[string]string{"actor_role": "leader"})
+	require.NoError(t, err)
+
+	next, err := e.ProjectNextTasks(context.Background(), "ns-1")
+	require.NoError(t, err)
+	require.Len(t, next, 1)
+	require.Equal(t, "T2", next[0].TaskID)
+	require.Equal(t, true, next[0].DepsSatisfied)
+	require.Equal(t, true, next[0].WorkerBusy)
+	require.Equal(t, true, next[0].Ready)
+	require.Equal(t, "", next[0].Reason)
+}
+
+func TestProjectBlockersOnlyReportsDependencies(t *testing.T) {
+	t.Parallel()
+
+	e, err := NewEngine(NewEngineConfig{})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, e.Close()) }()
+
+	_, err = e.CreateNamespace(context.Background(), CreateNamespaceRequest{ID: "ns-1", Name: "test"})
+	require.NoError(t, err)
+	_, err = e.RegisterWorker(context.Background(), RegisterWorkerRequest{
+		NamespaceID: "ns-1", ID: "worker-x", Name: "X", PromptTemplate: "Task {task_id}",
+	})
+	require.NoError(t, err)
+	_, err = e.CreateTask(context.Background(), CreateTaskRequest{
+		NamespaceID: "ns-1", ID: "T0", Title: "dep", AssignedWorker: "worker-x",
+	})
+	require.NoError(t, err)
+	_, err = e.CreateTask(context.Background(), CreateTaskRequest{
+		NamespaceID: "ns-1", ID: "T1", Title: "first", AssignedWorker: "worker-x",
+	})
+	require.NoError(t, err)
+	_, err = e.CreateTask(context.Background(), CreateTaskRequest{
+		NamespaceID: "ns-1", ID: "T2", Title: "second", AssignedWorker: "worker-x", DependsOn: []string{"T0"},
+	})
+	require.NoError(t, err)
+	_, err = e.TransitionTask(context.Background(), "ns-1", "T1", TransStart, map[string]string{"actor_role": "leader"})
+	require.NoError(t, err)
+
+	blockers, err := e.ProjectBlockers(context.Background(), "ns-1")
+	require.NoError(t, err)
+	require.Len(t, blockers, 1)
+	require.Equal(t, "dependency", blockers[0].Type)
+	require.Equal(t, "T2", blockers[0].TaskID)
+	require.Equal(t, "T0", blockers[0].BlockedBy)
 }
 
 // ---------------------------------------------------------------------------

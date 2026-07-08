@@ -365,6 +365,7 @@ func (e *Engine) DAGReport(ctx context.Context, nsID, dagID string) (*DAGReport,
 }
 
 // workerStatusUnsafe is the RLock-free version for callers already holding the lock.
+// Like WorkerStatus, this is an observational signal rather than a dispatch lock.
 func (e *Engine) workerStatusUnsafe(nsID, workerID string) WorkerStatus {
 	for _, t := range e.tasks[nsID] {
 		if t.AssignedWorker == workerID {
