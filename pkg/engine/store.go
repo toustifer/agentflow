@@ -61,13 +61,15 @@ CREATE TABLE IF NOT EXISTS events (
 );
 
 CREATE TABLE IF NOT EXISTS dags (
-	id           TEXT NOT NULL,
-	namespace_id TEXT NOT NULL,
-	title        TEXT NOT NULL,
-	branch       TEXT NOT NULL DEFAULT '',
-	status       TEXT NOT NULL DEFAULT 'planning',
-	created_at   TEXT NOT NULL,
-	updated_at   TEXT NOT NULL,
+	id               TEXT NOT NULL,
+	namespace_id     TEXT NOT NULL,
+	title            TEXT NOT NULL,
+	branch           TEXT NOT NULL DEFAULT '',
+	execution_branch TEXT NOT NULL DEFAULT '',
+	base_branch      TEXT NOT NULL DEFAULT '',
+	status           TEXT NOT NULL DEFAULT 'planning',
+	created_at       TEXT NOT NULL,
+	updated_at       TEXT NOT NULL,
 	PRIMARY KEY (namespace_id, id),
 	FOREIGN KEY (namespace_id) REFERENCES namespaces(id)
 );
@@ -157,6 +159,10 @@ func openSQLite(dbPath string) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate workers: %w", err)
 	}
+	if err := migrateDAGsTable(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate dags: %w", err)
+	}
 
 	return db, nil
 }
@@ -214,6 +220,30 @@ func migrateWorkersTable(db *sql.DB) error {
 				return fmt.Errorf("add column %s: %w", colName, err)
 			}
 		}
+	}
+	return nil
+}
+func migrateDAGsTable(db *sql.DB) error {
+	cols := []string{
+		"execution_branch TEXT NOT NULL DEFAULT ''",
+		"base_branch TEXT NOT NULL DEFAULT ''",
+	}
+	for _, c := range cols {
+		colName := strings.SplitN(c, " ", 2)[0]
+		var count int
+		if err := db.QueryRow(
+			`SELECT COUNT(*) FROM pragma_table_info('dags') WHERE name = ?`, colName,
+		).Scan(&count); err != nil {
+			return fmt.Errorf("check column %s: %w", colName, err)
+		}
+		if count == 0 {
+			if _, err := db.Exec("ALTER TABLE dags ADD COLUMN " + c); err != nil {
+				return fmt.Errorf("add column %s: %w", colName, err)
+			}
+		}
+	}
+	if _, err := db.Exec(`UPDATE dags SET execution_branch = branch WHERE execution_branch = '' AND branch != ''`); err != nil {
+		return fmt.Errorf("backfill execution_branch: %w", err)
 	}
 	return nil
 }

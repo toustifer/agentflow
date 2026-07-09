@@ -41,7 +41,7 @@ func TestDispatchTaskOnceTransitionsAssignedTask(t *testing.T) {
 		NamespaceID: "ns-1",
 		ID:          "dag-1",
 		Title:       "DAG 1",
-		Branch:      "feat/test",
+		ExecutionBranch:      "feat/test",
 	})
 	require.NoError(t, err)
 	_, err = eng.CreateTask(context.Background(), engine.CreateTaskRequest{
@@ -67,11 +67,14 @@ func TestDispatchTaskOnceTransitionsAssignedTask(t *testing.T) {
 	require.Equal(t, "worker-a", resp.WorkerLaunch["worker_id"])
 	require.Equal(t, "T1", resp.WorkerLaunch["task_id"])
 	require.NotEmpty(t, resp.WorkerLaunch["prompt_template"])
+	require.NotEmpty(t, resp.WorkerLaunch["launch_ticket"])
 
 	task, err := eng.GetTask(context.Background(), "ns-1", "T1")
 	require.NoError(t, err)
 	require.Equal(t, engine.TaskExecuting, task.State)
 	require.Equal(t, resp.WorktreePath, task.Metadata["git.worktree_path"])
+	require.Equal(t, "consumed", task.Metadata["launch.ticket_state"])
+	require.NotEmpty(t, task.WorkerAgentID)
 }
 
 func TestDispatchTaskOnceIsIdempotentForExecutingTask(t *testing.T) {
@@ -104,7 +107,7 @@ func TestDispatchTaskOnceIsIdempotentForExecutingTask(t *testing.T) {
 		NamespaceID: "ns-1",
 		ID:          "dag-1",
 		Title:       "DAG 1",
-		Branch:      "feat/test",
+		ExecutionBranch:      "feat/test",
 	})
 	require.NoError(t, err)
 	_, err = eng.CreateTask(context.Background(), engine.CreateTaskRequest{
@@ -127,6 +130,8 @@ func TestDispatchTaskOnceIsIdempotentForExecutingTask(t *testing.T) {
 	require.Equal(t, first.WorkerLaunch["leader_next_action"], second.WorkerLaunch["leader_next_action"])
 	require.Equal(t, first.WorkerLaunch["worker_id"], second.WorkerLaunch["worker_id"])
 	require.Equal(t, first.WorkerLaunch["task_id"], second.WorkerLaunch["task_id"])
+	require.NotEmpty(t, first.WorkerLaunch["launch_ticket"])
+	require.NotEmpty(t, second.WorkerLaunch["launch_ticket"])
 }
 
 func TestDispatchTaskOnceRejectsCompletedTask(t *testing.T) {

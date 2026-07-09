@@ -21,7 +21,7 @@ func (e *Engine) DAGFlowchart(ctx context.Context, nsID, dagID string) (string, 
 	b.WriteString(fmt.Sprintf("  %% %s — %s (branch: %s)\n",
 		graph.DAG.ID,
 		graph.DAG.Title,
-		graph.DAG.Branch,
+		graph.DAG.ExecutionBranch,
 	))
 
 	// Status emoji mapping
@@ -63,7 +63,7 @@ func (e *Engine) DAGFlowchart(ctx context.Context, nsID, dagID string) (string, 
 	b.WriteString("```\n")
 
 	// Human-readable summary
-	b.WriteString(fmt.Sprintf("\n📊 **%s** — %s (%s)\n", graph.DAG.Title, graph.DAG.Status, graph.DAG.Branch))
+	b.WriteString(fmt.Sprintf("\n📊 **%s** — %s (%s)\n", graph.DAG.Title, graph.DAG.Status, graph.DAG.ExecutionBranch))
 	b.WriteString(fmt.Sprintf("进度: %d/%d 完成 | 执行中: %d | 待处理: %d\n",
 		doneCount(graph.Tasks), len(graph.Tasks),
 		activeCount(graph.Tasks),

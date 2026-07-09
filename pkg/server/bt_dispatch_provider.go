@@ -63,50 +63,54 @@ func (s *Server) dispatchTaskOnce(ctx context.Context, namespaceID, taskID strin
 
 	switch task.State {
 	case engine.TaskAssigned:
-		ns, err := s.engine.GetNamespace(ctx, namespaceID)
+		ns, _, metadata, err := s.prepareTaskStart(ctx, namespaceID, taskID)
 		if err != nil {
 			return dispatchTaskResponse{}, err
 		}
-		if task.DAGID == "" {
-			return dispatchTaskResponse{}, fmt.Errorf("start 被拒绝：task %q 没有关联 DAG，无法绑定 git branch/worktree", taskID)
+		now := time.Now().UTC()
+		ticket := issueLaunchTicket(now)
+		for k, v := range launchTicketMetadata(ticket, now) {
+			metadata[k] = v
 		}
-		dag, err := s.engine.GetDAG(ctx, namespaceID, task.DAGID)
+		task, err = s.engine.UpdateTask(ctx, namespaceID, taskID, engine.UpdateTaskRequest{Metadata: metadata})
 		if err != nil {
 			return dispatchTaskResponse{}, err
 		}
-		runtime, err := s.prepareTaskGitRuntime(ctx, ns, dag, task)
+		startMetadata := cloneStringMap(metadata)
+		startMetadata["actor_role"] = "leader"
+		startMetadata["launch.ticket"] = ticket
+		startMetadata["worker_agent_id"] = fmt.Sprintf("bt:%s:%d", taskID, now.UnixNano())
+		startMetadata["runtime.provider"] = "bt_service"
+		startMetadata["runtime.status"] = "started"
+		startMetadata["runtime.launched_at"] = now.Format(time.RFC3339)
+		task, err = s.engine.TransitionTask(ctx, namespaceID, taskID, engine.TransStart, startMetadata)
 		if err != nil {
 			return dispatchTaskResponse{}, err
 		}
-		metadata := map[string]string{
-			"actor_role":        "leader",
-			"git.branch":        runtime.Branch,
-			"git.base_branch":   runtime.BaseBranch,
-			"git.repo_path":     runtime.RepoPath,
-			"git.worktree_path": runtime.WorktreePath,
-			"git.head_sha":      runtime.HeadSHA,
-			"git.status":        runtime.Status,
+		resp := dispatchTaskResponse{
+			TaskID:         task.ID,
+			State:          string(task.State),
+			AssignedWorker: task.AssignedWorker,
+			WorktreePath:   task.Metadata["git.worktree_path"],
+			Branch:         task.Metadata["git.branch"],
 		}
-		task, err = s.engine.TransitionTask(ctx, namespaceID, taskID, engine.TransStart, metadata)
+		briefing, err := s.buildWorkerLaunchBriefing(ctx, ns, task)
 		if err != nil {
 			return dispatchTaskResponse{}, err
 		}
+		briefing["launch_ticket"] = ticket
+		resp.WorkerLaunch = briefing
+		return resp, nil
 	case engine.TaskExecuting:
-		// idempotent success
-	default:
-		return dispatchTaskResponse{}, fmt.Errorf("dispatch_task rejected: task %q is in state %q", taskID, task.State)
-	}
-
-	resp := dispatchTaskResponse{
-		TaskID:         task.ID,
-		State:          string(task.State),
-		AssignedWorker: task.AssignedWorker,
-	}
-	if task.Metadata != nil {
-		resp.WorktreePath = task.Metadata["git.worktree_path"]
-		resp.Branch = task.Metadata["git.branch"]
-	}
-	if task.State == engine.TaskExecuting {
+		resp := dispatchTaskResponse{
+			TaskID:         task.ID,
+			State:          string(task.State),
+			AssignedWorker: task.AssignedWorker,
+		}
+		if task.Metadata != nil {
+			resp.WorktreePath = task.Metadata["git.worktree_path"]
+			resp.Branch = task.Metadata["git.branch"]
+		}
 		ns, err := s.engine.GetNamespace(ctx, namespaceID)
 		if err != nil {
 			return dispatchTaskResponse{}, err
@@ -116,8 +120,10 @@ func (s *Server) dispatchTaskOnce(ctx context.Context, namespaceID, taskID strin
 			return dispatchTaskResponse{}, err
 		}
 		resp.WorkerLaunch = briefing
+		return resp, nil
+	default:
+		return dispatchTaskResponse{}, fmt.Errorf("dispatch_task rejected: task %q is in state %q", taskID, task.State)
 	}
-	return resp, nil
 }
 
 func (p *btDispatchProvider) handleDispatchTask(w http.ResponseWriter, r *http.Request) {

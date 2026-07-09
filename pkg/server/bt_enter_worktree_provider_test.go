@@ -26,7 +26,7 @@ func TestEnterWorktreeOnceEnsuresAssignedTaskWorktree(t *testing.T) {
 	require.NoError(t, err)
 	_, err = eng.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{NamespaceID: "ns-1", ID: "worker-a", Name: "Worker A"})
 	require.NoError(t, err)
-	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{NamespaceID: "ns-1", ID: "dag-1", Title: "DAG 1", Branch: "feat/test"})
+	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{NamespaceID: "ns-1", ID: "dag-1", Title: "DAG 1", ExecutionBranch: "feat/test"})
 	require.NoError(t, err)
 	_, err = eng.CreateTask(context.Background(), engine.CreateTaskRequest{NamespaceID: "ns-1", ID: "T1", Title: "task 1", AssignedWorker: "worker-a", DAGID: "dag-1"})
 	require.NoError(t, err)
@@ -61,7 +61,7 @@ func TestEnterWorktreeOnceRejectsWorkerMismatch(t *testing.T) {
 	require.NoError(t, err)
 	_, err = eng.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{NamespaceID: "ns-1", ID: "worker-a", Name: "Worker A"})
 	require.NoError(t, err)
-	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{NamespaceID: "ns-1", ID: "dag-1", Title: "DAG 1", Branch: "feat/test"})
+	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{NamespaceID: "ns-1", ID: "dag-1", Title: "DAG 1", ExecutionBranch: "feat/test"})
 	require.NoError(t, err)
 	_, err = eng.CreateTask(context.Background(), engine.CreateTaskRequest{NamespaceID: "ns-1", ID: "T1", Title: "task 1", AssignedWorker: "worker-a", DAGID: "dag-1"})
 	require.NoError(t, err)
@@ -69,6 +69,39 @@ func TestEnterWorktreeOnceRejectsWorkerMismatch(t *testing.T) {
 	_, err = srv.enterWorktreeOnce(context.Background(), "ns-1", "T1", "worker-b")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "assigned to worker")
+}
+
+func TestEnterWorktreeOnceReusesSameDAGWorktreeAcrossSequentialTasks(t *testing.T) {
+	t.Parallel()
+
+	repoPath := initTestGitRepo(t)
+	eng, err := engine.NewEngine(engine.NewEngineConfig{})
+	require.NoError(t, err)
+	defer eng.Close()
+
+	srv, err := New(eng, Config{})
+	require.NoError(t, err)
+
+	_, err = eng.CreateNamespace(context.Background(), engine.CreateNamespaceRequest{ID: "ns-1", Name: "test", Metadata: map[string]string{"workdir": repoPath}})
+	require.NoError(t, err)
+	_, err = eng.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{NamespaceID: "ns-1", ID: "worker-a", Name: "Worker A", PromptTemplate: "Task {task_id}"})
+	require.NoError(t, err)
+	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{NamespaceID: "ns-1", ID: "dag-1", Title: "DAG 1", ExecutionBranch: "feat/test"})
+	require.NoError(t, err)
+	_, err = eng.CreateTask(context.Background(), engine.CreateTaskRequest{NamespaceID: "ns-1", ID: "T1", Title: "task 1", AssignedWorker: "worker-a", DAGID: "dag-1"})
+	require.NoError(t, err)
+	_, err = eng.CreateTask(context.Background(), engine.CreateTaskRequest{NamespaceID: "ns-1", ID: "T2", Title: "task 2", AssignedWorker: "worker-a", DAGID: "dag-1", DependsOn: []string{"T1"}})
+	require.NoError(t, err)
+
+	first, err := srv.enterWorktreeOnce(context.Background(), "ns-1", "T1", "worker-a")
+	require.NoError(t, err)
+	_, err = eng.UpdateTask(context.Background(), "ns-1", "T1", engine.UpdateTaskRequest{State: engine.TaskDone})
+	require.NoError(t, err)
+	second, err := srv.enterWorktreeOnce(context.Background(), "ns-1", "T2", "worker-a")
+	require.NoError(t, err)
+	firstPath := first.Git["worktree_path"]
+	secondPath := second.Git["worktree_path"]
+	require.Equal(t, firstPath, secondPath)
 }
 
 func TestEnterWorktreeProviderHandlesValidation(t *testing.T) {

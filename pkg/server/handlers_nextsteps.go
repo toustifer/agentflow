@@ -337,9 +337,11 @@ func dagToSummaryMap(dag *engine.DAG) map[string]any {
 		return nil
 	}
 	return map[string]any{
-		"id":     dag.ID,
-		"title":  dag.Title,
-		"branch": dag.Branch,
-		"status": string(dag.Status),
+		"id":               dag.ID,
+		"title":            dag.Title,
+		"branch":           dag.ExecutionBranch,
+		"execution_branch": dag.ExecutionBranch,
+		"base_branch":      dag.BaseBranch,
+		"status":           string(dag.Status),
 	}
 }

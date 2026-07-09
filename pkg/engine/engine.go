@@ -405,6 +405,8 @@ func (e *Engine) CreateTask(ctx context.Context, req CreateTaskRequest) (*Task, 
 type UpdateTaskRequest struct {
 	State          TaskState
 	ReviewMetadata map[string]string
+	Metadata       map[string]string
+	WorkerAgentID  string
 }
 
 func (e *Engine) UpdateTask(ctx context.Context, nsID, taskID string, req UpdateTaskRequest) (*Task, error) {
@@ -418,9 +420,15 @@ func (e *Engine) UpdateTask(ctx context.Context, nsID, taskID string, req Update
 	if req.State != "" {
 		task.State = req.State
 	}
-	if req.ReviewMetadata != nil {
+	if req.WorkerAgentID != "" {
+		task.WorkerAgentID = req.WorkerAgentID
+	}
+	if req.ReviewMetadata != nil || req.Metadata != nil {
 		task.Metadata = ensureMap(task.Metadata)
 		for k, v := range req.ReviewMetadata {
+			task.Metadata[k] = v
+		}
+		for k, v := range req.Metadata {
 			task.Metadata[k] = v
 		}
 	}
@@ -448,6 +456,9 @@ func (e *Engine) TransitionTask(ctx context.Context, nsID, taskID string, t Task
 			return nil, err
 		}
 	}
+	if err := validateTransitionMetadata(task, t, meta); err != nil {
+		return nil, err
+	}
 
 	from := task.State
 	to, err := applyTransition(task, t)
@@ -470,6 +481,10 @@ func (e *Engine) TransitionTask(ctx context.Context, nsID, taskID string, t Task
 			}
 			task.Metadata[k] = v
 		}
+	}
+	if t == TransStart || t == TransResume {
+		task.Metadata = ensureMap(task.Metadata)
+		task.Metadata["launch.ticket_state"] = "consumed"
 	}
 
 	ev := Event{
@@ -695,6 +710,57 @@ func (e *Engine) appendEventLocked(nsID, taskID string, event Event) {
 		e.history[nsID] = make(map[string][]Event)
 	}
 	e.history[nsID][taskID] = append(e.history[nsID][taskID], event)
+}
+
+func validateTransitionMetadata(task *Task, t TaskTransition, meta map[string]string) error {
+	switch t {
+	case TransStart, TransResume:
+		hasProtocolSignals := meta["launch.ticket"] != "" || meta["worker_agent_id"] != "" || meta["runtime.status"] != ""
+		if !hasProtocolSignals {
+			if task.Metadata == nil || task.Metadata["launch.ticket"] == "" {
+				return nil
+			}
+		}
+		launchTicket := meta["launch.ticket"]
+		if launchTicket == "" {
+			return fmt.Errorf("%w: %s requires launch.ticket", ErrInvalidTransition, t)
+		}
+		issued := ""
+		issuedState := ""
+		if task.Metadata != nil {
+			issued = task.Metadata["launch.ticket"]
+			issuedState = task.Metadata["launch.ticket_state"]
+			if expiresAt := task.Metadata["launch.ticket_expires_at"]; expiresAt != "" {
+				deadline, err := time.Parse(time.RFC3339, expiresAt)
+				if err != nil {
+					return fmt.Errorf("%w: invalid launch.ticket_expires_at", ErrInvalidTransition)
+				}
+				if time.Now().UTC().After(deadline) {
+					return fmt.Errorf("%w: launch ticket expired", ErrInvalidTransition)
+				}
+			}
+		}
+		if issued == "" || issued != launchTicket {
+			return fmt.Errorf("%w: launch ticket mismatch", ErrInvalidTransition)
+		}
+		if issuedState != "issued" {
+			return fmt.Errorf("%w: launch ticket is not active", ErrInvalidTransition)
+		}
+		workerAgentID := meta["worker_agent_id"]
+		if workerAgentID == "" {
+			return fmt.Errorf("%w: %s requires worker_agent_id", ErrInvalidTransition, t)
+		}
+		if meta["runtime.provider"] == "" {
+			return fmt.Errorf("%w: %s requires runtime.provider", ErrInvalidTransition, t)
+		}
+		if meta["runtime.status"] != "started" {
+			return fmt.Errorf("%w: %s requires runtime.status=started", ErrInvalidTransition, t)
+		}
+		if task.WorkerAgentID != "" && task.WorkerAgentID != workerAgentID {
+			return fmt.Errorf("%w: task already bound to another worker_agent_id", ErrInvalidTransition)
+		}
+	}
+	return nil
 }
 
 func applyTransition(task *Task, t TaskTransition) (TaskState, error) {

@@ -113,7 +113,7 @@ func TestReportStuckOnceRejectsExecutingTask(t *testing.T) {
 	require.NoError(t, err)
 	_, err = eng.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{NamespaceID: "ns-1", ID: "worker-a", Name: "Worker A", PromptTemplate: "Task {task_id}", RecoveryPolicy: []string{"search_docs"}, FallbackMCP: []string{"find_knowledge"}, StuckPlaybook: "Investigate before escalating.", EscalationMode: "leader_first"})
 	require.NoError(t, err)
-	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{NamespaceID: "ns-1", ID: "dag-1", Title: "DAG 1", Branch: "feat/test"})
+	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{NamespaceID: "ns-1", ID: "dag-1", Title: "DAG 1", ExecutionBranch: "feat/test"})
 	require.NoError(t, err)
 	_, err = eng.CreateTask(context.Background(), engine.CreateTaskRequest{NamespaceID: "ns-1", ID: "T1", Title: "task 1", AssignedWorker: "worker-a", DAGID: "dag-1"})
 	require.NoError(t, err)

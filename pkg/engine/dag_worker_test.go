@@ -27,12 +27,12 @@ func TestDAGCRUD(t *testing.T) {
 		NamespaceID: "ns-1",
 		ID:          "dag-1",
 		Title:       "添加登录功能",
-		Branch:      "feat/login",
+		ExecutionBranch: "feat/login",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "dag-1", dag.ID)
 	require.Equal(t, "添加登录功能", dag.Title)
-	require.Equal(t, "feat/login", dag.Branch)
+	require.Equal(t, "feat/login", dag.ExecutionBranch)
 	require.Equal(t, DAGPlanning, dag.Status)
 
 	// Get
@@ -54,11 +54,11 @@ func TestDAGCRUD(t *testing.T) {
 	// Update
 	dag3, err := e.UpdateDAG(context.Background(), "ns-1", "dag-1", UpdateDAGRequest{
 		Title:  "添加登录功能 v2",
-		Branch: "feat/login-v2",
+		ExecutionBranch: "feat/login-v2",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "添加登录功能 v2", dag3.Title)
-	require.Equal(t, "feat/login-v2", dag3.Branch)
+	require.Equal(t, "feat/login-v2", dag3.ExecutionBranch)
 }
 
 func TestDAGGraphFromTasks(t *testing.T) {
@@ -71,7 +71,7 @@ func TestDAGGraphFromTasks(t *testing.T) {
 	_, err = e.CreateNamespace(context.Background(), CreateNamespaceRequest{ID: "ns-1", Name: "test"})
 	require.NoError(t, err)
 	_, err = e.CreateDAG(context.Background(), CreateDAGRequest{
-		NamespaceID: "ns-1", ID: "dag-1", Title: "x", Branch: "feat/x",
+		NamespaceID: "ns-1", ID: "dag-1", Title: "x", ExecutionBranch: "feat/x",
 	})
 	require.NoError(t, err)
 
@@ -117,7 +117,7 @@ func TestCircularDependencyDetected(t *testing.T) {
 	_, err = e.CreateNamespace(context.Background(), CreateNamespaceRequest{ID: "ns-1", Name: "test"})
 	require.NoError(t, err)
 	_, err = e.CreateDAG(context.Background(), CreateDAGRequest{
-		NamespaceID: "ns-1", ID: "dag-1", Title: "x", Branch: "x",
+		NamespaceID: "ns-1", ID: "dag-1", Title: "x", ExecutionBranch: "x",
 	})
 	require.NoError(t, err)
 
@@ -354,11 +354,11 @@ func TestQueryTasksByDAG(t *testing.T) {
 	_, err = e.CreateNamespace(context.Background(), CreateNamespaceRequest{ID: "ns-1", Name: "test"})
 	require.NoError(t, err)
 	_, err = e.CreateDAG(context.Background(), CreateDAGRequest{
-		NamespaceID: "ns-1", ID: "dag-1", Title: "x", Branch: "x",
+		NamespaceID: "ns-1", ID: "dag-1", Title: "x", ExecutionBranch: "x",
 	})
 	require.NoError(t, err)
 	_, err = e.CreateDAG(context.Background(), CreateDAGRequest{
-		NamespaceID: "ns-1", ID: "dag-2", Title: "y", Branch: "y",
+		NamespaceID: "ns-1", ID: "dag-2", Title: "y", ExecutionBranch: "y",
 	})
 	require.NoError(t, err)
 
@@ -398,7 +398,7 @@ func TestQueryTasksReadyOnly(t *testing.T) {
 	_, err = e.CreateNamespace(context.Background(), CreateNamespaceRequest{ID: "ns-1", Name: "test"})
 	require.NoError(t, err)
 	_, err = e.CreateDAG(context.Background(), CreateDAGRequest{
-		NamespaceID: "ns-1", ID: "dag-1", Title: "x", Branch: "x",
+		NamespaceID: "ns-1", ID: "dag-1", Title: "x", ExecutionBranch: "x",
 	})
 	require.NoError(t, err)
 
@@ -474,7 +474,7 @@ func TestDAGWorkerPersistence(t *testing.T) {
 	_, err = e1.CreateNamespace(context.Background(), CreateNamespaceRequest{ID: "ns-1", Name: "test"})
 	require.NoError(t, err)
 	_, err = e1.CreateDAG(context.Background(), CreateDAGRequest{
-		NamespaceID: "ns-1", ID: "dag-1", Title: "添加登录", Branch: "feat/login",
+		NamespaceID: "ns-1", ID: "dag-1", Title: "添加登录", ExecutionBranch: "feat/login",
 	})
 	require.NoError(t, err)
 	_, err = e1.RegisterWorker(context.Background(), RegisterWorkerRequest{
@@ -491,7 +491,7 @@ func TestDAGWorkerPersistence(t *testing.T) {
 	dag, err := e2.GetDAG(context.Background(), "ns-1", "dag-1")
 	require.NoError(t, err)
 	require.Equal(t, "添加登录", dag.Title)
-	require.Equal(t, "feat/login", dag.Branch)
+	require.Equal(t, "feat/login", dag.ExecutionBranch)
 
 	w, err := e2.GetWorker(context.Background(), "ns-1", "worker-auth")
 	require.NoError(t, err)

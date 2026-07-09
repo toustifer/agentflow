@@ -92,6 +92,12 @@ shape flow 完成后，先确认当前 repo 已经有首个 commit，可作为 w
 - 用 `task_create_batch`
 - task 粒度应与 worker 角色、Rigid 边界、依赖顺序一致
 
+**Branch 约束：**
+- project / namespace 只持有默认 `base_branch`（通常是 `main`）
+- 每个 DAG 必须显式创建自己的 `execution_branch`（通常是 `feature/...`）
+- `main` 只作为基线/最终合并目标，不作为活跃 DAG 的执行 branch
+- 同一 DAG 下的 task 默认在同一条 `execution_branch` 上顺序推进
+
 ## Execute
 
 每条 task 的 dispatch 模板：
@@ -109,6 +115,9 @@ shape flow 完成后，先确认当前 repo 已经有首个 commit，可作为 w
 
 约束：
 - Worker 只在独立 worktree 工作
+- task worktree 永远围绕 DAG 的 `execution_branch` 创建
+- `git.branch` = DAG execution branch；`git.base_branch` = project/DAG base branch
+- 同一 DAG 若共用单一 execution branch，则 task 应按顺序推进，不应误以为可以在同一 branch 上并行挂多个 worktree
 - 不能跳过 commit
 - 不能跳过 worker diary
 - 触碰 Rigid 决策必须先和用户重新对齐

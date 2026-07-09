@@ -101,6 +101,7 @@ func (s *Server) buildWorkerLaunchBriefing(ctx context.Context, ns *engine.Names
 		"task_title":          briefing.TaskTitle,
 		"worktree_path":       briefing.WorktreePath,
 		"branch":              briefing.Branch,
+		"launch_ticket":       task.Metadata["launch.ticket"],
 		"dispatch_mode":       briefing.DispatchMode,
 		"prompt_template":     briefing.PromptTemplate,
 		"required_reads":      stringSliceToAny(briefing.RequiredReads),

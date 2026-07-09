@@ -52,7 +52,8 @@ mcp__agentflow__dag_list(namespace_id)
 resume 默认要先展示一个紧凑 DAG 列表，优先列 **非完成 DAG**：
 - `dag_id`
 - `title`
-- `branch`
+- `execution_branch`
+- `base_branch`（如果可见）
 - `status`
 - 如果容易拿到，再补 `progress / completion`
 

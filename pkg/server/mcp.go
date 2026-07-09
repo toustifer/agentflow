@@ -20,7 +20,9 @@ func (s *Server) Tools() []ToolSpec {
 		{Name: "namespace_delete"},
 		{Name: "namespace_list"},
 		{Name: "task_create"},
+		{Name: "task_prepare_start"},
 		{Name: "task_transition"},
+		{Name: "task_worker_sync"},
 		{Name: "task_get"},
 		{Name: "task_list"},
 		{Name: "task_history"},
@@ -93,8 +95,22 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 		}
 		s.syncTask(ctx, result.task)
 		return result.payload, nil
+	case "task_prepare_start":
+		result, err := s.handleTaskPrepareStart(ctx, input)
+		if err != nil {
+			return nil, err
+		}
+		s.syncTask(ctx, result.task)
+		return result.payload, nil
 	case "task_transition":
 		result, err := s.handleTaskTransition(ctx, input)
+		if err != nil {
+			return nil, err
+		}
+		s.syncTask(ctx, result.task)
+		return result.payload, nil
+	case "task_worker_sync":
+		result, err := s.handleTaskWorkerSync(ctx, input)
 		if err != nil {
 			return nil, err
 		}
@@ -241,6 +257,141 @@ type taskListResult struct {
 type taskHistoryResult struct {
 	task    *engine.Task
 	payload map[string]any
+}
+
+const launchTicketTTL = 5 * time.Minute
+
+func issueLaunchTicket(now time.Time) string {
+	return fmt.Sprintf("lt_%d", now.UnixNano())
+}
+
+func launchTicketMetadata(ticket string, now time.Time) map[string]string {
+	expiresAt := now.Add(launchTicketTTL)
+	return map[string]string{
+		"launch.ticket":            ticket,
+		"launch.ticket_issued_at":  now.Format(time.RFC3339),
+		"launch.ticket_expires_at": expiresAt.Format(time.RFC3339),
+		"launch.ticket_state":      "issued",
+		"launch.mode":              "leader_spawn_then_bind",
+	}
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if values == nil {
+		return nil
+	}
+	out := make(map[string]string, len(values))
+	for k, v := range values {
+		out[k] = v
+	}
+	return out
+}
+
+func (s *Server) prepareTaskStart(ctx context.Context, namespaceID, taskID string) (*engine.Namespace, *engine.Task, map[string]string, error) {
+	ns, err := s.engine.GetNamespace(ctx, namespaceID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	task, err := s.engine.GetTask(ctx, namespaceID, taskID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if task.DAGID == "" {
+		return nil, nil, nil, fmt.Errorf("start 被拒绝：task %q 没有关联 DAG，无法绑定 git branch/worktree", taskID)
+	}
+	dag, err := s.engine.GetDAG(ctx, namespaceID, task.DAGID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	runtime, err := s.prepareTaskGitRuntime(ctx, ns, dag, task)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	metadata := map[string]string{
+		"git.branch":        runtime.Branch,
+		"git.base_branch":   runtime.BaseBranch,
+		"git.repo_path":     runtime.RepoPath,
+		"git.worktree_path": runtime.WorktreePath,
+		"git.head_sha":      runtime.HeadSHA,
+		"git.status":        runtime.Status,
+	}
+	return ns, task, metadata, nil
+}
+
+func (s *Server) handleTaskPrepareStart(ctx context.Context, input map[string]any) (taskResult, error) {
+	namespaceID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return taskResult{}, err
+	}
+	taskID, err := requiredString(input, "task_id")
+	if err != nil {
+		return taskResult{}, err
+	}
+	ns, task, metadata, err := s.prepareTaskStart(ctx, namespaceID, taskID)
+	if err != nil {
+		return taskResult{}, err
+	}
+	now := time.Now().UTC()
+	ticket := issueLaunchTicket(now)
+	for k, v := range launchTicketMetadata(ticket, now) {
+		metadata[k] = v
+	}
+	task, err = s.engine.UpdateTask(ctx, namespaceID, taskID, engine.UpdateTaskRequest{Metadata: metadata})
+	if err != nil {
+		return taskResult{}, err
+	}
+	payload := taskToMap(task)
+	briefing, err := s.buildWorkerLaunchBriefing(ctx, ns, task)
+	if err != nil {
+		return taskResult{}, err
+	}
+	payload["launch_ticket"] = ticket
+	payload["worker_launch"] = briefing
+	return taskResult{task: task, payload: payload}, nil
+}
+
+func (s *Server) handleTaskWorkerSync(ctx context.Context, input map[string]any) (taskResult, error) {
+	namespaceID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return taskResult{}, err
+	}
+	taskID, err := requiredString(input, "task_id")
+	if err != nil {
+		return taskResult{}, err
+	}
+	workerAgentID, err := requiredString(input, "worker_agent_id")
+	if err != nil {
+		return taskResult{}, err
+	}
+	event, err := requiredString(input, "event")
+	if err != nil {
+		return taskResult{}, err
+	}
+	payload, err := optionalStringMap(input, "payload")
+	if err != nil {
+		return taskResult{}, err
+	}
+	task, err := s.engine.GetTask(ctx, namespaceID, taskID)
+	if err != nil {
+		return taskResult{}, err
+	}
+	if task.WorkerAgentID == "" || task.WorkerAgentID != workerAgentID {
+		return taskResult{}, fmt.Errorf("task_worker_sync 被拒绝：worker_agent_id 与 task 当前绑定不匹配")
+	}
+	metadata := map[string]string{
+		"runtime.status":        event,
+		"runtime.last_event_at": time.Now().UTC().Format(time.RFC3339),
+	}
+	if payload != nil {
+		for k, v := range payload {
+			metadata["runtime."+k] = v
+		}
+	}
+	task, err = s.engine.UpdateTask(ctx, namespaceID, taskID, engine.UpdateTaskRequest{Metadata: metadata})
+	if err != nil {
+		return taskResult{}, err
+	}
+	return taskResult{task: task, payload: taskToMap(task)}, nil
 }
 
 func (s *Server) handleNamespaceCreate(ctx context.Context, input map[string]any) (namespaceCreateResult, error) {
@@ -421,34 +572,15 @@ func (s *Server) handleTaskTransition(ctx context.Context, input map[string]any)
 	}
 
 	if transitionValue == "start" || transitionValue == "resume" {
-		// 校验并准备 task worktree
-		ns, err := s.engine.GetNamespace(ctx, namespaceID)
+		ns, _, runtimeMetadata, err := s.prepareTaskStart(ctx, namespaceID, taskID)
 		if err != nil {
 			return taskResult{}, err
 		}
-		task, err := s.engine.GetTask(ctx, namespaceID, taskID)
-		if err != nil {
-			return taskResult{}, err
+		for k, v := range runtimeMetadata {
+			metadata[k] = v
 		}
-		if task.DAGID == "" {
-			return taskResult{}, fmt.Errorf("%s 被拒绝：task %q 没有关联 DAG，无法绑定 git branch/worktree", transitionValue, taskID)
-		}
-		dag, err := s.engine.GetDAG(ctx, namespaceID, task.DAGID)
-		if err != nil {
-			return taskResult{}, err
-		}
-		runtime, err := s.prepareTaskGitRuntime(ctx, ns, dag, task)
-		if err != nil {
-			return taskResult{}, err
-		}
-		metadata["git.branch"] = runtime.Branch
-		metadata["git.base_branch"] = runtime.BaseBranch
-		metadata["git.repo_path"] = runtime.RepoPath
-		metadata["git.worktree_path"] = runtime.WorktreePath
-		metadata["git.head_sha"] = runtime.HeadSHA
-		metadata["git.status"] = runtime.Status
 
-		task, err = s.engine.TransitionTask(ctx, namespaceID, taskID, engine.TaskTransition(transitionValue), metadata)
+		task, err := s.engine.TransitionTask(ctx, namespaceID, taskID, engine.TaskTransition(transitionValue), metadata)
 		if err != nil {
 			return taskResult{}, err
 		}

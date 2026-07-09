@@ -328,7 +328,7 @@ func (e *Engine) WorkerPromptGet(ctx context.Context, nsID, workerID, taskID, ta
 			if dag, ok := e.dags[nsID][dagID]; ok {
 				dagTitle = dag.Title
 				if branch == "" {
-					branch = dag.Branch
+					branch = dag.ExecutionBranch
 				}
 			}
 		}

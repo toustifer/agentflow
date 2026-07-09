@@ -34,8 +34,8 @@ func (s *Server) prepareTaskGitRuntime(ctx context.Context, ns *engine.Namespace
 	if ns.Metadata == nil || ns.Metadata["workdir"] == "" {
 		return nil, fmt.Errorf("start 被拒绝：namespace %q 没有绑定 workdir。请在创建 namespace 时传入 metadata.workdir（绝对路径）", ns.ID)
 	}
-	if dag.Branch == "" {
-		return nil, fmt.Errorf("start 被拒绝：task %q 所属 DAG %q 没有 branch。请先为 DAG 设置 branch", task.ID, dag.ID)
+	if dag.ExecutionBranch == "" {
+		return nil, fmt.Errorf("start 被拒绝：task %q 所属 DAG %q 没有 execution_branch。请先为 DAG 设置 execution_branch", task.ID, dag.ID)
 	}
 
 	repoPath, err := validateGitRepo(ctx, ns.Metadata["workdir"])
@@ -45,6 +45,12 @@ func (s *Server) prepareTaskGitRuntime(ctx context.Context, ns *engine.Namespace
 	baseBranch, err := detectBaseBranch(ctx, repoPath, ns.Metadata["git_main_branch"])
 	if err != nil {
 		return nil, err
+	}
+	if dag.BaseBranch != "" {
+		baseBranch = dag.BaseBranch
+	}
+	if dag.ExecutionBranch == baseBranch {
+		return nil, fmt.Errorf("start 被拒绝：DAG %q 的 execution_branch %q 不能等于 base_branch %q", dag.ID, dag.ExecutionBranch, baseBranch)
 	}
 	hasHead, err := repoHasHeadCommit(ctx, repoPath)
 	if err != nil {
@@ -57,10 +63,10 @@ func (s *Server) prepareTaskGitRuntime(ctx context.Context, ns *engine.Namespace
 	if err := os.MkdirAll(filepath.Dir(worktreePath), 0o755); err != nil {
 		return nil, fmt.Errorf("create worktree parent: %w", err)
 	}
-	if err := ensureTaskWorktree(ctx, repoPath, worktreePath, dag.Branch, baseBranch); err != nil {
+	if err := ensureTaskWorktree(ctx, repoPath, worktreePath, dag.ExecutionBranch, baseBranch); err != nil {
 		return nil, err
 	}
-	status, err := inspectTaskGitRuntime(ctx, repoPath, worktreePath, dag.Branch, baseBranch)
+	status, err := inspectTaskGitRuntime(ctx, repoPath, worktreePath, dag.ExecutionBranch, baseBranch)
 	if err != nil {
 		return nil, err
 	}
@@ -78,8 +84,10 @@ func (s *Server) resolveTaskGitRuntime(ctx context.Context, ns *engine.Namespace
 		return nil, fmt.Errorf("namespace %q 没有绑定 workdir", ns.ID)
 	}
 	branch := ""
+	baseBranch := ""
 	if dag != nil {
-		branch = dag.Branch
+		branch = dag.ExecutionBranch
+		baseBranch = dag.BaseBranch
 	}
 	if task.Metadata != nil && task.Metadata["git.branch"] != "" {
 		branch = task.Metadata["git.branch"]
@@ -91,9 +99,11 @@ func (s *Server) resolveTaskGitRuntime(ctx context.Context, ns *engine.Namespace
 	if err != nil {
 		return nil, err
 	}
-	baseBranch, err := detectBaseBranch(ctx, repoPath, ns.Metadata["git_main_branch"])
-	if err != nil {
-		return nil, err
+	if baseBranch == "" {
+		baseBranch, err = detectBaseBranch(ctx, repoPath, ns.Metadata["git_main_branch"])
+		if err != nil {
+			return nil, err
+		}
 	}
 	worktreePath := worktreePathForTask(repoPath, ns, dag, task)
 	if task.Metadata != nil && task.Metadata["git.worktree_path"] != "" {
@@ -128,11 +138,13 @@ func worktreePathForTask(repoPath string, ns *engine.Namespace, dag *engine.DAG,
 	if ns != nil && ns.Metadata != nil && ns.Metadata["worktree_root"] != "" {
 		root = ns.Metadata["worktree_root"]
 	}
-	dagID := "standalone"
 	if dag != nil && dag.ID != "" {
-		dagID = dag.ID
+		return filepath.Join(root, dag.ID)
 	}
-	return filepath.Join(root, dagID, task.ID)
+	if task != nil && task.ID != "" {
+		return filepath.Join(root, "standalone", task.ID)
+	}
+	return filepath.Join(root, "standalone")
 }
 
 func validateGitRepo(ctx context.Context, workdir string) (string, error) {

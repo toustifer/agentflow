@@ -57,7 +57,7 @@ mcp__agentflow__project_init(...)
 - `workdir`
 - `rules_file_path`
 - `has_head_commit`
-- 绑定后的 repo / branch 事实
+- 绑定后的 repo / default base branch 事实
 
 这一步的目标是：
 - 让当前项目进入 agentflow namespace

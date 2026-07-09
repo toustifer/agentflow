@@ -94,13 +94,14 @@ func TestLeaderTickDispatchesTaskViaPython(t *testing.T) {
 		NamespaceID: "ns-dispatch",
 		ID:          "worker-a",
 		Name:        "Worker A",
+		PromptTemplate: "Task {task_id} in {worktree_path} on {branch}",
 	})
 	require.NoError(t, err)
 	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{
 		NamespaceID: "ns-dispatch",
 		ID:          "dag-1",
 		Title:       "DAG 1",
-		Branch:      "feat/test",
+		ExecutionBranch:      "feat/test",
 	})
 	require.NoError(t, err)
 	_, err = eng.CreateTask(context.Background(), engine.CreateTaskRequest{
@@ -150,13 +151,14 @@ func TestLeaderTickMonitorTasksViaPython(t *testing.T) {
 		NamespaceID: "ns-monitor",
 		ID:          "worker-a",
 		Name:        "Worker A",
+		PromptTemplate: "Task {task_id} in {worktree_path} on {branch}",
 	})
 	require.NoError(t, err)
 	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{
 		NamespaceID: "ns-monitor",
 		ID:          "dag-1",
 		Title:       "DAG 1",
-		Branch:      "feat/test",
+		ExecutionBranch:      "feat/test",
 	})
 	require.NoError(t, err)
 	_, err = eng.CreateTask(context.Background(), engine.CreateTaskRequest{
@@ -215,13 +217,14 @@ func TestLeaderTickReportStuckViaPython(t *testing.T) {
 		NamespaceID: "ns-stuck",
 		ID:          "worker-a",
 		Name:        "Worker A",
+		PromptTemplate: "Task {task_id} in {worktree_path} on {branch}",
 	})
 	require.NoError(t, err)
 	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{
 		NamespaceID: "ns-stuck",
 		ID:          "dag-1",
 		Title:       "DAG 1",
-		Branch:      "feat/test",
+		ExecutionBranch:      "feat/test",
 	})
 	require.NoError(t, err)
 	_, err = eng.CreateTask(context.Background(), engine.CreateTaskRequest{
@@ -232,7 +235,7 @@ func TestLeaderTickReportStuckViaPython(t *testing.T) {
 		DAGID:          "dag-1",
 	})
 	require.NoError(t, err)
-	_, err = eng.TransitionTask(context.Background(), "ns-stuck", "T1", engine.TransStart, map[string]string{"actor_role": "leader"})
+	_, err = srv.dispatchTaskOnce(context.Background(), "ns-stuck", "T1")
 	require.NoError(t, err)
 	_, err = eng.TransitionTask(context.Background(), "ns-stuck", "T1", engine.TransSubmit, map[string]string{"actor_role": "worker"})
 	require.NoError(t, err)
@@ -299,7 +302,7 @@ func TestLifecycleEndToEndViaPython(t *testing.T) {
 		NamespaceID: "ns-lifecycle",
 		ID:          "dag-1",
 		Title:       "DAG 1",
-		Branch:      "feat/test",
+		ExecutionBranch:      "feat/test",
 	})
 	require.NoError(t, err)
 	_, err = eng.CreateTask(context.Background(), engine.CreateTaskRequest{
@@ -394,7 +397,7 @@ func TestLeaderTickReportDoneViaPython(t *testing.T) {
 	require.NoError(t, err)
 	_, err = eng.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{NamespaceID: "ns-done", ID: "worker-a", Name: "Worker A"})
 	require.NoError(t, err)
-	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{NamespaceID: "ns-done", ID: "dag-1", Title: "DAG 1", Branch: "feat/test"})
+	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{NamespaceID: "ns-done", ID: "dag-1", Title: "DAG 1", ExecutionBranch: "feat/test"})
 	require.NoError(t, err)
 	_, err = eng.CreateTask(context.Background(), engine.CreateTaskRequest{NamespaceID: "ns-done", ID: "T1", Title: "task 1", AssignedWorker: "worker-a", DAGID: "dag-1"})
 	require.NoError(t, err)

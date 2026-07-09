@@ -22,25 +22,28 @@ const (
 )
 
 type DAG struct {
-	ID          string    `json:"id"`
-	NamespaceID string    `json:"namespace_id"`
-	Title       string    `json:"title"`
-	Branch      string    `json:"branch"`
-	Status      DAGStatus `json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID              string    `json:"id"`
+	NamespaceID     string    `json:"namespace_id"`
+	Title           string    `json:"title"`
+	ExecutionBranch string    `json:"execution_branch"`
+	BaseBranch      string    `json:"base_branch,omitempty"`
+	Status          DAGStatus `json:"status"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type CreateDAGRequest struct {
-	NamespaceID string
-	ID          string
-	Title       string
-	Branch      string
+	NamespaceID     string
+	ID              string
+	Title           string
+	ExecutionBranch string
+	BaseBranch      string
 }
 
 type UpdateDAGRequest struct {
-	Title  string
-	Branch string
+	Title           string
+	ExecutionBranch string
+	BaseBranch      string
 }
 
 // DAGGraph is the derived view returned by GetDAG.
@@ -84,6 +87,9 @@ func (e *Engine) CreateDAG(ctx context.Context, req CreateDAGRequest) (*DAG, err
 	if req.ID == "" {
 		return nil, errors.New("dag id is required")
 	}
+	if req.ExecutionBranch == "" {
+		return nil, errors.New("dag execution_branch is required")
+	}
 
 	if e.dags[req.NamespaceID] == nil {
 		e.dags[req.NamespaceID] = make(map[string]*DAG)
@@ -94,13 +100,14 @@ func (e *Engine) CreateDAG(ctx context.Context, req CreateDAGRequest) (*DAG, err
 
 	now := time.Now().UTC()
 	dag := &DAG{
-		ID:          req.ID,
-		NamespaceID: req.NamespaceID,
-		Title:       req.Title,
-		Branch:      req.Branch,
-		Status:      DAGPlanning,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:              req.ID,
+		NamespaceID:     req.NamespaceID,
+		Title:           req.Title,
+		ExecutionBranch: req.ExecutionBranch,
+		BaseBranch:      req.BaseBranch,
+		Status:          DAGPlanning,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	e.dags[req.NamespaceID][req.ID] = dag
 
@@ -158,8 +165,11 @@ func (e *Engine) UpdateDAG(ctx context.Context, nsID, dagID string, req UpdateDA
 	if req.Title != "" {
 		dag.Title = req.Title
 	}
-	if req.Branch != "" {
-		dag.Branch = req.Branch
+	if req.ExecutionBranch != "" {
+		dag.ExecutionBranch = req.ExecutionBranch
+	}
+	if req.BaseBranch != "" {
+		dag.BaseBranch = req.BaseBranch
 	}
 	dag.UpdatedAt = time.Now().UTC()
 

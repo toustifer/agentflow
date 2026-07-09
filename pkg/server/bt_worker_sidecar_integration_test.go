@@ -25,7 +25,7 @@ func TestWorkerTaskGetConfirmViaPython(t *testing.T) {
 	require.NoError(t, err)
 	_, err = eng.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{NamespaceID: "ns-worker", ID: "worker-a", Name: "Worker A", PromptTemplate: "Task {task_id} in {worktree_path} on {branch}"})
 	require.NoError(t, err)
-	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{NamespaceID: "ns-worker", ID: "dag-1", Title: "DAG 1", Branch: "feat/test"})
+	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{NamespaceID: "ns-worker", ID: "dag-1", Title: "DAG 1", ExecutionBranch: "feat/test"})
 	require.NoError(t, err)
 	_, err = eng.CreateTask(context.Background(), engine.CreateTaskRequest{NamespaceID: "ns-worker", ID: "T1", Title: "task 1", AssignedWorker: "worker-a", DAGID: "dag-1"})
 	require.NoError(t, err)

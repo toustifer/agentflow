@@ -244,6 +244,33 @@ func (s *Server) handleTaskCreateBatch(ctx context.Context, input map[string]any
 // DAG handlers
 // ---------------------------------------------------------------------------
 
+func (s *Server) validateDAGBranches(ctx context.Context, nsID, executionBranch, baseBranch string) (string, error) {
+	if strings.TrimSpace(executionBranch) == "" {
+		return "", fmt.Errorf("execution_branch is required")
+	}
+	ns, err := s.engine.GetNamespace(ctx, nsID)
+	if err != nil {
+		return "", err
+	}
+	resolvedBase := baseBranch
+	if resolvedBase == "" {
+		if ns.Metadata != nil && ns.Metadata["git_main_branch"] != "" {
+			resolvedBase = ns.Metadata["git_main_branch"]
+		} else {
+			resolvedBase = "main"
+		}
+	}
+	if executionBranch == resolvedBase {
+		return "", fmt.Errorf("execution_branch %q cannot equal base_branch %q", executionBranch, resolvedBase)
+	}
+	for _, reserved := range []string{"main", "master"} {
+		if executionBranch == reserved {
+			return "", fmt.Errorf("execution_branch %q is reserved; use a feature branch", executionBranch)
+		}
+	}
+	return resolvedBase, nil
+}
+
 func (s *Server) handleDAGCreate(ctx context.Context, input map[string]any) (map[string]any, error) {
 	nsID, err := requiredString(input, "namespace_id")
 	if err != nil {
@@ -258,12 +285,22 @@ func (s *Server) handleDAGCreate(ctx context.Context, input map[string]any) (map
 		return nil, err
 	}
 	branch, _ := optionalString(input, "branch")
+	executionBranch, _ := optionalString(input, "execution_branch")
+	baseBranch, _ := optionalString(input, "base_branch")
+	if executionBranch == "" {
+		executionBranch = branch
+	}
+	resolvedBase, err := s.validateDAGBranches(ctx, nsID, executionBranch, baseBranch)
+	if err != nil {
+		return nil, err
+	}
 
 	dag, err := s.engine.CreateDAG(ctx, engine.CreateDAGRequest{
-		NamespaceID: nsID,
-		ID:          dagID,
-		Title:       title,
-		Branch:      branch,
+		NamespaceID:     nsID,
+		ID:              dagID,
+		Title:           title,
+		ExecutionBranch: executionBranch,
+		BaseBranch:      resolvedBase,
 	})
 	if err != nil {
 		return nil, err
@@ -322,10 +359,30 @@ func (s *Server) handleDAGUpdate(ctx context.Context, input map[string]any) (map
 	}
 	title, _ := optionalString(input, "title")
 	branch, _ := optionalString(input, "branch")
+	executionBranch, _ := optionalString(input, "execution_branch")
+	baseBranch, _ := optionalString(input, "base_branch")
+	if executionBranch == "" {
+		executionBranch = branch
+	}
+	if executionBranch == "" {
+		existing, err := s.engine.GetDAG(ctx, nsID, dagID)
+		if err != nil {
+			return nil, err
+		}
+		executionBranch = existing.ExecutionBranch
+		if baseBranch == "" {
+			baseBranch = existing.BaseBranch
+		}
+	}
+	resolvedBase, err := s.validateDAGBranches(ctx, nsID, executionBranch, baseBranch)
+	if err != nil {
+		return nil, err
+	}
 
 	dag, err := s.engine.UpdateDAG(ctx, nsID, dagID, engine.UpdateDAGRequest{
-		Title:  title,
-		Branch: branch,
+		Title:           title,
+		ExecutionBranch: executionBranch,
+		BaseBranch:      resolvedBase,
 	})
 	if err != nil {
 		return nil, err
@@ -1137,13 +1194,15 @@ func (s *Server) handleProjectBlockers(ctx context.Context, input map[string]any
 
 func dagToMap(dag *engine.DAG) map[string]any {
 	return map[string]any{
-		"id":          dag.ID,
-		"namespace_id": dag.NamespaceID,
-		"title":       dag.Title,
-		"branch":      dag.Branch,
-		"status":      string(dag.Status),
-		"created_at":  dag.CreatedAt,
-		"updated_at":  dag.UpdatedAt,
+		"id":               dag.ID,
+		"namespace_id":     dag.NamespaceID,
+		"title":            dag.Title,
+		"branch":           dag.ExecutionBranch,
+		"execution_branch": dag.ExecutionBranch,
+		"base_branch":      dag.BaseBranch,
+		"status":           string(dag.Status),
+		"created_at":       dag.CreatedAt,
+		"updated_at":       dag.UpdatedAt,
 	}
 }
 
