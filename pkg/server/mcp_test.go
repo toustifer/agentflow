@@ -487,6 +487,141 @@ func TestSameDAGTasksReuseSingleWorktreePath(t *testing.T) {
 	require.Equal(t, sharedPath, prepared["metadata"].(map[string]any)["git.worktree_path"])
 }
 
+func TestTaskWorkerSyncUpdatesDAGLeaseHolderState(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t)
+	createDagTaskForStart(t, srv, "T-sync-dag-lease")
+	prepared, err := srv.Handle(context.Background(), "task_prepare_start", map[string]any{
+		"namespace_id": "ns-1",
+		"task_id":      "T-sync-dag-lease",
+	})
+	require.NoError(t, err)
+	launchTicket := prepared["launch_ticket"].(string)
+	_, err = srv.Handle(context.Background(), "task_transition", map[string]any{
+		"namespace_id": "ns-1",
+		"task_id":      "T-sync-dag-lease",
+		"transition":   "start",
+		"actor_role":   "leader",
+		"metadata": map[string]any{
+			"launch.ticket":       launchTicket,
+			"worker_agent_id":     "agent-dag-lease",
+			"runtime.provider":    "claude_code",
+			"runtime.status":      "started",
+			"runtime.launched_at": time.Now().UTC().Format(time.RFC3339),
+		},
+	})
+	require.NoError(t, err)
+	_, err = srv.Handle(context.Background(), "task_worker_sync", map[string]any{
+		"namespace_id":    "ns-1",
+		"task_id":         "T-sync-dag-lease",
+		"worker_agent_id": "agent-dag-lease",
+		"event":           "completed",
+	})
+	require.NoError(t, err)
+	dag, err := srv.engine.GetDAG(context.Background(), "ns-1", "dag-1")
+	require.NoError(t, err)
+	require.Equal(t, "", dag.ActiveTaskID)
+	require.Equal(t, "", dag.LeaseHolderTaskID)
+	require.Equal(t, "", dag.LeaseHolderAgentID)
+}
+
+func TestSequentialTasksTransferDAGLeaseHolder(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t)
+	_, err := srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
+		NamespaceID: "ns-1", ID: "worker-leased", Name: "Worker Leased", PromptTemplate: "Task {task_id}",
+	})
+	require.NoError(t, err)
+	_, err = srv.Handle(context.Background(), "dag_create", map[string]any{
+		"namespace_id":     "ns-1",
+		"dag_id":           "dag-lease-transfer",
+		"title":            "Lease Transfer",
+		"execution_branch": "feature/lease-transfer",
+		"base_branch":      "main",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID:    "ns-1",
+		ID:             "T-lease-1",
+		Title:          "first",
+		AssignedWorker: "worker-leased",
+		DAGID:          "dag-lease-transfer",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID:    "ns-1",
+		ID:             "T-lease-2",
+		Title:          "second",
+		AssignedWorker: "worker-leased",
+		DAGID:          "dag-lease-transfer",
+		DependsOn:      []string{"T-lease-1"},
+	})
+	require.NoError(t, err)
+
+	firstPrepared, err := srv.Handle(context.Background(), "task_prepare_start", map[string]any{"namespace_id": "ns-1", "task_id": "T-lease-1"})
+	require.NoError(t, err)
+	firstTicket := firstPrepared["launch_ticket"].(string)
+	_, err = srv.Handle(context.Background(), "task_transition", map[string]any{
+		"namespace_id": "ns-1",
+		"task_id":      "T-lease-1",
+		"transition":   "start",
+		"actor_role":   "leader",
+		"metadata": map[string]any{
+			"launch.ticket":       firstTicket,
+			"worker_agent_id":     "agent-lease-1",
+			"runtime.provider":    "claude_code",
+			"runtime.status":      "started",
+			"runtime.launched_at": time.Now().UTC().Format(time.RFC3339),
+		},
+	})
+	require.NoError(t, err)
+	dag, err := srv.engine.GetDAG(context.Background(), "ns-1", "dag-lease-transfer")
+	require.NoError(t, err)
+	require.Equal(t, "T-lease-1", dag.ActiveTaskID)
+	require.Equal(t, "agent-lease-1", dag.LeaseHolderAgentID)
+
+	_, err = srv.engine.UpdateTask(context.Background(), "ns-1", "T-lease-1", engine.UpdateTaskRequest{State: engine.TaskDone})
+	require.NoError(t, err)
+	_, err = srv.engine.UpdateDAGRuntime(context.Background(), "ns-1", "dag-lease-transfer", engine.UpdateDAGRuntimeRequest{
+		ActiveTaskID:        "",
+		LeaseHolderTaskID:   "",
+		LeaseHolderWorkerID: "",
+		LeaseHolderAgentID:  "",
+		LeaseAcquiredAt:     "",
+		RuntimeUpdatedAt:    time.Now().UTC().Format(time.RFC3339),
+	})
+	require.NoError(t, err)
+
+	secondPrepared, err := srv.Handle(context.Background(), "task_prepare_start", map[string]any{"namespace_id": "ns-1", "task_id": "T-lease-2"})
+	require.NoError(t, err)
+	secondTicket := secondPrepared["launch_ticket"].(string)
+	_, err = srv.Handle(context.Background(), "task_transition", map[string]any{
+		"namespace_id": "ns-1",
+		"task_id":      "T-lease-2",
+		"transition":   "start",
+		"actor_role":   "leader",
+		"metadata": map[string]any{
+			"launch.ticket":       secondTicket,
+			"worker_agent_id":     "agent-lease-2",
+			"runtime.provider":    "claude_code",
+			"runtime.status":      "started",
+			"runtime.launched_at": time.Now().UTC().Format(time.RFC3339),
+		},
+	})
+	require.NoError(t, err)
+	dag, err = srv.engine.GetDAG(context.Background(), "ns-1", "dag-lease-transfer")
+	require.NoError(t, err)
+	require.Equal(t, "T-lease-2", dag.ActiveTaskID)
+	require.Equal(t, "agent-lease-2", dag.LeaseHolderAgentID)
+
+	result, err := srv.Handle(context.Background(), "worktree_get", map[string]any{"namespace_id": "ns-1", "task_id": "T-lease-2"})
+	require.NoError(t, err)
+	require.Equal(t, "dag", result["worktree_owner_scope"])
+	require.Equal(t, "T-lease-2", result["active_task_id"])
+}
+
 func TestWorkerRegisterRequiresPromptTemplate(t *testing.T) {
 	t.Parallel()
 

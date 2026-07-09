@@ -26,6 +26,10 @@ type monitorTaskResponse struct {
 	AvailableTransitions []string `json:"available_transitions,omitempty"`
 	WorktreePath         string   `json:"worktree_path,omitempty"`
 	Branch               string   `json:"branch,omitempty"`
+	ActiveTaskID         string   `json:"active_task_id,omitempty"`
+	LeaseHolderTaskID    string   `json:"lease_holder_task_id,omitempty"`
+	LeaseHolderWorkerID  string   `json:"lease_holder_worker_id,omitempty"`
+	LeaseHolderAgentID   string   `json:"lease_holder_agent_id,omitempty"`
 }
 
 type btMonitorProvider struct {
@@ -69,7 +73,18 @@ func (s *Server) monitorTaskOnce(ctx context.Context, namespaceID, taskID string
 		ReviewCycle:          task.ReviewCycle,
 		AvailableTransitions: availableTransitionsToStrings(engine.AvailableTransitions(task)),
 	}
-	if task.Metadata != nil {
+	var dag *engine.DAG
+	if task.DAGID != "" {
+		dag, _ = s.engine.GetDAG(ctx, namespaceID, task.DAGID)
+	}
+	if dag != nil {
+		resp.WorktreePath = dag.WorktreePath
+		resp.Branch = dag.ExecutionBranch
+		resp.ActiveTaskID = dag.ActiveTaskID
+		resp.LeaseHolderTaskID = dag.LeaseHolderTaskID
+		resp.LeaseHolderWorkerID = dag.LeaseHolderWorkerID
+		resp.LeaseHolderAgentID = dag.LeaseHolderAgentID
+	} else if task.Metadata != nil {
 		resp.WorktreePath = task.Metadata["git.worktree_path"]
 		resp.Branch = task.Metadata["git.branch"]
 	}

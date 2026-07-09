@@ -287,25 +287,25 @@ func cloneStringMap(values map[string]string) map[string]string {
 	return out
 }
 
-func (s *Server) prepareTaskStart(ctx context.Context, namespaceID, taskID string) (*engine.Namespace, *engine.Task, map[string]string, error) {
+func (s *Server) prepareTaskStart(ctx context.Context, namespaceID, taskID string) (*engine.Namespace, *engine.Task, *engine.DAG, map[string]string, error) {
 	ns, err := s.engine.GetNamespace(ctx, namespaceID)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	task, err := s.engine.GetTask(ctx, namespaceID, taskID)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	if task.DAGID == "" {
-		return nil, nil, nil, fmt.Errorf("start 被拒绝：task %q 没有关联 DAG，无法绑定 git branch/worktree", taskID)
+		return nil, nil, nil, nil, fmt.Errorf("start 被拒绝：task %q 没有关联 DAG，无法绑定 git branch/worktree", taskID)
 	}
 	dag, err := s.engine.GetDAG(ctx, namespaceID, task.DAGID)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	runtime, err := s.prepareTaskGitRuntime(ctx, ns, dag, task)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	metadata := map[string]string{
 		"git.branch":        runtime.Branch,
@@ -315,7 +315,7 @@ func (s *Server) prepareTaskStart(ctx context.Context, namespaceID, taskID strin
 		"git.head_sha":      runtime.HeadSHA,
 		"git.status":        runtime.Status,
 	}
-	return ns, task, metadata, nil
+	return ns, task, dag, metadata, nil
 }
 
 func (s *Server) handleTaskPrepareStart(ctx context.Context, input map[string]any) (taskResult, error) {
@@ -327,7 +327,7 @@ func (s *Server) handleTaskPrepareStart(ctx context.Context, input map[string]an
 	if err != nil {
 		return taskResult{}, err
 	}
-	ns, task, metadata, err := s.prepareTaskStart(ctx, namespaceID, taskID)
+	ns, task, dag, metadata, err := s.prepareTaskStart(ctx, namespaceID, taskID)
 	if err != nil {
 		return taskResult{}, err
 	}
@@ -337,6 +337,15 @@ func (s *Server) handleTaskPrepareStart(ctx context.Context, input map[string]an
 		metadata[k] = v
 	}
 	task, err = s.engine.UpdateTask(ctx, namespaceID, taskID, engine.UpdateTaskRequest{Metadata: metadata})
+	if err != nil {
+		return taskResult{}, err
+	}
+	_, err = s.engine.UpdateDAGRuntime(ctx, namespaceID, dag.ID, engine.UpdateDAGRuntimeRequest{
+		WorktreePath:     metadata["git.worktree_path"],
+		WorktreeStatus:   metadata["git.status"],
+		HeadSHA:          metadata["git.head_sha"],
+		RuntimeUpdatedAt: now.Format(time.RFC3339),
+	})
 	if err != nil {
 		return taskResult{}, err
 	}
@@ -390,6 +399,31 @@ func (s *Server) handleTaskWorkerSync(ctx context.Context, input map[string]any)
 	task, err = s.engine.UpdateTask(ctx, namespaceID, taskID, engine.UpdateTaskRequest{Metadata: metadata})
 	if err != nil {
 		return taskResult{}, err
+	}
+	if task.DAGID != "" {
+		activeTaskID := task.ID
+		leaseHolderTaskID := task.ID
+		leaseHolderWorkerID := task.AssignedWorker
+		leaseHolderAgentID := task.WorkerAgentID
+		if event == "completed" || event == "failed" || event == "lost" || event == "cancelled" {
+			activeTaskID = ""
+			leaseHolderTaskID = ""
+			leaseHolderWorkerID = ""
+			leaseHolderAgentID = ""
+		}
+		_, err = s.engine.UpdateDAGRuntime(ctx, namespaceID, task.DAGID, engine.UpdateDAGRuntimeRequest{
+			WorktreePath:        task.Metadata["git.worktree_path"],
+			WorktreeStatus:      task.Metadata["git.status"],
+			HeadSHA:             task.Metadata["git.head_sha"],
+			ActiveTaskID:        activeTaskID,
+			LeaseHolderTaskID:   leaseHolderTaskID,
+			LeaseHolderWorkerID: leaseHolderWorkerID,
+			LeaseHolderAgentID:  leaseHolderAgentID,
+			RuntimeUpdatedAt:    time.Now().UTC().Format(time.RFC3339),
+		})
+		if err != nil {
+			return taskResult{}, err
+		}
 	}
 	return taskResult{task: task, payload: taskToMap(task)}, nil
 }
@@ -572,7 +606,7 @@ func (s *Server) handleTaskTransition(ctx context.Context, input map[string]any)
 	}
 
 	if transitionValue == "start" || transitionValue == "resume" {
-		ns, _, runtimeMetadata, err := s.prepareTaskStart(ctx, namespaceID, taskID)
+		ns, _, dag, runtimeMetadata, err := s.prepareTaskStart(ctx, namespaceID, taskID)
 		if err != nil {
 			return taskResult{}, err
 		}
@@ -581,6 +615,20 @@ func (s *Server) handleTaskTransition(ctx context.Context, input map[string]any)
 		}
 
 		task, err := s.engine.TransitionTask(ctx, namespaceID, taskID, engine.TaskTransition(transitionValue), metadata)
+		if err != nil {
+			return taskResult{}, err
+		}
+		_, err = s.engine.UpdateDAGRuntime(ctx, namespaceID, dag.ID, engine.UpdateDAGRuntimeRequest{
+			WorktreePath:        metadata["git.worktree_path"],
+			WorktreeStatus:      metadata["git.status"],
+			HeadSHA:             metadata["git.head_sha"],
+			ActiveTaskID:        task.ID,
+			LeaseHolderTaskID:   task.ID,
+			LeaseHolderWorkerID: task.AssignedWorker,
+			LeaseHolderAgentID:  task.WorkerAgentID,
+			LeaseAcquiredAt:     time.Now().UTC().Format(time.RFC3339),
+			RuntimeUpdatedAt:    time.Now().UTC().Format(time.RFC3339),
+		})
 		if err != nil {
 			return taskResult{}, err
 		}

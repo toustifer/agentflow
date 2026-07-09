@@ -63,7 +63,7 @@ func (s *Server) dispatchTaskOnce(ctx context.Context, namespaceID, taskID strin
 
 	switch task.State {
 	case engine.TaskAssigned:
-		ns, _, metadata, err := s.prepareTaskStart(ctx, namespaceID, taskID)
+		ns, _, dag, metadata, err := s.prepareTaskStart(ctx, namespaceID, taskID)
 		if err != nil {
 			return dispatchTaskResponse{}, err
 		}
@@ -76,6 +76,15 @@ func (s *Server) dispatchTaskOnce(ctx context.Context, namespaceID, taskID strin
 		if err != nil {
 			return dispatchTaskResponse{}, err
 		}
+		_, err = s.engine.UpdateDAGRuntime(ctx, namespaceID, dag.ID, engine.UpdateDAGRuntimeRequest{
+			WorktreePath:     metadata["git.worktree_path"],
+			WorktreeStatus:   metadata["git.status"],
+			HeadSHA:          metadata["git.head_sha"],
+			RuntimeUpdatedAt: now.Format(time.RFC3339),
+		})
+		if err != nil {
+			return dispatchTaskResponse{}, err
+		}
 		startMetadata := cloneStringMap(metadata)
 		startMetadata["actor_role"] = "leader"
 		startMetadata["launch.ticket"] = ticket
@@ -84,6 +93,20 @@ func (s *Server) dispatchTaskOnce(ctx context.Context, namespaceID, taskID strin
 		startMetadata["runtime.status"] = "started"
 		startMetadata["runtime.launched_at"] = now.Format(time.RFC3339)
 		task, err = s.engine.TransitionTask(ctx, namespaceID, taskID, engine.TransStart, startMetadata)
+		if err != nil {
+			return dispatchTaskResponse{}, err
+		}
+		_, err = s.engine.UpdateDAGRuntime(ctx, namespaceID, dag.ID, engine.UpdateDAGRuntimeRequest{
+			WorktreePath:        metadata["git.worktree_path"],
+			WorktreeStatus:      metadata["git.status"],
+			HeadSHA:             metadata["git.head_sha"],
+			ActiveTaskID:        task.ID,
+			LeaseHolderTaskID:   task.ID,
+			LeaseHolderWorkerID: task.AssignedWorker,
+			LeaseHolderAgentID:  task.WorkerAgentID,
+			LeaseAcquiredAt:     now.Format(time.RFC3339),
+			RuntimeUpdatedAt:    now.Format(time.RFC3339),
+		})
 		if err != nil {
 			return dispatchTaskResponse{}, err
 		}

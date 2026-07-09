@@ -61,15 +61,24 @@ CREATE TABLE IF NOT EXISTS events (
 );
 
 CREATE TABLE IF NOT EXISTS dags (
-	id               TEXT NOT NULL,
-	namespace_id     TEXT NOT NULL,
-	title            TEXT NOT NULL,
-	branch           TEXT NOT NULL DEFAULT '',
-	execution_branch TEXT NOT NULL DEFAULT '',
-	base_branch      TEXT NOT NULL DEFAULT '',
-	status           TEXT NOT NULL DEFAULT 'planning',
-	created_at       TEXT NOT NULL,
-	updated_at       TEXT NOT NULL,
+	id                    TEXT NOT NULL,
+	namespace_id          TEXT NOT NULL,
+	title                 TEXT NOT NULL,
+	branch                TEXT NOT NULL DEFAULT '',
+	execution_branch      TEXT NOT NULL DEFAULT '',
+	base_branch           TEXT NOT NULL DEFAULT '',
+	worktree_path         TEXT NOT NULL DEFAULT '',
+	worktree_status       TEXT NOT NULL DEFAULT '',
+	head_sha              TEXT NOT NULL DEFAULT '',
+	active_task_id        TEXT NOT NULL DEFAULT '',
+	lease_holder_task_id  TEXT NOT NULL DEFAULT '',
+	lease_holder_worker_id TEXT NOT NULL DEFAULT '',
+	lease_holder_agent_id TEXT NOT NULL DEFAULT '',
+	lease_acquired_at     TEXT NOT NULL DEFAULT '',
+	runtime_updated_at    TEXT NOT NULL DEFAULT '',
+	status                TEXT NOT NULL DEFAULT 'planning',
+	created_at            TEXT NOT NULL,
+	updated_at            TEXT NOT NULL,
 	PRIMARY KEY (namespace_id, id),
 	FOREIGN KEY (namespace_id) REFERENCES namespaces(id)
 );
@@ -227,6 +236,15 @@ func migrateDAGsTable(db *sql.DB) error {
 	cols := []string{
 		"execution_branch TEXT NOT NULL DEFAULT ''",
 		"base_branch TEXT NOT NULL DEFAULT ''",
+		"worktree_path TEXT NOT NULL DEFAULT ''",
+		"worktree_status TEXT NOT NULL DEFAULT ''",
+		"head_sha TEXT NOT NULL DEFAULT ''",
+		"active_task_id TEXT NOT NULL DEFAULT ''",
+		"lease_holder_task_id TEXT NOT NULL DEFAULT ''",
+		"lease_holder_worker_id TEXT NOT NULL DEFAULT ''",
+		"lease_holder_agent_id TEXT NOT NULL DEFAULT ''",
+		"lease_acquired_at TEXT NOT NULL DEFAULT ''",
+		"runtime_updated_at TEXT NOT NULL DEFAULT ''",
 	}
 	for _, c := range cols {
 		colName := strings.SplitN(c, " ", 2)[0]

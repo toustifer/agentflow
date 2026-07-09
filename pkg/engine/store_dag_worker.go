@@ -11,8 +11,8 @@ import (
 
 func insertDAG(db *sql.DB, dag *DAG) error {
 	_, err := db.Exec(
-		`INSERT INTO dags (id, namespace_id, title, branch, execution_branch, base_branch, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		dag.ID, dag.NamespaceID, dag.Title, dag.ExecutionBranch, dag.ExecutionBranch, dag.BaseBranch, string(dag.Status),
+		`INSERT INTO dags (id, namespace_id, title, branch, execution_branch, base_branch, worktree_path, worktree_status, head_sha, active_task_id, lease_holder_task_id, lease_holder_worker_id, lease_holder_agent_id, lease_acquired_at, runtime_updated_at, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		dag.ID, dag.NamespaceID, dag.Title, dag.ExecutionBranch, dag.ExecutionBranch, dag.BaseBranch, dag.WorktreePath, dag.WorktreeStatus, dag.HeadSHA, dag.ActiveTaskID, dag.LeaseHolderTaskID, dag.LeaseHolderWorkerID, dag.LeaseHolderAgentID, dag.LeaseAcquiredAt, dag.RuntimeUpdatedAt, string(dag.Status),
 		dag.CreatedAt.Format(time.RFC3339Nano), dag.UpdatedAt.Format(time.RFC3339Nano),
 	)
 	return err
@@ -20,8 +20,8 @@ func insertDAG(db *sql.DB, dag *DAG) error {
 
 func updateDAG(db *sql.DB, dag *DAG) error {
 	_, err := db.Exec(
-		`UPDATE dags SET title=?, branch=?, execution_branch=?, base_branch=?, status=?, updated_at=? WHERE namespace_id=? AND id=?`,
-		dag.Title, dag.ExecutionBranch, dag.ExecutionBranch, dag.BaseBranch, string(dag.Status),
+		`UPDATE dags SET title=?, branch=?, execution_branch=?, base_branch=?, worktree_path=?, worktree_status=?, head_sha=?, active_task_id=?, lease_holder_task_id=?, lease_holder_worker_id=?, lease_holder_agent_id=?, lease_acquired_at=?, runtime_updated_at=?, status=?, updated_at=? WHERE namespace_id=? AND id=?`,
+		dag.Title, dag.ExecutionBranch, dag.ExecutionBranch, dag.BaseBranch, dag.WorktreePath, dag.WorktreeStatus, dag.HeadSHA, dag.ActiveTaskID, dag.LeaseHolderTaskID, dag.LeaseHolderWorkerID, dag.LeaseHolderAgentID, dag.LeaseAcquiredAt, dag.RuntimeUpdatedAt, string(dag.Status),
 		dag.UpdatedAt.Format(time.RFC3339Nano),
 		dag.NamespaceID, dag.ID,
 	)
@@ -29,7 +29,7 @@ func updateDAG(db *sql.DB, dag *DAG) error {
 }
 
 func loadDAGs(db *sql.DB) (map[string]map[string]*DAG, error) {
-	rows, err := db.Query(`SELECT id, namespace_id, title, branch, execution_branch, base_branch, status, created_at, updated_at FROM dags`)
+	rows, err := db.Query(`SELECT id, namespace_id, title, branch, execution_branch, base_branch, worktree_path, worktree_status, head_sha, active_task_id, lease_holder_task_id, lease_holder_worker_id, lease_holder_agent_id, lease_acquired_at, runtime_updated_at, status, created_at, updated_at FROM dags`)
 	if err != nil {
 		return nil, err
 	}
@@ -38,9 +38,9 @@ func loadDAGs(db *sql.DB) (map[string]map[string]*DAG, error) {
 	out := make(map[string]map[string]*DAG)
 	for rows.Next() {
 		var (
-			id, nsID, title, branch, executionBranch, baseBranch, statusStr, createdAtStr, updatedAtStr string
+			id, nsID, title, branch, executionBranch, baseBranch, worktreePath, worktreeStatus, headSHA, activeTaskID, leaseHolderTaskID, leaseHolderWorkerID, leaseHolderAgentID, leaseAcquiredAt, runtimeUpdatedAt, statusStr, createdAtStr, updatedAtStr string
 		)
-		if err := rows.Scan(&id, &nsID, &title, &branch, &executionBranch, &baseBranch, &statusStr, &createdAtStr, &updatedAtStr); err != nil {
+		if err := rows.Scan(&id, &nsID, &title, &branch, &executionBranch, &baseBranch, &worktreePath, &worktreeStatus, &headSHA, &activeTaskID, &leaseHolderTaskID, &leaseHolderWorkerID, &leaseHolderAgentID, &leaseAcquiredAt, &runtimeUpdatedAt, &statusStr, &createdAtStr, &updatedAtStr); err != nil {
 			return nil, err
 		}
 		if executionBranch == "" {
@@ -49,14 +49,23 @@ func loadDAGs(db *sql.DB) (map[string]map[string]*DAG, error) {
 		createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
 		updatedAt, _ := time.Parse(time.RFC3339Nano, updatedAtStr)
 		dag := &DAG{
-			ID:              id,
-			NamespaceID:     nsID,
-			Title:           title,
-			ExecutionBranch: executionBranch,
-			BaseBranch:      baseBranch,
-			Status:          DAGStatus(statusStr),
-			CreatedAt:       createdAt,
-			UpdatedAt:       updatedAt,
+			ID:                  id,
+			NamespaceID:         nsID,
+			Title:               title,
+			ExecutionBranch:     executionBranch,
+			BaseBranch:          baseBranch,
+			WorktreePath:        worktreePath,
+			WorktreeStatus:      worktreeStatus,
+			HeadSHA:             headSHA,
+			ActiveTaskID:        activeTaskID,
+			LeaseHolderTaskID:   leaseHolderTaskID,
+			LeaseHolderWorkerID: leaseHolderWorkerID,
+			LeaseHolderAgentID:  leaseHolderAgentID,
+			LeaseAcquiredAt:     leaseAcquiredAt,
+			RuntimeUpdatedAt:    runtimeUpdatedAt,
+			Status:              DAGStatus(statusStr),
+			CreatedAt:           createdAt,
+			UpdatedAt:           updatedAt,
 		}
 		if out[nsID] == nil {
 			out[nsID] = make(map[string]*DAG)

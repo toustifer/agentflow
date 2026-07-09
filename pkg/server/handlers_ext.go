@@ -1123,16 +1123,21 @@ func (s *Server) handleWorktreeGet(ctx context.Context, input map[string]any) (m
 		return nil, err
 	}
 	return map[string]any{
-		"namespace_id":  nsID,
-		"task_id":       taskID,
-		"dag_id":        task.DAGID,
-		"repo_path":     runtime.RepoPath,
-		"worktree_path": runtime.WorktreePath,
-		"branch":        runtime.Branch,
-		"base_branch":   runtime.BaseBranch,
-		"head_sha":      runtime.HeadSHA,
-		"status":        runtime.Status,
-		"metadata":      cloneStringMapAny(task.Metadata),
+		"namespace_id":         nsID,
+		"task_id":              taskID,
+		"dag_id":               task.DAGID,
+		"repo_path":            runtime.RepoPath,
+		"worktree_path":        runtime.WorktreePath,
+		"branch":               runtime.Branch,
+		"base_branch":          runtime.BaseBranch,
+		"head_sha":             runtime.HeadSHA,
+		"status":               runtime.Status,
+		"worktree_owner_scope": "dag",
+		"active_task_id":       dag.ActiveTaskID,
+		"lease_holder_task_id": dag.LeaseHolderTaskID,
+		"lease_holder_worker_id": dag.LeaseHolderWorkerID,
+		"lease_holder_agent_id":  dag.LeaseHolderAgentID,
+		"metadata":             cloneStringMapAny(task.Metadata),
 	}, nil
 }
 

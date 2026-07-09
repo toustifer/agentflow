@@ -22,14 +22,23 @@ const (
 )
 
 type DAG struct {
-	ID              string    `json:"id"`
-	NamespaceID     string    `json:"namespace_id"`
-	Title           string    `json:"title"`
-	ExecutionBranch string    `json:"execution_branch"`
-	BaseBranch      string    `json:"base_branch,omitempty"`
-	Status          DAGStatus `json:"status"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID                 string    `json:"id"`
+	NamespaceID        string    `json:"namespace_id"`
+	Title              string    `json:"title"`
+	ExecutionBranch    string    `json:"execution_branch"`
+	BaseBranch         string    `json:"base_branch,omitempty"`
+	WorktreePath       string    `json:"worktree_path,omitempty"`
+	WorktreeStatus     string    `json:"worktree_status,omitempty"`
+	HeadSHA            string    `json:"head_sha,omitempty"`
+	ActiveTaskID       string    `json:"active_task_id,omitempty"`
+	LeaseHolderTaskID  string    `json:"lease_holder_task_id,omitempty"`
+	LeaseHolderWorkerID string   `json:"lease_holder_worker_id,omitempty"`
+	LeaseHolderAgentID string    `json:"lease_holder_agent_id,omitempty"`
+	LeaseAcquiredAt    string    `json:"lease_acquired_at,omitempty"`
+	RuntimeUpdatedAt   string    `json:"runtime_updated_at,omitempty"`
+	Status             DAGStatus `json:"status"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 type CreateDAGRequest struct {
@@ -179,6 +188,65 @@ func (e *Engine) UpdateDAG(ctx context.Context, nsID, dagID string, req UpdateDA
 		}
 	}
 
+	return cloneDAG(dag), nil
+}
+
+type UpdateDAGRuntimeRequest struct {
+	WorktreePath        string
+	WorktreeStatus      string
+	HeadSHA             string
+	ActiveTaskID        string
+	LeaseHolderTaskID   string
+	LeaseHolderWorkerID string
+	LeaseHolderAgentID  string
+	LeaseAcquiredAt     string
+	RuntimeUpdatedAt    string
+}
+
+func (e *Engine) UpdateDAGRuntime(ctx context.Context, nsID, dagID string, req UpdateDAGRuntimeRequest) (*DAG, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if _, ok := e.namespaces[nsID]; !ok {
+		return nil, ErrNamespaceNotFound
+	}
+	dag, ok := e.dags[nsID][dagID]
+	if !ok {
+		return nil, errors.New("dag not found")
+	}
+	if req.WorktreePath != "" {
+		dag.WorktreePath = req.WorktreePath
+	}
+	if req.WorktreeStatus != "" {
+		dag.WorktreeStatus = req.WorktreeStatus
+	}
+	if req.HeadSHA != "" {
+		dag.HeadSHA = req.HeadSHA
+	}
+	if req.ActiveTaskID != "" || req.ActiveTaskID == "" {
+		dag.ActiveTaskID = req.ActiveTaskID
+	}
+	if req.LeaseHolderTaskID != "" || req.LeaseHolderTaskID == "" {
+		dag.LeaseHolderTaskID = req.LeaseHolderTaskID
+	}
+	if req.LeaseHolderWorkerID != "" || req.LeaseHolderWorkerID == "" {
+		dag.LeaseHolderWorkerID = req.LeaseHolderWorkerID
+	}
+	if req.LeaseHolderAgentID != "" || req.LeaseHolderAgentID == "" {
+		dag.LeaseHolderAgentID = req.LeaseHolderAgentID
+	}
+	if req.LeaseAcquiredAt != "" || req.LeaseAcquiredAt == "" {
+		dag.LeaseAcquiredAt = req.LeaseAcquiredAt
+	}
+	if req.RuntimeUpdatedAt != "" {
+		dag.RuntimeUpdatedAt = req.RuntimeUpdatedAt
+	}
+	dag.UpdatedAt = time.Now().UTC()
+	if e.db != nil {
+		if err := updateDAG(e.db, dag); err != nil {
+			return nil, fmt.Errorf("persist dag update: %w", err)
+		}
+	}
 	return cloneDAG(dag), nil
 }
 

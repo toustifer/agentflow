@@ -465,6 +465,52 @@ func TestQueryTasksByWorker(t *testing.T) {
 // Persistence test for DAG and Worker
 // ---------------------------------------------------------------------------
 
+func TestDAGRuntimeLeasePersistence(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "agentflow-dag-runtime.db")
+
+	e1, err := NewEngine(NewEngineConfig{DBPath: dbPath})
+	require.NoError(t, err)
+	_, err = e1.CreateNamespace(context.Background(), CreateNamespaceRequest{ID: "ns-1", Name: "test"})
+	require.NoError(t, err)
+	_, err = e1.CreateDAG(context.Background(), CreateDAGRequest{
+		NamespaceID:     "ns-1",
+		ID:              "dag-1",
+		Title:           "shared runtime",
+		ExecutionBranch: "feat/shared-runtime",
+		BaseBranch:      "main",
+	})
+	require.NoError(t, err)
+	_, err = e1.UpdateDAGRuntime(context.Background(), "ns-1", "dag-1", UpdateDAGRuntimeRequest{
+		WorktreePath:        "/tmp/shared-dag-worktree",
+		WorktreeStatus:      "clean",
+		HeadSHA:             "abc123",
+		ActiveTaskID:        "T1",
+		LeaseHolderTaskID:   "T1",
+		LeaseHolderWorkerID: "worker-a",
+		LeaseHolderAgentID:  "agent-1",
+		LeaseAcquiredAt:     "2026-07-09T00:00:00Z",
+		RuntimeUpdatedAt:    "2026-07-09T00:00:01Z",
+	})
+	require.NoError(t, err)
+	require.NoError(t, e1.Close())
+
+	e2, err := NewEngine(NewEngineConfig{DBPath: dbPath})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, e2.Close()) }()
+
+	dag, err := e2.GetDAG(context.Background(), "ns-1", "dag-1")
+	require.NoError(t, err)
+	require.Equal(t, "/tmp/shared-dag-worktree", dag.WorktreePath)
+	require.Equal(t, "clean", dag.WorktreeStatus)
+	require.Equal(t, "abc123", dag.HeadSHA)
+	require.Equal(t, "T1", dag.ActiveTaskID)
+	require.Equal(t, "T1", dag.LeaseHolderTaskID)
+	require.Equal(t, "worker-a", dag.LeaseHolderWorkerID)
+	require.Equal(t, "agent-1", dag.LeaseHolderAgentID)
+	require.Equal(t, "2026-07-09T00:00:00Z", dag.LeaseAcquiredAt)
+	require.Equal(t, "2026-07-09T00:00:01Z", dag.RuntimeUpdatedAt)
+}
+
 func TestDAGWorkerPersistence(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "agentflow-dw.db")
 
