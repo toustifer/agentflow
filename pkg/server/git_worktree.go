@@ -21,7 +21,7 @@ type taskGitRuntime struct {
 	Status       string
 }
 
-func (s *Server) prepareTaskGitRuntime(ctx context.Context, ns *engine.Namespace, dag *engine.DAG, task *engine.Task) (*taskGitRuntime, error) {
+func (s *Server) prepareTaskGitRuntime(ctx context.Context, ns *engine.Namespace, dag *engine.DAG, task *engine.Task, allowRepair bool) (*taskGitRuntime, error) {
 	if ns == nil {
 		return nil, fmt.Errorf("namespace is required")
 	}
@@ -63,7 +63,7 @@ func (s *Server) prepareTaskGitRuntime(ctx context.Context, ns *engine.Namespace
 	if err := os.MkdirAll(filepath.Dir(worktreePath), 0o755); err != nil {
 		return nil, fmt.Errorf("create worktree parent: %w", err)
 	}
-	if err := ensureTaskWorktree(ctx, repoPath, worktreePath, dag.ExecutionBranch, baseBranch); err != nil {
+	if err := ensureTaskWorktree(ctx, repoPath, worktreePath, dag.ExecutionBranch, baseBranch, allowRepair); err != nil {
 		return nil, err
 	}
 	status, err := inspectTaskGitRuntime(ctx, repoPath, worktreePath, dag.ExecutionBranch, baseBranch)
@@ -188,7 +188,7 @@ func detectBaseBranch(ctx context.Context, repoPath, configured string) (string,
 	return "", fmt.Errorf("无法检测默认 base branch")
 }
 
-func ensureTaskWorktree(ctx context.Context, repoPath, worktreePath, branch, baseBranch string) error {
+func ensureTaskWorktree(ctx context.Context, repoPath, worktreePath, branch, baseBranch string, allowRepair bool) error {
 	if runtime, err := inspectTaskGitRuntime(ctx, repoPath, worktreePath, branch, baseBranch); err == nil {
 		if runtime.Branch == branch {
 			return nil
@@ -196,7 +196,9 @@ func ensureTaskWorktree(ctx context.Context, repoPath, worktreePath, branch, bas
 		return fmt.Errorf("现有 worktree %q 绑定到分支 %q，不是期望的 %q", worktreePath, runtime.Branch, branch)
 	}
 	if _, err := os.Stat(worktreePath); err == nil {
-		return fmt.Errorf("路径 %q 已存在但不是有效 worktree，请先手动清理", worktreePath)
+		if err := repairInvalidWorktreePath(worktreePath, allowRepair); err != nil {
+			return fmt.Errorf("路径 %q 已存在但不是有效 worktree，请先手动清理: %w", worktreePath, err)
+		}
 	}
 
 	localRef := "refs/heads/" + branch

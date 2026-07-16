@@ -53,6 +53,7 @@ func (s *Server) Tools() []ToolSpec {
 		{Name: "project_next_steps"},
 		{Name: "project_blockers"},
 		{Name: "project_report"},
+		{Name: "project_inspect"},
 		{Name: "worker_handbook_write"},
 		{Name: "worker_handbook_get"},
 		{Name: "worker_handbook_list"},
@@ -196,6 +197,8 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 		return s.handleProjectBlockers(ctx, input)
 	case "project_report":
 		return s.handleProjectReport(ctx, input)
+	case "project_inspect":
+		return s.handleProjectInspect(ctx, input)
 	case "worker_handbook_write":
 		return s.handleHandbookWrite(ctx, input)
 	case "worker_handbook_get":
@@ -287,7 +290,7 @@ func cloneStringMap(values map[string]string) map[string]string {
 	return out
 }
 
-func (s *Server) prepareTaskStart(ctx context.Context, namespaceID, taskID string) (*engine.Namespace, *engine.Task, *engine.DAG, map[string]string, error) {
+func (s *Server) prepareTaskStart(ctx context.Context, namespaceID, taskID string, allowRepair bool) (*engine.Namespace, *engine.Task, *engine.DAG, map[string]string, error) {
 	ns, err := s.engine.GetNamespace(ctx, namespaceID)
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -303,7 +306,7 @@ func (s *Server) prepareTaskStart(ctx context.Context, namespaceID, taskID strin
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	runtime, err := s.prepareTaskGitRuntime(ctx, ns, dag, task)
+	runtime, err := s.prepareTaskGitRuntime(ctx, ns, dag, task, allowRepair)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -327,7 +330,12 @@ func (s *Server) handleTaskPrepareStart(ctx context.Context, input map[string]an
 	if err != nil {
 		return taskResult{}, err
 	}
-	ns, task, dag, metadata, err := s.prepareTaskStart(ctx, namespaceID, taskID)
+	allowRepair, _ := input["allow_repair"].(bool)
+	resumeTargeted, _ := input["resume_targeted"].(bool)
+	if allowRepair && !resumeTargeted {
+		return taskResult{}, fmt.Errorf("allow_repair requires resume_targeted=true")
+	}
+	ns, task, dag, metadata, err := s.prepareTaskStart(ctx, namespaceID, taskID, allowRepair)
 	if err != nil {
 		return taskResult{}, err
 	}
@@ -606,7 +614,7 @@ func (s *Server) handleTaskTransition(ctx context.Context, input map[string]any)
 	}
 
 	if transitionValue == "start" || transitionValue == "resume" {
-		ns, _, dag, runtimeMetadata, err := s.prepareTaskStart(ctx, namespaceID, taskID)
+		ns, _, dag, runtimeMetadata, err := s.prepareTaskStart(ctx, namespaceID, taskID, false)
 		if err != nil {
 			return taskResult{}, err
 		}

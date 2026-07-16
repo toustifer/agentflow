@@ -63,7 +63,7 @@ func (s *Server) dispatchTaskOnce(ctx context.Context, namespaceID, taskID strin
 
 	switch task.State {
 	case engine.TaskAssigned:
-		ns, _, dag, metadata, err := s.prepareTaskStart(ctx, namespaceID, taskID)
+		ns, _, dag, metadata, err := s.prepareTaskStart(ctx, namespaceID, taskID, false)
 		if err != nil {
 			return dispatchTaskResponse{}, err
 		}

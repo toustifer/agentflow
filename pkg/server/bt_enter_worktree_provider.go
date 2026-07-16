@@ -84,7 +84,7 @@ func (s *Server) enterWorktreeOnce(ctx context.Context, namespaceID, taskID, wor
 		dagMap = dagToSummaryMap(dag)
 	}
 
-	runtime, err := s.prepareTaskGitRuntime(ctx, ns, dag, task)
+	runtime, err := s.prepareTaskGitRuntime(ctx, ns, dag, task, false)
 	if err != nil {
 		return enterWorktreeResponse{}, err
 	}

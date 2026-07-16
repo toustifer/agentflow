@@ -22,23 +22,24 @@ const (
 )
 
 type DAG struct {
-	ID                 string    `json:"id"`
-	NamespaceID        string    `json:"namespace_id"`
-	Title              string    `json:"title"`
-	ExecutionBranch    string    `json:"execution_branch"`
-	BaseBranch         string    `json:"base_branch,omitempty"`
-	WorktreePath       string    `json:"worktree_path,omitempty"`
-	WorktreeStatus     string    `json:"worktree_status,omitempty"`
-	HeadSHA            string    `json:"head_sha,omitempty"`
-	ActiveTaskID       string    `json:"active_task_id,omitempty"`
-	LeaseHolderTaskID  string    `json:"lease_holder_task_id,omitempty"`
-	LeaseHolderWorkerID string   `json:"lease_holder_worker_id,omitempty"`
-	LeaseHolderAgentID string    `json:"lease_holder_agent_id,omitempty"`
-	LeaseAcquiredAt    string    `json:"lease_acquired_at,omitempty"`
-	RuntimeUpdatedAt   string    `json:"runtime_updated_at,omitempty"`
-	Status             DAGStatus `json:"status"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	ID                  string            `json:"id"`
+	NamespaceID         string            `json:"namespace_id"`
+	Title               string            `json:"title"`
+	ExecutionBranch     string            `json:"execution_branch"`
+	BaseBranch          string            `json:"base_branch,omitempty"`
+	Metadata            map[string]string `json:"metadata,omitempty"`
+	WorktreePath        string            `json:"worktree_path,omitempty"`
+	WorktreeStatus      string            `json:"worktree_status,omitempty"`
+	HeadSHA             string            `json:"head_sha,omitempty"`
+	ActiveTaskID        string            `json:"active_task_id,omitempty"`
+	LeaseHolderTaskID   string            `json:"lease_holder_task_id,omitempty"`
+	LeaseHolderWorkerID string            `json:"lease_holder_worker_id,omitempty"`
+	LeaseHolderAgentID  string            `json:"lease_holder_agent_id,omitempty"`
+	LeaseAcquiredAt     string            `json:"lease_acquired_at,omitempty"`
+	RuntimeUpdatedAt    string            `json:"runtime_updated_at,omitempty"`
+	Status              DAGStatus         `json:"status"`
+	CreatedAt           time.Time         `json:"created_at"`
+	UpdatedAt           time.Time         `json:"updated_at"`
 }
 
 type CreateDAGRequest struct {
@@ -47,12 +48,14 @@ type CreateDAGRequest struct {
 	Title           string
 	ExecutionBranch string
 	BaseBranch      string
+	Metadata        map[string]string
 }
 
 type UpdateDAGRequest struct {
 	Title           string
 	ExecutionBranch string
 	BaseBranch      string
+	Metadata        map[string]string
 }
 
 // DAGGraph is the derived view returned by GetDAG.
@@ -114,6 +117,7 @@ func (e *Engine) CreateDAG(ctx context.Context, req CreateDAGRequest) (*DAG, err
 		Title:           req.Title,
 		ExecutionBranch: req.ExecutionBranch,
 		BaseBranch:      req.BaseBranch,
+		Metadata:        cloneStringMap(req.Metadata),
 		Status:          DAGPlanning,
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -179,6 +183,9 @@ func (e *Engine) UpdateDAG(ctx context.Context, nsID, dagID string, req UpdateDA
 	}
 	if req.BaseBranch != "" {
 		dag.BaseBranch = req.BaseBranch
+	}
+	if req.Metadata != nil {
+		dag.Metadata = cloneStringMap(req.Metadata)
 	}
 	dag.UpdatedAt = time.Now().UTC()
 
@@ -557,5 +564,6 @@ func cloneDAG(dag *DAG) *DAG {
 		return nil
 	}
 	cpy := *dag
+	cpy.Metadata = cloneStringMap(dag.Metadata)
 	return &cpy
 }

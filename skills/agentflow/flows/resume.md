@@ -31,12 +31,25 @@ mcp__agentflow__namespace_list(workdir_contains=<当前 cwd>)
 
 ## Step 2. 先恢复项目级 snapshot
 
+如果用户执行的是：
+
+```text
+/agentflow resume dag <dag_id>
+```
+
+则本次恢复属于 **targeted resume**：
+- 仍先恢复项目级 snapshot
+- 但后续 `project_next_steps` / `project_inspect` / `dag_get` 应携带 `dag_id=<dag_id>`
+- 不再让默认 recommended DAG 覆盖该目标
+- 若目标 DAG 带有 `legacy=true` 或 `resume_priority=deprioritized`，必须明确提示：这是显式恢复历史线，而不是默认主线
+
 resume 的首屏优先读这些事实：
 
 ```text
 mcp__agentflow__project_next_steps(namespace_id)
 mcp__agentflow__project_report(namespace_id)
 mcp__agentflow__dag_list(namespace_id)
+mcp__agentflow__project_inspect(namespace_id, focus="project")
 ```
 
 先回答：
@@ -46,6 +59,15 @@ mcp__agentflow__dag_list(namespace_id)
 - 当前有哪些非完成 DAG
 
 这一步的输出应先是 **项目摘要**，不是直接钻进某条 task。
+
+如果 `project_inspect` 可用：
+- 执行链固定为：`mcp__agentflow__project_inspect(...) -> node hooks/render-inspect.js`
+- 额外输出一版紧凑树状 project 视图
+- 该脚本同时负责刷新 `.claude/agentflow/status.json`
+- 在结尾明确给出 inspect 入口：
+  - `/agentflow inspect`
+  - `/agentflow inspect dag <dag_id>`
+  - `/agentflow inspect task <task_id>`
 
 ## Step 3. 输出 DAG 列表
 

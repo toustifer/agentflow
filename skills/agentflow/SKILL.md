@@ -2,7 +2,7 @@
 
 项目编排引擎调度器。`/agentflow` 是唯一公开入口。
 
-`setup` / `init` / `intake` / `goal` / `resume` / `shape` 现在都作为本 bundle 内部 flow 持有：
+`setup` / `init` / `intake` / `goal` / `resume` / `inspect` / `shape` / `mode` 现在都作为本 bundle 内部 flow 持有：
 
 ```text
 agentflow/
@@ -13,7 +13,15 @@ agentflow/
     intake.md
     goal.md
     resume.md
+    inspect.md
     shape.md
+    mode.md
+  hooks/
+    mode-lib.js
+    mode-cli.js
+    mode-inject.js
+    statusline.js
+    render-inspect.js
   references/
     using-superpowers-adapter.md
 ```
@@ -21,6 +29,20 @@ agentflow/
 ## 总原则
 
 先确认 `agentflow` MCP 是否可用，再决定进入哪个业务 flow。
+
+## Sticky Mode（会话保持）
+
+Claude Code **不能**在输入框里挂住 `agentflow` 文本前缀。  
+等价能力是 sticky mode：
+
+```text
+/agentflow on  -> 写 .claude/agentflow/mode.json
+每一轮 prompt  -> UserPromptSubmit hook 注入 agentflow 规则
+statusline     -> 可选显示 agentflow:on
+/agentflow off -> 关闭
+```
+
+细节见 `flows/mode.md` 与 `SETUP.md` Sticky Mode 段。
 
 ## MCP 前置检查
 
@@ -34,13 +56,20 @@ agentflow/
 - 按 setup flow 做安装/修复/验证
 - 不要假装业务 flow 可以继续推进
 
+`on` / `off` / `status` **不要求** MCP 可用（它们只读写 mode 文件）。
+
 ## 调度逻辑
 
 ```text
-如果 agentflow MCP 不可用      -> 读取 flows/setup.md
+如果 agentflow MCP 不可用      -> 读取 flows/setup.md（on/off/status 除外）
+/agentflow on [opts]           -> 读取 flows/mode.md，开启 sticky mode
+/agentflow off                 -> 读取 flows/mode.md，关闭 sticky mode
+/agentflow status              -> 读取 flows/mode.md，显示 mode 状态
+/agentflow inspect ...         -> 读取 flows/inspect.md，查看项目/DAG/task 树状进度
 /agentflow init [项目名]        -> 读取 flows/init.md
 /agentflow goal [目标]         -> 先读取 flows/intake.md，再读取 flows/goal.md
 /agentflow resume              -> 读取 flows/resume.md 并按 resume flow 推进
+/agentflow resume dag <dag_id> -> 恢复项目现场，但强制聚焦指定 DAG
 /agentflow [无]                -> 默认读取 flows/resume.md
 其他                             -> 全部当作 goal，先读取 flows/intake.md，再读取 flows/goal.md
 ```
@@ -49,29 +78,41 @@ agentflow/
 
 收到 `/agentflow` 后，按下面顺序判断：
 
-1. 先确认 agentflow MCP 是否可用
+1. 如果 args 以 `on` / `off` / `status` 开头
+   - 读取 `flows/mode.md`
+   - 用 `hooks/mode-cli.js` 写/读 `.claude/agentflow/mode.json`
+   - 不进入业务 DAG flow
+   - 若 hook 未安装，提醒用户按 `SETUP.md` 配置 `UserPromptSubmit`
+
+2. 先确认 agentflow MCP 是否可用
    - 如果不可用：读取 `flows/setup.md`
 
-2. 如果 args 以 `init` 开头
+3. 如果 args 以 `init` 开头
    - 读取 `flows/init.md`
    - 把它当作已有内容项目首次接入请求
    - 在 `/agentflow` 内完成 repo 绑定、扫描、baseline 建立与后续去向判断
 
-3. 如果 args 以 `goal` 开头
+4. 如果 args 以 `goal` 开头
    - 先读取 `flows/intake.md`
    - 再读取 `flows/goal.md`
    - 只有 intake 接受后，才按 goal flow 进入 shape / plan / execute
 
-4. 如果 args 以 `resume` 开头
+5. 如果 args 以 `resume` 开头
    - 读取 `flows/resume.md`
    - 先恢复项目 snapshot 和 DAG 列表
    - 再按 resume flow 决定继续哪条线
 
-5. 如果 args 为空
+6. 如果 args 以 `inspect` 开头
+   - 读取 `flows/inspect.md`
+   - 优先使用 `project_inspect(namespace_id, focus?, dag_id?, task_id?)`
+   - 把返回 snapshot 通过 `node hooks/render-inspect.js` 渲染并刷新 `.claude/agentflow/status.json`
+   - 输出树状项目 / DAG / task / worker / blocker 视图
+
+7. 如果 args 为空
    - 默认读取 `flows/resume.md`
    - 默认走同一套项目恢复流程
 
-6. 其他
+8. 其他
    - 全部当作 goal
    - 先读取 `flows/intake.md`
    - 再读取 `flows/goal.md`
@@ -91,3 +132,4 @@ agentflow/
 - `references/using-superpowers-adapter.md` 是 shape 阶段的参考材料
 - `flows/*.md` 是本 bundle 的主实现定义，不是附属说明文档
 - `SETUP.md` 是 setup flow 的安装说明来源，不是业务 flow 文档
+- `hooks/*` 是 sticky mode 的运行时脚本；skill 本身不会每轮自动重注入，必须靠 `UserPromptSubmit` hook

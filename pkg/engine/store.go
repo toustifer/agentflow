@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS dags (
 	branch                TEXT NOT NULL DEFAULT '',
 	execution_branch      TEXT NOT NULL DEFAULT '',
 	base_branch           TEXT NOT NULL DEFAULT '',
+	metadata              TEXT NOT NULL DEFAULT '{}',
 	worktree_path         TEXT NOT NULL DEFAULT '',
 	worktree_status       TEXT NOT NULL DEFAULT '',
 	head_sha              TEXT NOT NULL DEFAULT '',
@@ -236,6 +237,7 @@ func migrateDAGsTable(db *sql.DB) error {
 	cols := []string{
 		"execution_branch TEXT NOT NULL DEFAULT ''",
 		"base_branch TEXT NOT NULL DEFAULT ''",
+		"metadata TEXT NOT NULL DEFAULT '{}'",
 		"worktree_path TEXT NOT NULL DEFAULT ''",
 		"worktree_status TEXT NOT NULL DEFAULT ''",
 		"head_sha TEXT NOT NULL DEFAULT ''",

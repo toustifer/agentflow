@@ -13,6 +13,7 @@ import (
 func (s *Server) handleProjectNextSteps(ctx context.Context, input map[string]any) (map[string]any, error) {
 	nsID, _ := optionalString(input, "namespace_id")
 	cwd, _ := optionalString(input, "workdir")
+	targetDAGID, _ := optionalString(input, "dag_id")
 
 	// 如果没有传 namespace_id，用 workdir 反查
 	if nsID == "" && cwd != "" {
@@ -89,13 +90,7 @@ func (s *Server) handleProjectNextSteps(ctx context.Context, input map[string]an
 
 	// DAG 情况
 	dags, _ := s.engine.ListDAGs(ctx, nsID)
-	var activeDAG *engine.DAG
-	for i := range dags {
-		if dags[i].Status != "" {
-			activeDAG = &dags[i]
-			break
-		}
-	}
+	activeDAG := pickResumeDAG(dags, targetDAGID)
 	if activeDAG == nil && len(dags) > 0 {
 		activeDAG = &dags[0]
 	}
@@ -114,14 +109,13 @@ func (s *Server) handleProjectNextSteps(ctx context.Context, input map[string]an
 		phaseName = "等待拆解 DAG"
 	} else {
 		// 有 DAG，检查 task 完成情况
-
 		if totalTasks > 0 {
 			pct := float64(doneTasks) * 100 / float64(totalTasks)
 			if doneTasks == totalTasks {
 				phase = "done"
 				phaseName = fmt.Sprintf("已完成（%d/%d）", doneTasks, totalTasks)
 				completed = append(completed, fmt.Sprintf("DAG %q 全部完成", activeDAG.Title))
-				return map[string]any{
+				result := map[string]any{
 					"phase":           phase,
 					"phase_name":      phaseName,
 					"progress":        fmt.Sprintf("%.0f%%", pct),
@@ -131,7 +125,12 @@ func (s *Server) handleProjectNextSteps(ctx context.Context, input map[string]an
 					"next_steps":      []string{"项目已完成，可添加新功能（/agentflow goal + 目标）", "查看项目文档（doc_list）"},
 					"actions":         []string{"goal", "doc_list"},
 					"dag":             dagToSummaryMap(activeDAG),
-				}, nil
+					"resume_targeted": targetDAGID != "",
+				}
+				if activeDAG != nil {
+					result["legacy_dags_skipped"] = summarizeSkippedLegacyDAGs(dags, activeDAG.ID)
+				}
+				return result, nil
 			}
 
 			phase = "execute"
@@ -139,19 +138,23 @@ func (s *Server) handleProjectNextSteps(ctx context.Context, input map[string]an
 			completed = append(completed, fmt.Sprintf("DAG %q 进度 %d/%d", activeDAG.Title, doneTasks, totalTasks))
 
 			nextCandidates, _ := s.engine.ProjectNextTasks(ctx, nsID)
-			nextTasks := projectNextTaskSummaries(nextCandidates)
-			activeList := projectActiveTaskSummaries(tasks)
-			stuckTasks := projectBlockedTaskSummaries(nextCandidates)
+			nextTasks := projectNextTaskSummaries(nextCandidates, activeDAG)
+			activeList := projectActiveTaskSummaries(tasks, activeDAG)
+			stuckTasks := projectBlockedTaskSummaries(nextCandidates, activeDAG)
 
 			result := map[string]any{
-				"phase":       phase,
-				"phase_name":  phaseName,
-				"progress":    fmt.Sprintf("%.0f%%", pct),
-				"completed":   completed,
-				"next_steps":  []string{},
-				"actions":     []string{},
-				"dag":         dagToSummaryMap(activeDAG),
-				"active_dags": len(dags),
+				"phase":           phase,
+				"phase_name":      phaseName,
+				"progress":        fmt.Sprintf("%.0f%%", pct),
+				"completed":       completed,
+				"next_steps":      []string{},
+				"actions":         []string{},
+				"dag":             dagToSummaryMap(activeDAG),
+				"active_dags":     len(dags),
+				"resume_targeted": targetDAGID != "",
+			}
+			if activeDAG != nil {
+				result["legacy_dags_skipped"] = summarizeSkippedLegacyDAGs(dags, activeDAG.ID)
 			}
 			if len(nextTasks) > 0 {
 				result["next_steps"] = append(result["next_steps"].([]string), fmt.Sprintf("派发 task %s（%s）→ task_transition start", nextTasks[0]["task_id"], nextTasks[0]["title"]))
@@ -166,14 +169,16 @@ func (s *Server) handleProjectNextSteps(ctx context.Context, input map[string]an
 
 			if len(nextTasks) == 0 && len(activeList) == 0 {
 				return map[string]any{
-					"phase":       "stuck",
-					"phase_name":  "阻塞",
-					"progress":    fmt.Sprintf("%.0f%%", pct),
-					"completed":   completed,
-					"dag":         dagToSummaryMap(activeDAG),
-					"stuck_tasks": stuckTasks,
-					"next_steps":  []string{"检查 stuck_tasks 中的任务状态，手动修复阻塞后就恢复正常"},
-					"actions":     []string{"task_get", "project_blockers"},
+					"phase":               "stuck",
+					"phase_name":          "阻塞",
+					"progress":            fmt.Sprintf("%.0f%%", pct),
+					"completed":           completed,
+					"dag":                 dagToSummaryMap(activeDAG),
+					"stuck_tasks":         stuckTasks,
+					"next_steps":          []string{"检查 stuck_tasks 中的任务状态，手动修复阻塞后就恢复正常"},
+					"actions":             []string{"task_get", "project_blockers"},
+					"resume_targeted":     targetDAGID != "",
+					"legacy_dags_skipped": summarizeSkippedLegacyDAGs(dags, activeDAG.ID),
 				}, nil
 			}
 
@@ -187,17 +192,21 @@ func (s *Server) handleProjectNextSteps(ctx context.Context, input map[string]an
 
 	// 非 execute 阶段的通用返回
 	result := map[string]any{
-		"phase":          phase,
-		"phase_name":     phaseName,
-		"progress":       "0%",
-		"completed":      completed,
-		"next_steps":     []string{},
-		"actions":        []string{},
-		"namespace":      ns.ID,
-		"namespace_name": ns.Name,
-		"workdir":        getWorkdir(ns),
-		"active_dags":    len(dags),
-		"workers":        len(workers),
+		"phase":           phase,
+		"phase_name":      phaseName,
+		"progress":        "0%",
+		"completed":       completed,
+		"next_steps":      []string{},
+		"actions":         []string{},
+		"namespace":       ns.ID,
+		"namespace_name":  ns.Name,
+		"workdir":         getWorkdir(ns),
+		"active_dags":     len(dags),
+		"workers":         len(workers),
+		"resume_targeted": targetDAGID != "",
+	}
+	if activeDAG != nil {
+		result["legacy_dags_skipped"] = summarizeSkippedLegacyDAGs(dags, activeDAG.ID)
 	}
 
 	switch phase {
@@ -275,10 +284,13 @@ func (s *Server) namespaceIDForWorkdir(ctx context.Context, workdir string) stri
 	return ""
 }
 
-func projectNextTaskSummaries(next []engine.NextTask) []map[string]any {
+func projectNextTaskSummaries(next []engine.NextTask, dag *engine.DAG) []map[string]any {
 	out := make([]map[string]any, 0, len(next))
 	for _, t := range next {
 		if !t.Ready {
+			continue
+		}
+		if dag != nil && t.DAGID != dag.ID {
 			continue
 		}
 		out = append(out, map[string]any{
@@ -290,9 +302,12 @@ func projectNextTaskSummaries(next []engine.NextTask) []map[string]any {
 	return out
 }
 
-func projectActiveTaskSummaries(tasks []engine.Task) []map[string]any {
+func projectActiveTaskSummaries(tasks []engine.Task, dag *engine.DAG) []map[string]any {
 	out := make([]map[string]any, 0)
 	for _, t := range tasks {
+		if dag != nil && t.DAGID != dag.ID {
+			continue
+		}
 		switch t.State {
 		case engine.TaskExecuting, engine.TaskReviewPending:
 			out = append(out, map[string]any{
@@ -306,10 +321,13 @@ func projectActiveTaskSummaries(tasks []engine.Task) []map[string]any {
 	return out
 }
 
-func projectBlockedTaskSummaries(next []engine.NextTask) []map[string]any {
+func projectBlockedTaskSummaries(next []engine.NextTask, dag *engine.DAG) []map[string]any {
 	out := make([]map[string]any, 0)
 	for _, t := range next {
 		if t.Ready {
+			continue
+		}
+		if dag != nil && t.DAGID != dag.ID {
 			continue
 		}
 		out = append(out, map[string]any{

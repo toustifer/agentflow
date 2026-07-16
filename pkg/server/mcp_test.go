@@ -86,6 +86,85 @@ func TestProjectBlockersExcludeWorkerBusy(t *testing.T) {
 	require.Equal(t, "T0", item["blocked_by"])
 }
 
+func TestProjectInspectAggregatesBucketsAndTaskRuntime(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t)
+	_, err := srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
+		NamespaceID: "ns-1", ID: "worker-x", Name: "Worker X", PromptTemplate: "Task {task_id}",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateDAG(context.Background(), engine.CreateDAGRequest{
+		NamespaceID: "ns-1", ID: "dag-1", Title: "Primary DAG", ExecutionBranch: "feat/test",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID: "ns-1", ID: "T-ready", Title: "ready", DAGID: "dag-1", AssignedWorker: "worker-x",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID: "ns-1", ID: "T-running", Title: "running", DAGID: "dag-1", AssignedWorker: "worker-x",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID: "ns-1", ID: "T-blocker", Title: "blocker", DAGID: "dag-1", AssignedWorker: "worker-x",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID: "ns-1", ID: "T-blocked", Title: "blocked", DAGID: "dag-1", AssignedWorker: "worker-x", DependsOn: []string{"T-blocker"},
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID: "ns-1", ID: "T-done", Title: "done", DAGID: "dag-1", AssignedWorker: "worker-x",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.TransitionTask(context.Background(), "ns-1", "T-running", engine.TransStart, map[string]string{"actor_role": "leader"})
+	require.NoError(t, err)
+	_, err = srv.engine.TransitionTask(context.Background(), "ns-1", "T-done", engine.TransStart, map[string]string{"actor_role": "leader"})
+	require.NoError(t, err)
+	_, err = srv.engine.TransitionTask(context.Background(), "ns-1", "T-done", engine.TransSubmit, map[string]string{"actor_role": "worker"})
+	require.NoError(t, err)
+	_, err = srv.engine.TransitionTask(context.Background(), "ns-1", "T-done", engine.TransPass, map[string]string{"actor_role": "reviewer"})
+	require.NoError(t, err)
+
+	result, err := srv.Handle(context.Background(), "project_inspect", map[string]any{
+		"namespace_id": "ns-1",
+		"dag_id":       "dag-1",
+		"task_id":      "T-running",
+	})
+	require.NoError(t, err)
+
+	summary := result["summary"].(map[string]any)
+	require.Equal(t, 2, summary["ready_count"])
+	require.Equal(t, 1, summary["running_count"])
+	require.Equal(t, 1, summary["blocked_count"])
+	require.Equal(t, 1, summary["done_count"])
+	require.Equal(t, 1, summary["worker_busy"])
+	require.Equal(t, 1, summary["worker_total"])
+
+	dags := result["dags"].([]any)
+	require.Len(t, dags, 1)
+	dag := dags[0].(map[string]any)
+	require.Len(t, dag["ready_tasks"].([]map[string]any), 2)
+	require.Len(t, dag["active_tasks"].([]map[string]any), 1)
+	require.Len(t, dag["blocked_tasks"].([]map[string]any), 1)
+	require.Len(t, dag["done_task_items"].([]map[string]any), 1)
+
+	taskDetail := result["task_detail"].(map[string]any)
+	require.Equal(t, "T-running", taskDetail["id"])
+	require.Equal(t, "busy", taskDetail["worker_status"])
+
+	if runtimeRaw, ok := result["task_runtime"]; ok && runtimeRaw != nil {
+		taskRuntime := runtimeRaw.(map[string]any)
+		require.Equal(t, "dag-1", taskRuntime["dag_id"])
+		require.Equal(t, "T-running", taskRuntime["task_id"])
+		require.Equal(t, "dag", taskRuntime["worktree_owner_scope"])
+	}
+
+	dagDetail := result["dag_detail"].(map[string]any)
+	require.NotEmpty(t, dagDetail["tasks"])
+}
+
 func TestLeaderTickDoesNotEnterStuckOnSharedWorkerConcurrency(t *testing.T) {
 	t.Parallel()
 
@@ -337,10 +416,10 @@ func TestDAGCreateRejectsExecutionBranchEqualToMain(t *testing.T) {
 
 	srv := newTestServer(t)
 	_, err := srv.Handle(context.Background(), "dag_create", map[string]any{
-		"namespace_id":      "ns-1",
-		"dag_id":            "dag-main",
-		"title":             "Bad DAG",
-		"execution_branch":  "main",
+		"namespace_id":     "ns-1",
+		"dag_id":           "dag-main",
+		"title":            "Bad DAG",
+		"execution_branch": "main",
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cannot equal base_branch")
@@ -355,11 +434,11 @@ func TestTaskStartUsesExecutionBranchAndBaseBranch(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = srv.Handle(context.Background(), "dag_create", map[string]any{
-		"namespace_id":      "ns-1",
-		"dag_id":            "dag-branch-check",
-		"title":             "Branch Check",
-		"execution_branch":  "feature/branch-check",
-		"base_branch":       "main",
+		"namespace_id":     "ns-1",
+		"dag_id":           "dag-branch-check",
+		"title":            "Branch Check",
+		"execution_branch": "feature/branch-check",
+		"base_branch":      "main",
 	})
 	require.NoError(t, err)
 	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
@@ -677,9 +756,9 @@ func TestWorkerPromptGetIncludesGitContext(t *testing.T) {
 
 	srv := newTestServer(t)
 	_, err := srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
-		NamespaceID: "ns-1",
-		ID:          "worker-b",
-		Name:        "Builder",
+		NamespaceID:    "ns-1",
+		ID:             "worker-b",
+		Name:           "Builder",
 		PromptTemplate: "task={task_id} branch={branch} repo={repo_path} worktree={worktree_path} dag={dag_title}",
 	})
 	require.NoError(t, err)
@@ -790,24 +869,24 @@ func TestLifecycleTickRunsEndToEnd(t *testing.T) {
 
 	srv := newTestServer(t)
 	_, err := srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
-		NamespaceID: "ns-1",
-		ID:          "worker-a",
-		Name:        "Worker A",
+		NamespaceID:    "ns-1",
+		ID:             "worker-a",
+		Name:           "Worker A",
 		PromptTemplate: "Task {task_id} in {worktree_path} on {branch}",
 	})
 	require.NoError(t, err)
 	_, err = srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
-		NamespaceID: "ns-1",
-		ID:          "reviewer-a",
-		Name:        "Reviewer A",
+		NamespaceID:    "ns-1",
+		ID:             "reviewer-a",
+		Name:           "Reviewer A",
 		PromptTemplate: "rev_commit={review_commit} rev_diff={review.diff} task={task_id}",
 	})
 	require.NoError(t, err)
 	_, err = srv.engine.CreateDAG(context.Background(), engine.CreateDAGRequest{
-		NamespaceID: "ns-1",
-		ID:          "dag-1",
-		Title:       "Test DAG",
-		ExecutionBranch:      "feat/test",
+		NamespaceID:     "ns-1",
+		ID:              "dag-1",
+		Title:           "Test DAG",
+		ExecutionBranch: "feat/test",
 	})
 	require.NoError(t, err)
 	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
@@ -858,24 +937,24 @@ func TestLifecycleTickRejectsUndispatchedTask(t *testing.T) {
 
 	srv := newTestServer(t)
 	_, err := srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
-		NamespaceID: "ns-1",
-		ID:          "worker-a",
-		Name:        "Worker A",
+		NamespaceID:    "ns-1",
+		ID:             "worker-a",
+		Name:           "Worker A",
 		PromptTemplate: "Task {task_id} in {worktree_path} on {branch}",
 	})
 	require.NoError(t, err)
 	_, err = srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
-		NamespaceID: "ns-1",
-		ID:          "reviewer-a",
-		Name:        "Reviewer A",
+		NamespaceID:    "ns-1",
+		ID:             "reviewer-a",
+		Name:           "Reviewer A",
 		PromptTemplate: "rev_commit={review_commit} rev_diff={review.diff} task={task_id}",
 	})
 	require.NoError(t, err)
 	_, err = srv.engine.CreateDAG(context.Background(), engine.CreateDAGRequest{
-		NamespaceID: "ns-1",
-		ID:          "dag-1",
-		Title:       "Test DAG",
-		ExecutionBranch:      "feat/test",
+		NamespaceID:     "ns-1",
+		ID:              "dag-1",
+		Title:           "Test DAG",
+		ExecutionBranch: "feat/test",
 	})
 	require.NoError(t, err)
 	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
@@ -920,24 +999,24 @@ func TestLifecycleTickRejectsMissingPromptTemplate(t *testing.T) {
 
 	srv := newTestServer(t)
 	_, err := srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
-		NamespaceID:     "ns-1",
-		ID:              "worker-a",
-		Name:            "Worker A",
-		PromptTemplate:  "Task {task_id} in {worktree_path} on {branch}",
+		NamespaceID:    "ns-1",
+		ID:             "worker-a",
+		Name:           "Worker A",
+		PromptTemplate: "Task {task_id} in {worktree_path} on {branch}",
 	})
 	require.NoError(t, err)
 	_, err = srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
-		NamespaceID: "ns-1",
-		ID:          "reviewer-a",
-		Name:        "Reviewer A",
+		NamespaceID:    "ns-1",
+		ID:             "reviewer-a",
+		Name:           "Reviewer A",
 		PromptTemplate: "rev_commit={review_commit} rev_diff={review.diff} task={task_id}",
 	})
 	require.NoError(t, err)
 	_, err = srv.engine.CreateDAG(context.Background(), engine.CreateDAGRequest{
-		NamespaceID: "ns-1",
-		ID:          "dag-1",
-		Title:       "Test DAG",
-		ExecutionBranch:      "feat/test",
+		NamespaceID:     "ns-1",
+		ID:              "dag-1",
+		Title:           "Test DAG",
+		ExecutionBranch: "feat/test",
 	})
 	require.NoError(t, err)
 	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
@@ -1164,8 +1243,8 @@ func TestEnsureReadyGitRepoFresh(t *testing.T) {
 	info, branch, err := ensureReadyGitRepo(context.Background(), workdir, "main", true, "Tester", "tester@example.com")
 	require.NoError(t, err)
 	evalWorkdir, _ := filepath.EvalSymlinks(workdir)
-		require.NoError(t, err)
-		require.Equal(t, info, evalWorkdir)
+	require.NoError(t, err)
+	require.Equal(t, info, evalWorkdir)
 	require.Equal(t, "main", branch)
 	_, err = os.Stat(filepath.Join(workdir, ".git"))
 	require.NoError(t, err)
@@ -1272,10 +1351,10 @@ func TestTaskTransitionStartRejectsRepoWithoutInitialCommit(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{
-		NamespaceID: "ns-no-head",
-		ID:          "dag-1",
-		Title:       "DAG",
-		ExecutionBranch:      "feat/test",
+		NamespaceID:     "ns-no-head",
+		ID:              "dag-1",
+		Title:           "DAG",
+		ExecutionBranch: "feat/test",
 	})
 	require.NoError(t, err)
 	_, err = eng.CreateTask(context.Background(), engine.CreateTaskRequest{
@@ -1322,7 +1401,7 @@ func TestSubmitCapturesReviewCommitAndDiff(t *testing.T) {
 	}
 	_, err = srv.Handle(context.Background(), "worker_diary_write", map[string]any{
 		"namespace_id": "ns-1", "worker_id": "worker-b",
-		"date": time.Now().UTC().Format("2006-01-02"),
+		"date":    time.Now().UTC().Format("2006-01-02"),
 		"content": "drafted", "task_id": "T-review",
 	})
 	require.NoError(t, err)
@@ -1343,7 +1422,6 @@ func TestSubmitCapturesReviewCommitAndDiff(t *testing.T) {
 	require.NotEmpty(t, task.Metadata["review.commit"])
 	require.Contains(t, task.Metadata["review.diff"], "note.txt")
 }
-
 
 func TestTaskTransitionSubmitRejectsDirtyWorktree(t *testing.T) {
 	t.Parallel()
@@ -1367,7 +1445,7 @@ func TestTaskTransitionSubmitRejectsDirtyWorktree(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(wtPath, "dirty.txt"), []byte("hello\n"), 0o644))
 	_, err = srv.Handle(context.Background(), "worker_diary_write", map[string]any{
 		"namespace_id": "ns-1", "worker_id": "worker-b",
-		"date": time.Now().UTC().Format("2006-01-02"),
+		"date":    time.Now().UTC().Format("2006-01-02"),
 		"content": "drafted", "task_id": "T-dirty-submit",
 	})
 	require.NoError(t, err)
@@ -1414,14 +1492,13 @@ func TestTaskTransitionSubmitMissingDiaryKeepsExecutingState(t *testing.T) {
 	require.Equal(t, engine.TaskExecuting, task.State)
 }
 
-
 func TestWorkerPromptGetReviewerMode(t *testing.T) {
 	t.Parallel()
 
 	srv := newTestServer(t)
 	_, err := srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
 		NamespaceID: "ns-1", ID: "reviewer-a",
-		Name: "Reviewer",
+		Name:           "Reviewer",
 		PromptTemplate: "rev_commit={review_commit} rev_diff={review.diff} worker={assigned_worker} task={task_id}",
 	})
 	require.NoError(t, err)
@@ -1451,7 +1528,6 @@ func TestWorkerPromptGetReviewerMode(t *testing.T) {
 	require.Contains(t, prompt, "task=T-prompt-rev")
 }
 
-
 func TestLeaderTickReturnsPhase(t *testing.T) {
 	t.Parallel()
 
@@ -1464,8 +1540,6 @@ func TestLeaderTickReturnsPhase(t *testing.T) {
 	require.Contains(t, []string{"running", "success", "failure"}, result["tree_status"])
 	require.NotEmpty(t, result["progress"])
 }
-
-
 
 func (s *Server) findLatestWorktreePath(t *testing.T, nsID, taskID string) string {
 	t.Helper()
@@ -1547,10 +1621,10 @@ func createDagTaskForStart(t *testing.T, srv *Server, taskID string) {
 		require.NoError(t, err)
 	}
 	_, err = srv.engine.CreateDAG(context.Background(), engine.CreateDAGRequest{
-		NamespaceID: "ns-1",
-		ID:          "dag-1",
-		Title:       "Test DAG",
-		ExecutionBranch:      "feat/test",
+		NamespaceID:     "ns-1",
+		ID:              "dag-1",
+		Title:           "Test DAG",
+		ExecutionBranch: "feat/test",
 	})
 	require.NoError(t, err)
 	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
@@ -1589,8 +1663,8 @@ func (f failingHubSyncer) Ping(context.Context) error {
 
 // trackingHubSyncer records synced task IDs for verification in tests.
 type trackingHubSyncer struct {
-	mu           sync.Mutex
-	syncedTasks  []string
+	mu          sync.Mutex
+	syncedTasks []string
 }
 
 func (t *trackingHubSyncer) SyncTask(_ context.Context, task *engine.Task) error {

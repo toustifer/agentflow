@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -287,6 +288,10 @@ func (s *Server) handleDAGCreate(ctx context.Context, input map[string]any) (map
 	branch, _ := optionalString(input, "branch")
 	executionBranch, _ := optionalString(input, "execution_branch")
 	baseBranch, _ := optionalString(input, "base_branch")
+	metadata, err := optionalStringMap(input, "metadata")
+	if err != nil {
+		return nil, err
+	}
 	if executionBranch == "" {
 		executionBranch = branch
 	}
@@ -301,6 +306,7 @@ func (s *Server) handleDAGCreate(ctx context.Context, input map[string]any) (map
 		Title:           title,
 		ExecutionBranch: executionBranch,
 		BaseBranch:      resolvedBase,
+		Metadata:        metadata,
 	})
 	if err != nil {
 		return nil, err
@@ -361,6 +367,10 @@ func (s *Server) handleDAGUpdate(ctx context.Context, input map[string]any) (map
 	branch, _ := optionalString(input, "branch")
 	executionBranch, _ := optionalString(input, "execution_branch")
 	baseBranch, _ := optionalString(input, "base_branch")
+	metadata, err := optionalStringMap(input, "metadata")
+	if err != nil {
+		return nil, err
+	}
 	if executionBranch == "" {
 		executionBranch = branch
 	}
@@ -383,6 +393,7 @@ func (s *Server) handleDAGUpdate(ctx context.Context, input map[string]any) (map
 		Title:           title,
 		ExecutionBranch: executionBranch,
 		BaseBranch:      resolvedBase,
+		Metadata:        metadata,
 	})
 	if err != nil {
 		return nil, err
@@ -787,27 +798,27 @@ func handbookToMap(hb *engine.WorkerHandbook) map[string]any {
 		})
 	}
 	m := map[string]any{
-		"worker_id":   hb.WorkerID,
+		"worker_id":    hb.WorkerID,
 		"namespace_id": hb.NamespaceID,
-		"scope":       hb.Scope,
-		"tech_stack":  hb.TechStack,
-		"knowledge":   knowledge,
-		"pitfalls":    pitfalls,
-		"created_at":  hb.CreatedAt,
-		"updated_at":  hb.UpdatedAt,
+		"scope":        hb.Scope,
+		"tech_stack":   hb.TechStack,
+		"knowledge":    knowledge,
+		"pitfalls":     pitfalls,
+		"created_at":   hb.CreatedAt,
+		"updated_at":   hb.UpdatedAt,
 	}
 	return m
 }
 
 func workerDiaryToMap(d *engine.WorkerDiary) map[string]any {
 	return map[string]any{
-		"worker_id":   d.WorkerID,
+		"worker_id":    d.WorkerID,
 		"namespace_id": d.NamespaceID,
-		"date":        d.Date,
-		"task_id":     d.TaskID,
-		"content":     d.Content,
-		"tags":        d.Tags,
-		"created_at":  d.CreatedAt,
+		"date":         d.Date,
+		"task_id":      d.TaskID,
+		"content":      d.Content,
+		"tags":         d.Tags,
+		"created_at":   d.CreatedAt,
 	}
 }
 
@@ -826,10 +837,10 @@ func leaderDiaryToMap(ld *engine.LeaderDiary) map[string]any {
 	}
 	return map[string]any{
 		"namespace_id": ld.NamespaceID,
-		"date":        ld.Date,
-		"entries":     entries,
-		"created_at":  ld.CreatedAt,
-		"updated_at":  ld.UpdatedAt,
+		"date":         ld.Date,
+		"entries":      entries,
+		"created_at":   ld.CreatedAt,
+		"updated_at":   ld.UpdatedAt,
 	}
 }
 
@@ -1123,21 +1134,21 @@ func (s *Server) handleWorktreeGet(ctx context.Context, input map[string]any) (m
 		return nil, err
 	}
 	return map[string]any{
-		"namespace_id":         nsID,
-		"task_id":              taskID,
-		"dag_id":               task.DAGID,
-		"repo_path":            runtime.RepoPath,
-		"worktree_path":        runtime.WorktreePath,
-		"branch":               runtime.Branch,
-		"base_branch":          runtime.BaseBranch,
-		"head_sha":             runtime.HeadSHA,
-		"status":               runtime.Status,
-		"worktree_owner_scope": "dag",
-		"active_task_id":       dag.ActiveTaskID,
-		"lease_holder_task_id": dag.LeaseHolderTaskID,
+		"namespace_id":           nsID,
+		"task_id":                taskID,
+		"dag_id":                 task.DAGID,
+		"repo_path":              runtime.RepoPath,
+		"worktree_path":          runtime.WorktreePath,
+		"branch":                 runtime.Branch,
+		"base_branch":            runtime.BaseBranch,
+		"head_sha":               runtime.HeadSHA,
+		"status":                 runtime.Status,
+		"worktree_owner_scope":   "dag",
+		"active_task_id":         dag.ActiveTaskID,
+		"lease_holder_task_id":   dag.LeaseHolderTaskID,
 		"lease_holder_worker_id": dag.LeaseHolderWorkerID,
 		"lease_holder_agent_id":  dag.LeaseHolderAgentID,
-		"metadata":             cloneStringMapAny(task.Metadata),
+		"metadata":               cloneStringMapAny(task.Metadata),
 	}, nil
 }
 
@@ -1198,6 +1209,7 @@ func (s *Server) handleProjectBlockers(ctx context.Context, input map[string]any
 // ---------------------------------------------------------------------------
 
 func dagToMap(dag *engine.DAG) map[string]any {
+	hint := dagResumeHintFromMetadata(dag.Metadata)
 	return map[string]any{
 		"id":               dag.ID,
 		"namespace_id":     dag.NamespaceID,
@@ -1206,6 +1218,9 @@ func dagToMap(dag *engine.DAG) map[string]any {
 		"execution_branch": dag.ExecutionBranch,
 		"base_branch":      dag.BaseBranch,
 		"status":           string(dag.Status),
+		"legacy":           hint.Legacy,
+		"resume_priority":  string(hint.ResumePriority),
+		"superseded_by":    hint.SupersededBy,
 		"created_at":       dag.CreatedAt,
 		"updated_at":       dag.UpdatedAt,
 	}
@@ -1251,24 +1266,24 @@ func dagGraphToMap(g *engine.DAGGraph) map[string]any {
 
 func workerToMap(w *engine.Worker, status string) map[string]any {
 	m := map[string]any{
-		"id":               w.ID,
-		"namespace_id":     w.NamespaceID,
-		"name":             w.Name,
-		"kind":             w.Kind,
-		"scope":            w.Scope,
-		"skills":           w.Skills,
-		"task_tags":        w.TaskTags,
-		"prompt_template":  w.PromptTemplate,
-		"required_reads":   w.RequiredReads,
-		"recommended_mcp":  w.RecommendedMCP,
-		"launch_mode":      w.LaunchMode,
-		"handoff_targets":  w.HandoffTargets,
-		"recovery_policy":  w.RecoveryPolicy,
-		"fallback_mcp":     w.FallbackMCP,
-		"stuck_playbook":   w.StuckPlaybook,
-		"escalation_mode":  w.EscalationMode,
-		"created_at":       w.CreatedAt,
-		"updated_at":       w.UpdatedAt,
+		"id":              w.ID,
+		"namespace_id":    w.NamespaceID,
+		"name":            w.Name,
+		"kind":            w.Kind,
+		"scope":           w.Scope,
+		"skills":          w.Skills,
+		"task_tags":       w.TaskTags,
+		"prompt_template": w.PromptTemplate,
+		"required_reads":  w.RequiredReads,
+		"recommended_mcp": w.RecommendedMCP,
+		"launch_mode":     w.LaunchMode,
+		"handoff_targets": w.HandoffTargets,
+		"recovery_policy": w.RecoveryPolicy,
+		"fallback_mcp":    w.FallbackMCP,
+		"stuck_playbook":  w.StuckPlaybook,
+		"escalation_mode": w.EscalationMode,
+		"created_at":      w.CreatedAt,
+		"updated_at":      w.UpdatedAt,
 	}
 	if len(w.Metadata) > 0 {
 		m["metadata"] = w.Metadata
@@ -1331,4 +1346,244 @@ func (s *Server) handleProjectReport(ctx context.Context, input map[string]any) 
 		"dags":            dags,
 		"workers":         workers,
 	}, nil
+}
+
+func (s *Server) handleProjectInspect(ctx context.Context, input map[string]any) (map[string]any, error) {
+	nsID, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return nil, err
+	}
+	focus, _ := optionalString(input, "focus")
+	dagID, _ := optionalString(input, "dag_id")
+	taskID, _ := optionalString(input, "task_id")
+
+	ns, err := s.engine.GetNamespace(ctx, nsID)
+	if err != nil {
+		return nil, err
+	}
+	nextStepsInput := map[string]any{"namespace_id": nsID}
+	if dagID != "" {
+		nextStepsInput["dag_id"] = dagID
+	}
+	steps, err := s.handleProjectNextSteps(ctx, nextStepsInput)
+	if err != nil {
+		return nil, err
+	}
+	report, err := s.engine.ProjectReport(ctx, nsID)
+	if err != nil {
+		return nil, err
+	}
+	next, err := s.engine.ProjectNextTasks(ctx, nsID)
+	if err != nil {
+		return nil, err
+	}
+	blockers, err := s.engine.ProjectBlockers(ctx, nsID)
+	if err != nil {
+		return nil, err
+	}
+	workers, err := s.engine.ListWorkers(ctx, nsID)
+	if err != nil {
+		return nil, err
+	}
+	dags, err := s.engine.ListDAGs(ctx, nsID)
+	if err != nil {
+		return nil, err
+	}
+	tasks, err := s.engine.ListTasks(ctx, nsID, engine.StateFilter{})
+	if err != nil {
+		return nil, err
+	}
+
+	project := map[string]any{
+		"namespace_id":   nsID,
+		"namespace_name": ns.Name,
+		"workdir":        getWorkdir(ns),
+		"phase":          steps["phase"],
+		"phase_name":     steps["phase_name"],
+		"progress":       steps["progress"],
+		"total_dags":     report.TotalDAGs,
+		"total_tasks":    report.TotalTasks,
+		"done_tasks":     report.DoneTasks,
+		"running_tasks":  report.ExecutingTasks,
+		"pending_tasks":  report.PendingTasks,
+		"completion_pct": report.CompletionPct,
+	}
+
+	workerItems := make([]any, 0, len(workers))
+	busyWorkers := 0
+	for i := range workers {
+		status := string(s.engine.WorkerStatus(ctx, nsID, workers[i].ID))
+		if status == string(engine.WorkerBusy) {
+			busyWorkers++
+		}
+		workerItems = append(workerItems, workerToMap(&workers[i], status))
+	}
+	sort.Slice(workerItems, func(i, j int) bool {
+		left := workerItems[i].(map[string]any)
+		right := workerItems[j].(map[string]any)
+		return fmt.Sprint(left["id"]) < fmt.Sprint(right["id"])
+	})
+
+	readyByDAG := make(map[string][]map[string]any)
+	blockedByDAG := make(map[string][]map[string]any)
+	for _, item := range next {
+		entry := map[string]any{
+			"task_id":         item.TaskID,
+			"title":           item.Title,
+			"dag_id":          item.DAGID,
+			"assigned_worker": item.AssignedWorker,
+			"state":           item.State,
+			"worker_busy":     item.WorkerBusy,
+			"deps_satisfied":  item.DepsSatisfied,
+			"reason":          item.Reason,
+		}
+		if item.Ready {
+			readyByDAG[item.DAGID] = append(readyByDAG[item.DAGID], entry)
+		} else {
+			blockedByDAG[item.DAGID] = append(blockedByDAG[item.DAGID], entry)
+		}
+	}
+
+	runningByDAG := make(map[string][]map[string]any)
+	doneByDAG := make(map[string][]map[string]any)
+	allByID := make(map[string]engine.Task, len(tasks))
+	for i := range tasks {
+		t := tasks[i]
+		allByID[t.ID] = t
+		entry := map[string]any{
+			"task_id":         t.ID,
+			"title":           t.Title,
+			"dag_id":          t.DAGID,
+			"assigned_worker": t.AssignedWorker,
+			"state":           string(t.State),
+		}
+		switch t.State {
+		case engine.TaskExecuting, engine.TaskReviewPending, engine.TaskReworkNeeded:
+			runningByDAG[t.DAGID] = append(runningByDAG[t.DAGID], entry)
+		case engine.TaskDone:
+			doneByDAG[t.DAGID] = append(doneByDAG[t.DAGID], entry)
+		}
+	}
+
+	blockerItems := make([]any, 0, len(blockers))
+	for _, b := range blockers {
+		blockerItems = append(blockerItems, map[string]any{
+			"task_id":    b.TaskID,
+			"title":      b.Title,
+			"dag_id":     b.DAGID,
+			"type":       b.Type,
+			"blocked_by": b.BlockedBy,
+		})
+	}
+
+	dagItems := make([]any, 0, len(report.DAGs))
+	for _, d := range report.DAGs {
+		item := map[string]any{
+			"dag":             dagToMap(&d.DAG),
+			"total_tasks":     d.TotalTasks,
+			"done_tasks":      d.DoneTasks,
+			"running_tasks":   d.ExecutingTasks,
+			"pending_tasks":   d.PendingTasks,
+			"completion_pct":  d.CompletionPct,
+			"ready_tasks":     readyByDAG[d.DAG.ID],
+			"blocked_tasks":   blockedByDAG[d.DAG.ID],
+			"active_tasks":    runningByDAG[d.DAG.ID],
+			"done_task_items": doneByDAG[d.DAG.ID],
+		}
+		dagItems = append(dagItems, item)
+	}
+	sort.Slice(dagItems, func(i, j int) bool {
+		left := dagItems[i].(map[string]any)["dag"].(map[string]any)
+		right := dagItems[j].(map[string]any)["dag"].(map[string]any)
+		return fmt.Sprint(left["id"]) < fmt.Sprint(right["id"])
+	})
+
+	readyCount := len(flattenTaskBuckets(readyByDAG))
+	runningCount := len(flattenTaskBuckets(runningByDAG))
+	blockedCount := len(flattenTaskBuckets(blockedByDAG))
+	doneCount := report.DoneTasks
+	nextTaskItems := make([]any, 0)
+	if dagID != "" {
+		// Targeted inspect: counts and next queue follow the focused DAG.
+		readyCount = len(readyByDAG[dagID])
+		runningCount = len(runningByDAG[dagID])
+		blockedCount = len(blockedByDAG[dagID])
+		doneCount = len(doneByDAG[dagID])
+		for _, item := range readyByDAG[dagID] {
+			nextTaskItems = append(nextTaskItems, item)
+		}
+	} else {
+		for _, bucket := range readyByDAG {
+			for _, item := range bucket {
+				nextTaskItems = append(nextTaskItems, item)
+			}
+		}
+	}
+
+	response := map[string]any{
+		"focus":   focus,
+		"project": project,
+		"summary": map[string]any{
+			"phase":         steps["phase"],
+			"phase_name":    steps["phase_name"],
+			"progress":      steps["progress"],
+			"ready_count":   readyCount,
+			"running_count": runningCount,
+			"blocked_count": blockedCount,
+			"done_count":    doneCount,
+			"worker_busy":   busyWorkers,
+			"worker_total":  len(workers),
+		},
+		"dags":       dagItems,
+		"blockers":   blockerItems,
+		"workers":    workerItems,
+		"next_tasks": nextTaskItems,
+	}
+
+	if dagID != "" {
+		graph, err := s.engine.GetDAGGraph(ctx, nsID, dagID)
+		if err != nil {
+			return nil, err
+		}
+		response["dag_detail"] = dagGraphToMap(graph)
+	}
+	if taskID != "" {
+		task, err := s.engine.GetTask(ctx, nsID, taskID)
+		if err != nil {
+			return nil, err
+		}
+		taskDetail := taskToMap(task)
+		var blockedBy []string
+		for _, dep := range task.DependsOn {
+			depTask, ok := allByID[dep]
+			if !ok || depTask.State != engine.TaskDone {
+				blockedBy = append(blockedBy, dep)
+			}
+		}
+		taskDetail["blocked_by"] = blockedBy
+		taskDetail["worker_status"] = string(s.engine.WorkerStatus(ctx, nsID, task.AssignedWorker))
+		response["task_detail"] = taskDetail
+		if task.DAGID != "" {
+			worktree, err := s.handleWorktreeGet(ctx, map[string]any{"namespace_id": nsID, "task_id": taskID})
+			if err == nil {
+				response["task_runtime"] = worktree
+			}
+		}
+	}
+
+	for i := range dags {
+		if dagID != "" && dags[i].ID == dagID {
+			response["focused_dag"] = dagToMap(&dags[i])
+			break
+		}
+	}
+	return response, nil
+}
+
+func flattenTaskBuckets(buckets map[string][]map[string]any) []map[string]any {
+	out := make([]map[string]any, 0)
+	for _, items := range buckets {
+		out = append(out, items...)
+	}
+	return out
 }
