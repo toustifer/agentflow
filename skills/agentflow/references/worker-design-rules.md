@@ -68,6 +68,12 @@ leader 的职责是：
 
 leader 不应该常态化代替 worker 写交付物、commit、submit、pass。
 
+硬规则：
+- 没有真实 spawn 的 Agent subagent，就没有合法的 `worker_agent_id`
+- 没有合法 `worker_agent_id`，就不能把 task 标成 executing/done
+- prepare/start/worktree 失败时，leader 只能 repair 或 escalate，不能“主会话先写完”
+- 主仓 / leader cwd 不得长期占着 `execution_branch`
+
 ## 7. 新能力先加协议，再加自动执行
 
 如果以后要新增恢复策略，优先顺序是：

@@ -177,6 +177,28 @@ mcp__agentflow__leader_tick(namespace_id)
 
 而不是自己重新发明一整套分支推进逻辑。
 
+### 恢复后的 execute 约束
+
+resume 一旦进入可执行态，必须遵守 `flows/goal.md` 的 Execute 铁律：
+
+1. Leader 只负责 prepare / spawn / transition / sync / 协调
+2. Leader **不得**在主会话实现 ready task 的产品代码
+3. 主仓必须留在 `base_branch`；`execution_branch` 只存在于 DAG worktree
+4. 每条 ready task 的固定顺序：
+
+```text
+task_prepare_start
+  -> spawn real Agent subagent in worktree_path
+  -> task_transition(start) + launch.ticket + worker_agent_id
+  -> worker implement/commit/submit
+  -> task_worker_sync / review
+```
+
+如果 `task_prepare_start` 或 worktree 失败：
+- 只修 git 占用 / invalid worktree / 权限
+- 或 escalate
+- **禁止** 退化成主会话手写代码
+
 ## 与 Goal / Intake / Shape 的关系
 
 - `resume` 不负责重新做 `shape`

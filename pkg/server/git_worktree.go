@@ -201,6 +201,12 @@ func ensureTaskWorktree(ctx context.Context, repoPath, worktreePath, branch, bas
 		}
 	}
 
+	// Main workdir must not hold execution_branch; otherwise `git worktree add`
+	// fails with "already checked out". Free it back to base when clean.
+	if err := ensureMainRepoOnBaseBranch(ctx, repoPath, branch, baseBranch); err != nil {
+		return err
+	}
+
 	localRef := "refs/heads/" + branch
 	remoteRef := "refs/remotes/origin/" + branch
 	if err := gitRefExists(ctx, repoPath, localRef); err == nil {
@@ -225,6 +231,45 @@ func ensureTaskWorktree(ctx context.Context, repoPath, worktreePath, branch, bas
 	_, err := runGit(ctx, repoPath, "worktree", "add", "-b", branch, worktreePath, baseRef)
 	if err != nil {
 		return fmt.Errorf("create worktree from base branch: %w", err)
+	}
+	return nil
+}
+
+// ensureMainRepoOnBaseBranch keeps the primary workdir off the DAG execution
+// branch so a shared worktree can own that branch.
+func ensureMainRepoOnBaseBranch(ctx context.Context, repoPath, executionBranch, baseBranch string) error {
+	if repoPath == "" || executionBranch == "" || baseBranch == "" {
+		return nil
+	}
+	if executionBranch == baseBranch {
+		return nil
+	}
+	current, err := runGit(ctx, repoPath, "branch", "--show-current")
+	if err != nil {
+		// Detached HEAD or non-branch checkout: leave alone.
+		return nil
+	}
+	if current != executionBranch {
+		return nil
+	}
+	status, err := runGit(ctx, repoPath, "status", "--porcelain")
+	if err != nil {
+		return fmt.Errorf("检查主仓状态失败: %w", err)
+	}
+	if strings.TrimSpace(status) != "" {
+		return fmt.Errorf(
+			"主仓 workdir 当前在 execution_branch %q 上且有未提交改动，无法创建 worktree。请先提交/贮藏改动，并把主仓切回 base branch %q",
+			executionBranch,
+			baseBranch,
+		)
+	}
+	if _, err := runGit(ctx, repoPath, "checkout", baseBranch); err != nil {
+		return fmt.Errorf(
+			"主仓 workdir 占用 execution_branch %q，自动切回 base branch %q 失败: %w",
+			executionBranch,
+			baseBranch,
+			err,
+		)
 	}
 	return nil
 }

@@ -80,7 +80,9 @@ node <skill>/hooks/mode-cli.js status
 - 每个新对话轮都应视为同一 agentflow working session，优先路由到 `resume` / `inspect` / `goal` / 当前激活 flow，而不是先走自由回答
 - 新的项目目标应直接落回 agentflow 的 goal/intake 主链，而不是脱离工作流单独处理
 - 任务引用必须 `task_id + title`
-- start worker 必须走 launch-ticket 协议
+- start worker 必须走 launch-ticket 协议：`prepare_start -> spawn Agent -> start(ticket, worker_agent_id) -> sync`
+- **Leader 禁止代写产品代码**；prepare/start 失败只能修 worktree/分支占用或 escalate
+- 主仓留在 `base_branch`；`execution_branch` 只在 DAG worktree
 - DAG 拥有 shared worktree lease，task 只持有阶段性租约
 
 ## 安装检查清单

@@ -30,6 +30,17 @@ agentflow/
 
 先确认 `agentflow` MCP 是否可用，再决定进入哪个业务 flow。
 
+## Leader / Worker 执行边界
+
+`/agentflow` 打开后，**主会话默认是 leader，不是实现工人**。
+
+- Leader：intake / shape / plan / prepare_start / spawn Agent / transition / sync / review 协调
+- Worker Agent：在 DAG `worktree_path` 内写代码、测试、commit、submit
+- 主仓保持 `base_branch`；禁止在主仓 checkout `execution_branch` 后由 leader 手写交付
+- prepare/start 失败时只修 git/worktree 或 escalate，**禁止**主会话代做 task
+
+完整派工协议见 `flows/goal.md` 的 Execute 段。
+
 ## Sticky Mode（会话保持）
 
 Claude Code **不能**在输入框里挂住 `agentflow` 文本前缀。  

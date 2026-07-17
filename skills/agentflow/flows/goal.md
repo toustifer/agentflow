@@ -100,12 +100,62 @@ shape flow 完成后，先确认当前 repo 已经有首个 commit，可作为 w
 
 ## Execute
 
-每条 task 的 dispatch 模板：
+### Leader 铁律（禁止代做）
+
+Leader 主会话 **不是** 实现者。
+
+Leader 只允许：
+- `project_next_steps` / `project_inspect` / `leader_tick`
+- `task_prepare_start`
+- spawn 真实 `Agent` subagent
+- `task_transition(start|...)` + `task_worker_sync`
+- diary / doc / shape 文件（通常只在 `.claude/`）
+- 修 git/worktree 所有权冲突，或 escalate 给用户
+
+Leader **禁止**：
+- 在产品 workdir 直接 `Write` / `Edit` 业务代码来完成 task
+- 在主仓 checkout `execution_branch` 后自己 commit 交付
+- 因 prepare/start 失败就“我先帮 worker 写完”
+- 把 `task` 标成 done/executing，却没有真实 `worker_agent_id`
+
+失败时的唯一合法路径：
+
+```text
+prepare/start 失败
+  -> 修 base/execution branch 占用 / worktree / 权限
+  -> 重新 task_prepare_start
+  -> 再 spawn Agent
+  -> 仍失败则 escalate 给用户
+  -> 永远不要主会话代写产品代码
+```
+
+### Leader 派工协议（每条 ready task）
+
+```text
+1. task_get(task_id) / project_next_tasks
+2. task_prepare_start(namespace_id, task_id)
+3. 读取返回的 worker_launch / prompt_template / worktree_path / launch_ticket
+4. Agent({
+     description: "worker:<assigned_worker> <task_id>",
+     prompt: prompt_template + task context + required_reads,
+     // cwd / isolation 指向 briefing.worktree_path
+   })
+5. task_transition(start) with:
+     launch.ticket
+     worker_agent_id = 真实 Agent subagent id
+6. 等待 worker 完成
+7. task_worker_sync + worker submit
+8. reviewer pass/rework
+```
+
+没有第 4 步真实 spawn，就不得进入第 5 步 start。
+
+### Worker 在 worktree 内的实现模板
 
 ```text
 0. doc_search(当前模块关键词)
 1. task_get(task_id)
-2. 进入已准备好的 worktree
+2. 确认 cwd = prepared worktree_path，且 branch = DAG execution_branch
 3. 写代码 + 测试
 4. git add -p && git commit -m "task=..."
 5. doc_write(...)
@@ -113,11 +163,14 @@ shape flow 完成后，先确认当前 repo 已经有首个 commit，可作为 w
 7. task_transition submit
 ```
 
-约束：
-- Worker 只在独立 worktree 工作
+### Branch / worktree 所有权
+
+- 主会话 / 主仓 `workdir` 必须停留在 `base_branch`（通常 `main`）
+- **禁止** 在主仓 checkout DAG 的 `execution_branch`
+- Worker 只在 DAG shared `worktree_path` 工作
 - task worktree 永远围绕 DAG 的 `execution_branch` 创建
 - `git.branch` = DAG execution branch；`git.base_branch` = project/DAG base branch
-- 同一 DAG 若共用单一 execution branch，则 task 应按顺序推进，不应误以为可以在同一 branch 上并行挂多个 worktree
+- 同一 DAG 若共用单一 execution branch + shared worktree，则同一时刻只有一个 lease holder；不要假装多 worker 可并行改同一 branch
 - 不能跳过 commit
 - 不能跳过 worker diary
 - 触碰 Rigid 决策必须先和用户重新对齐
