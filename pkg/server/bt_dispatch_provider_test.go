@@ -11,7 +11,7 @@ import (
 	"github.com/toustifer/agentflow/pkg/engine"
 )
 
-func TestDispatchTaskOnceTransitionsAssignedTask(t *testing.T) {
+func TestDispatchTaskOncePreparesAssignedTaskWithoutStart(t *testing.T) {
 	t.Parallel()
 
 	repoPath := initTestGitRepo(t)
@@ -38,10 +38,10 @@ func TestDispatchTaskOnceTransitionsAssignedTask(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{
-		NamespaceID: "ns-1",
-		ID:          "dag-1",
-		Title:       "DAG 1",
-		ExecutionBranch:      "feat/test",
+		NamespaceID:     "ns-1",
+		ID:              "dag-1",
+		Title:           "DAG 1",
+		ExecutionBranch: "feat/test",
 	})
 	require.NoError(t, err)
 	_, err = eng.CreateTask(context.Background(), engine.CreateTaskRequest{
@@ -56,7 +56,8 @@ func TestDispatchTaskOnceTransitionsAssignedTask(t *testing.T) {
 	resp, err := srv.dispatchTaskOnce(context.Background(), "ns-1", "T1")
 	require.NoError(t, err)
 	require.Equal(t, "T1", resp.TaskID)
-	require.Equal(t, "executing", resp.State)
+	// Skill-primary: dispatch is prepare-only — state stays assigned.
+	require.Equal(t, "assigned", resp.State)
 	require.Equal(t, "worker-a", resp.AssignedWorker)
 	require.Equal(t, "feat/test", resp.Branch)
 	require.NotEmpty(t, resp.WorktreePath)
@@ -71,13 +72,18 @@ func TestDispatchTaskOnceTransitionsAssignedTask(t *testing.T) {
 
 	task, err := eng.GetTask(context.Background(), "ns-1", "T1")
 	require.NoError(t, err)
-	require.Equal(t, engine.TaskExecuting, task.State)
+	require.Equal(t, engine.TaskAssigned, task.State)
 	require.Equal(t, resp.WorktreePath, task.Metadata["git.worktree_path"])
-	require.Equal(t, "consumed", task.Metadata["launch.ticket_state"])
-	require.NotEmpty(t, task.WorkerAgentID)
+	require.Equal(t, "issued", task.Metadata["launch.ticket_state"])
+	require.Empty(t, task.WorkerAgentID)
+
+	dag, err := eng.GetDAG(context.Background(), "ns-1", "dag-1")
+	require.NoError(t, err)
+	require.Empty(t, dag.LeaseHolderTaskID)
+	require.Empty(t, dag.LeaseHolderAgentID)
 }
 
-func TestDispatchTaskOnceIsIdempotentForExecutingTask(t *testing.T) {
+func TestDispatchTaskOnceIsIdempotentForPreparedTask(t *testing.T) {
 	t.Parallel()
 
 	repoPath := initTestGitRepo(t)
@@ -104,10 +110,10 @@ func TestDispatchTaskOnceIsIdempotentForExecutingTask(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{
-		NamespaceID: "ns-1",
-		ID:          "dag-1",
-		Title:       "DAG 1",
-		ExecutionBranch:      "feat/test",
+		NamespaceID:     "ns-1",
+		ID:              "dag-1",
+		Title:           "DAG 1",
+		ExecutionBranch: "feat/test",
 	})
 	require.NoError(t, err)
 	_, err = eng.CreateTask(context.Background(), engine.CreateTaskRequest{
@@ -121,17 +127,87 @@ func TestDispatchTaskOnceIsIdempotentForExecutingTask(t *testing.T) {
 
 	first, err := srv.dispatchTaskOnce(context.Background(), "ns-1", "T1")
 	require.NoError(t, err)
+	require.Equal(t, "assigned", first.State)
 	second, err := srv.dispatchTaskOnce(context.Background(), "ns-1", "T1")
 	require.NoError(t, err)
 	require.Equal(t, first.TaskID, second.TaskID)
-	require.Equal(t, first.State, second.State)
+	require.Equal(t, "assigned", second.State)
 	require.Equal(t, first.WorktreePath, second.WorktreePath)
 	require.Equal(t, first.Branch, second.Branch)
-	require.Equal(t, first.WorkerLaunch["leader_next_action"], second.WorkerLaunch["leader_next_action"])
+	require.Equal(t, "launch_worker_manually", second.WorkerLaunch["leader_next_action"])
 	require.Equal(t, first.WorkerLaunch["worker_id"], second.WorkerLaunch["worker_id"])
 	require.Equal(t, first.WorkerLaunch["task_id"], second.WorkerLaunch["task_id"])
 	require.NotEmpty(t, first.WorkerLaunch["launch_ticket"])
 	require.NotEmpty(t, second.WorkerLaunch["launch_ticket"])
+	// Second prepare re-issues a ticket while still assigned.
+	task, err := eng.GetTask(context.Background(), "ns-1", "T1")
+	require.NoError(t, err)
+	require.Equal(t, engine.TaskAssigned, task.State)
+	require.Equal(t, "issued", task.Metadata["launch.ticket_state"])
+	require.Empty(t, task.WorkerAgentID)
+}
+
+func TestDispatchTaskOnceRebriefsExecutingTask(t *testing.T) {
+	t.Parallel()
+
+	repoPath := initTestGitRepo(t)
+	eng, err := engine.NewEngine(engine.NewEngineConfig{})
+	require.NoError(t, err)
+	defer eng.Close()
+
+	srv, err := New(eng, Config{})
+	require.NoError(t, err)
+
+	_, err = eng.CreateNamespace(context.Background(), engine.CreateNamespaceRequest{
+		ID:   "ns-1",
+		Name: "test",
+		Metadata: map[string]string{
+			"workdir": repoPath,
+		},
+	})
+	require.NoError(t, err)
+	_, err = eng.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
+		NamespaceID:    "ns-1",
+		ID:             "worker-a",
+		Name:           "Worker A",
+		PromptTemplate: "Task {task_id} in {worktree_path} on {branch}",
+	})
+	require.NoError(t, err)
+	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{
+		NamespaceID:     "ns-1",
+		ID:              "dag-1",
+		Title:           "DAG 1",
+		ExecutionBranch: "feat/test",
+	})
+	require.NoError(t, err)
+	_, err = eng.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID:    "ns-1",
+		ID:             "T1",
+		Title:          "task 1",
+		AssignedWorker: "worker-a",
+		DAGID:          "dag-1",
+	})
+	require.NoError(t, err)
+
+	// Skill path: prepare then real start.
+	prep, err := srv.dispatchTaskOnce(context.Background(), "ns-1", "T1")
+	require.NoError(t, err)
+	ticket, _ := prep.WorkerLaunch["launch_ticket"].(string)
+	require.NotEmpty(t, ticket)
+	_, err = eng.TransitionTask(context.Background(), "ns-1", "T1", engine.TransStart, map[string]string{
+		"actor_role":       "leader",
+		"launch.ticket":    ticket,
+		"worker_agent_id":  "agent-real-1",
+		"runtime.provider": "claude_code",
+		"runtime.status":   "started",
+	})
+	require.NoError(t, err)
+
+	rebrief, err := srv.dispatchTaskOnce(context.Background(), "ns-1", "T1")
+	require.NoError(t, err)
+	require.Equal(t, "executing", rebrief.State)
+	require.Equal(t, true, rebrief.WorkerLaunch["started"])
+	require.Equal(t, "monitor_or_sync_worker", rebrief.WorkerLaunch["leader_next_action"])
 }
 
 func TestDispatchTaskOnceRejectsCompletedTask(t *testing.T) {

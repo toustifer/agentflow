@@ -60,8 +60,8 @@ func TestTaskGetConfirmOnceReturnsExistingWorktreeSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	_, err = eng.CreateTask(context.Background(), engine.CreateTaskRequest{NamespaceID: "ns-1", ID: "T1", Title: "task 1", AssignedWorker: "worker-a", DAGID: "dag-1"})
 	require.NoError(t, err)
-	_, err = srv.dispatchTaskOnce(context.Background(), "ns-1", "T1")
-	require.NoError(t, err)
+	// prepare-only creates worktree; skill path then starts.
+	skillPrimaryStart(t, srv, "ns-1", "T1", "agent-taskget-1")
 
 	resp, err := srv.taskGetConfirmOnce(context.Background(), "ns-1", "T1", "worker-a")
 	require.NoError(t, err)

@@ -168,9 +168,10 @@ def refresh_phase(bb: Blackboard) -> tuple:
     # Preferred path: fetch from Go via narrow provider
     namespace_id = bb.get_string("namespace_id") or bb.get_string("nsID")
     workdir = bb.get_string("workdir")
+    dag_id = bb.get_string("dag_id")
     if namespace_id:
         try:
-            phase_data = fetch_phase(namespace_id, workdir)
+            phase_data = fetch_phase(namespace_id, workdir, dag_id)
         except PhaseProviderError:
             # Fall back to phase_data if already pre-populated
             pass
@@ -196,10 +197,22 @@ def refresh_phase(bb: Blackboard) -> tuple:
     bb.set("has_next_tasks", len(next_tasks) > 0)
     bb.set("has_active_tasks", len(active_tasks) > 0)
     bb.set("has_stuck_tasks", len(stuck_tasks) > 0)
+    if phase_data.get("focused_dag_id"):
+        bb.set("focused_dag_id", phase_data.get("focused_dag_id"))
+        if not bb.get_string("dag_id"):
+            bb.set("dag_id", phase_data.get("focused_dag_id"))
+    if phase_data.get("focus_source"):
+        bb.set("focus_source", phase_data.get("focus_source"))
     return (True, None)
 
 
 def dispatch_task_action(bb: Blackboard) -> tuple:
+    """Skill-primary prepare-for-spawn.
+
+    Calls Go dispatch provider which issues launch ticket + worktree only.
+    Does NOT start the task (state stays assigned / rework_needed).
+    Leader must spawn a real Agent then task_transition(start).
+    """
     try:
         namespace_id = _require_namespace_id(bb)
         task_id = _require_first_task_id(bb, "next_tasks")
@@ -216,11 +229,16 @@ def dispatch_task_action(bb: Blackboard) -> tuple:
     except DispatchProviderError as err:
         return (False, err)
 
+    # Expect prepare-only: typically "assigned" (not "executing").
     bb.set("last_dispatch_task_id", result.get("task_id", "") or "")
     bb.set("last_dispatch_state", result.get("state", "") or "")
     bb.set("last_dispatch_worker", result.get("assigned_worker", "") or "")
     bb.set("last_dispatch_worktree_path", result.get("worktree_path", "") or "")
     bb.set("last_dispatch_branch", result.get("branch", "") or "")
+    worker_launch = result.get("worker_launch") or {}
+    if isinstance(worker_launch, dict):
+        bb.set("last_dispatch_launch_ticket", worker_launch.get("launch_ticket", "") or "")
+        bb.set("last_dispatch_worker_launch", worker_launch)
     return (True, None)
 
 

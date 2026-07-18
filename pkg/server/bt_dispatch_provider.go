@@ -55,6 +55,10 @@ func newBTDispatchProvider(s *Server) (*btDispatchProvider, error) {
 	return provider, nil
 }
 
+// dispatchTaskOnce prepares a ready task for Skill-primary launch.
+// Skill-primary contract:
+//   prepare (this call) → leader spawns a real Agent → task_transition(start)
+// This function must NOT TransitionTask(TransStart) and must NOT mint synthetic worker_agent_id.
 func (s *Server) dispatchTaskOnce(ctx context.Context, namespaceID, taskID string) (dispatchTaskResponse, error) {
 	task, err := s.engine.GetTask(ctx, namespaceID, taskID)
 	if err != nil {
@@ -62,7 +66,8 @@ func (s *Server) dispatchTaskOnce(ctx context.Context, namespaceID, taskID strin
 	}
 
 	switch task.State {
-	case engine.TaskAssigned:
+	case engine.TaskAssigned, engine.TaskReworkNeeded:
+		// prepare-only: worktree + launch ticket; state stays assigned/rework_needed
 		ns, _, dag, metadata, err := s.prepareTaskStart(ctx, namespaceID, taskID, false)
 		if err != nil {
 			return dispatchTaskResponse{}, err
@@ -76,36 +81,12 @@ func (s *Server) dispatchTaskOnce(ctx context.Context, namespaceID, taskID strin
 		if err != nil {
 			return dispatchTaskResponse{}, err
 		}
+		// Record worktree runtime only — no lease holder (lease is taken on real start).
 		_, err = s.engine.UpdateDAGRuntime(ctx, namespaceID, dag.ID, engine.UpdateDAGRuntimeRequest{
 			WorktreePath:     metadata["git.worktree_path"],
 			WorktreeStatus:   metadata["git.status"],
 			HeadSHA:          metadata["git.head_sha"],
 			RuntimeUpdatedAt: now.Format(time.RFC3339),
-		})
-		if err != nil {
-			return dispatchTaskResponse{}, err
-		}
-		startMetadata := cloneStringMap(metadata)
-		startMetadata["actor_role"] = "leader"
-		startMetadata["launch.ticket"] = ticket
-		startMetadata["worker_agent_id"] = fmt.Sprintf("bt:%s:%d", taskID, now.UnixNano())
-		startMetadata["runtime.provider"] = "bt_service"
-		startMetadata["runtime.status"] = "started"
-		startMetadata["runtime.launched_at"] = now.Format(time.RFC3339)
-		task, err = s.engine.TransitionTask(ctx, namespaceID, taskID, engine.TransStart, startMetadata)
-		if err != nil {
-			return dispatchTaskResponse{}, err
-		}
-		_, err = s.engine.UpdateDAGRuntime(ctx, namespaceID, dag.ID, engine.UpdateDAGRuntimeRequest{
-			WorktreePath:        metadata["git.worktree_path"],
-			WorktreeStatus:      metadata["git.status"],
-			HeadSHA:             metadata["git.head_sha"],
-			ActiveTaskID:        task.ID,
-			LeaseHolderTaskID:   task.ID,
-			LeaseHolderWorkerID: task.AssignedWorker,
-			LeaseHolderAgentID:  task.WorkerAgentID,
-			LeaseAcquiredAt:     now.Format(time.RFC3339),
-			RuntimeUpdatedAt:    now.Format(time.RFC3339),
 		})
 		if err != nil {
 			return dispatchTaskResponse{}, err
@@ -125,6 +106,7 @@ func (s *Server) dispatchTaskOnce(ctx context.Context, namespaceID, taskID strin
 		resp.WorkerLaunch = briefing
 		return resp, nil
 	case engine.TaskExecuting:
+		// Already started by skill path: idempotent re-brief only.
 		resp := dispatchTaskResponse{
 			TaskID:         task.ID,
 			State:          string(task.State),

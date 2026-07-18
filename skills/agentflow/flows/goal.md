@@ -25,26 +25,47 @@
 
 ## 核心原则
 
-由 Behavior Tree 驱动。不断调用 `mcp__agentflow__leader_tick` 推进一步，让 MCP server 作为系统事实源。
+MCP server 是系统事实源。`leader_tick` 刷新 phase / next_tasks，但 **不会** 把 task 标成 executing。
+
+**Skill-primary 派工（唯一真相）：**
+
+```text
+leader_tick / project_next_steps（只读建议）
+  -> task_prepare_start（或 BT dispatch_task = 等价 prepare-only）
+  -> Leader spawn 真实 Agent
+  -> task_transition(start) + launch.ticket + real worker_agent_id + runtime.*
+  -> Worker 实现 / commit / submit
+```
+
+禁止把 `leader_tick` 或 BT `dispatch_task` 当成“已开工”。它们只 prepare（ticket + worktree + briefing）。
 
 ## Agent Loop
 
 ```text
+# 先选定 dag_id：
+# - 仅 1 条 open primary DAG → 可自动 / 从 leader_tick.focused_dag_id 取
+# - 多条 open → 必须显式 dag_id（/agentflow resume dag <id> 或用户选定）
+# 禁止无 dag_id 在多 DAG 下盲调 leader_tick
+
 while phase != "done":
-  result = mcp__agentflow__leader_tick(namespace_id)
+  result = mcp__agentflow__leader_tick(namespace_id, dag_id=<focused>)
   phase = result.phase
   tree_status = result.tree_status
+  # result.next_tasks 仅为 focused DAG 内 ready 任务
+  # BT dispatch_task 若跑过：state 仍是 assigned，launch.ticket=issued
 
   setup   -> namespace / project bootstrap
   intake  -> 已在主入口完成 accept / defer / reject 决策
   shape   -> 调用 shape flow，写 .claude/PROJECT_FINAL_SHAPE.md
   plan    -> dag_create + task_create_batch
-  execute -> dispatch / monitor / stuck handling
+  execute -> prepare-only → spawn Agent → start → monitor / stuck
   done    -> completion reporting
 
   if tree_status == "failure": human intervention
   if phase == "done": break
 ```
+
+`lifecycle_tick` 仅测试/诊断 glue，**不是** 生产 execute 主循环。
 
 ## Shape
 
@@ -132,23 +153,29 @@ prepare/start 失败
 ### Leader 派工协议（每条 ready task）
 
 ```text
-1. task_get(task_id) / project_next_tasks
+1. task_get(task_id) / project_next_tasks（或 leader_tick 的 next_tasks，需带 dag_id）
 2. task_prepare_start(namespace_id, task_id)
+   // 与 BT dispatch_task 等价：state 保持 assigned；ticket issued；无合成 bt: agent id
 3. 读取返回的 worker_launch / prompt_template / worktree_path / launch_ticket
+   // worker_launch.started 应为 false；leader_next_action=launch_worker_manually
 4. Agent({
      description: "worker:<assigned_worker> <task_id>",
      prompt: prompt_template + task context + required_reads,
      // cwd / isolation 指向 briefing.worktree_path
    })
-5. task_transition(start) with:
+5. task_transition(start) with metadata:
      launch.ticket
-     worker_agent_id = 真实 Agent subagent id
+     worker_agent_id = 真实 Agent subagent id   // 禁止 bt: 前缀合成 id
+     runtime.provider = "claude_code"            // engine 要求非空
+     runtime.status   = "started"                // engine 要求字面 started
 6. 等待 worker 完成
 7. task_worker_sync + worker submit
-8. reviewer pass/rework
+8. reviewer pass/rework（reviewer 产出决策后 transition pass|rework；
+   不要把 lifecycle_tick 当生产主循环）
 ```
 
-没有第 4 步真实 spawn，就不得进入第 5 步 start。
+没有第 4 步真实 spawn，就不得进入第 5 步 start。  
+`leader_tick` / BT `dispatch_task` **不会**代替第 5 步。
 
 ### Worker 在 worktree 内的实现模板
 

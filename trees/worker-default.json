@@ -1,5 +1,6 @@
 {
   "name": "worker-default",
+  "desc": "Handoff / metadata pipeline only. implement_code is briefing_only (does not write code). git_commit_changes records review metadata (does not git commit). Real implementation is done by an external Worker Agent after skill-primary start.",
   "blackboard": {},
   "tree": {
     "type": "Sequence",
@@ -7,6 +8,7 @@
       {
         "type": "Action",
         "name": "doc_search",
+        "desc": "noop prepare",
         "properties": { "fn": "doc_search_prepare" }
       },
       {
@@ -22,11 +24,13 @@
       {
         "type": "Action",
         "name": "implement",
+        "desc": "briefing_only: returns prompt/context; external Worker Agent writes code",
         "properties": { "fn": "implement_code" }
       },
       {
         "type": "Action",
         "name": "git_commit",
+        "desc": "record_review_metadata: requires clean worktree; does not run git commit",
         "properties": { "fn": "git_commit_changes" }
       },
       {

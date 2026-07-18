@@ -42,12 +42,20 @@ func (s *Server) handleLifecycleTick(ctx context.Context, input map[string]any) 
 		return nil, err
 	}
 
-	leaderResult, err := s.handleLeaderTick(ctx, map[string]any{"namespace_id": namespaceID})
+	initialTask, err := s.engine.GetTask(ctx, namespaceID, taskID)
 	if err != nil {
 		return nil, err
 	}
-
-	initialTask, err := s.engine.GetTask(ctx, namespaceID, taskID)
+	leaderInput := map[string]any{"namespace_id": namespaceID}
+	if initialTask.DAGID != "" {
+		leaderInput["dag_id"] = initialTask.DAGID
+	}
+	leaderResult, err := s.handleLeaderTick(ctx, leaderInput)
+	if err != nil {
+		return nil, err
+	}
+	// Re-read after leader_tick (prepare-only may have updated metadata).
+	initialTask, err = s.engine.GetTask(ctx, namespaceID, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -66,8 +74,11 @@ func (s *Server) handleLifecycleTick(ctx context.Context, input map[string]any) 
 	if _, err := s.engine.WorkerPromptGet(ctx, namespaceID, reviewerID, taskID, initialTask.Title, true); err != nil {
 		return nil, fmt.Errorf("lifecycle_tick rejected: reviewer %q prompt preflight failed: %w", reviewerID, err)
 	}
+	// lifecycle_tick is test/diagnostic glue only: it assumes skill-primary
+	// prepare_start + real Agent spawn + task_transition(start) already happened.
+	// leader_tick / BT dispatch_task are prepare-only and do NOT start tasks.
 	if initialTask.State != engine.TaskExecuting && initialTask.State != engine.TaskReviewPending && initialTask.State != engine.TaskDone {
-		return nil, fmt.Errorf("lifecycle_tick rejected: task %q was not dispatched by leader_tick and is still in state %q", taskID, initialTask.State)
+		return nil, fmt.Errorf("lifecycle_tick rejected: task %q is not started (need prepare_start + transition start with real agent); still in state %q", taskID, initialTask.State)
 	}
 
 	bridge := btBridgeForRequest(s)
@@ -124,7 +135,7 @@ func (s *Server) handleLifecycleTick(ctx context.Context, input map[string]any) 
 		}
 	}
 
-	finalLeaderResult, err := s.handleLeaderTick(ctx, map[string]any{"namespace_id": namespaceID})
+	finalLeaderResult, err := s.handleLeaderTick(ctx, leaderInput)
 	if err != nil {
 		return nil, err
 	}

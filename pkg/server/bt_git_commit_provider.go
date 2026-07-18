@@ -20,6 +20,8 @@ type gitCommitChangesRequest struct {
 }
 
 type gitCommitChangesResponse struct {
+	// Mode is record_review_metadata: this step does NOT git commit.
+	Mode           string         `json:"mode"`
 	TaskID         string         `json:"task_id"`
 	State          string         `json:"state"`
 	AssignedWorker string         `json:"assigned_worker,omitempty"`
@@ -83,7 +85,7 @@ func (s *Server) gitCommitChangesOnce(ctx context.Context, namespaceID, taskID, 
 		return gitCommitChangesResponse{}, err
 	}
 	if runtime.Status != "clean" {
-		return gitCommitChangesResponse{}, fmt.Errorf("git_commit_changes rejected: task %q worktree status is %q; commit or clean the worktree before recording review metadata", taskID, runtime.Status)
+		return gitCommitChangesResponse{}, fmt.Errorf("git_commit_changes rejected: task %q worktree status is %q; worker must commit first — this step only records HEAD+diff for review metadata", taskID, runtime.Status)
 	}
 
 	head, err := runGit(ctx, runtime.WorktreePath, "rev-parse", "HEAD")
@@ -109,6 +111,7 @@ func (s *Server) gitCommitChangesOnce(ctx context.Context, namespaceID, taskID, 
 	}
 
 	return gitCommitChangesResponse{
+		Mode:           "record_review_metadata",
 		TaskID:         task.ID,
 		State:          string(task.State),
 		AssignedWorker: task.AssignedWorker,

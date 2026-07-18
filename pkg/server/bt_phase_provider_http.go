@@ -50,14 +50,19 @@ func (p *btPhaseProvider) handlePhase(w http.ResponseWriter, r *http.Request) {
 	}
 	var input struct {
 		NamespaceID string `json:"namespace_id"`
+		DAGID       string `json:"dag_id,omitempty"`
 		Workdir     string `json:"workdir,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	result, err := p.server.buildPhaseProviderResult(r.Context(), input.NamespaceID)
+	result, err := p.server.buildPhaseProviderResult(r.Context(), input.NamespaceID, input.DAGID)
 	if err != nil {
+		if _, ok := err.(*MultiDAGFocusError); ok {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

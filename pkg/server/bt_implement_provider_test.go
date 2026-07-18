@@ -40,7 +40,8 @@ func TestImplementCodeOnceReturnsPromptContext(t *testing.T) {
 	require.Contains(t, resp.Prompt, "feat/test")
 	require.Equal(t, "worker-a", resp.Worker["id"])
 	require.Equal(t, "Worker A", resp.Worker["name"])
-	require.Equal(t, []string{"worker_prompt_get", "worktree_get", "git_status"}, resp.SuggestedActions)
+	require.Equal(t, "briefing_only", resp.Mode)
+	require.Equal(t, []string{"spawn_or_continue_worker_agent", "implement_in_worktree", "git_commit_in_worktree", "worker_prompt_get", "worktree_get", "git_status"}, resp.SuggestedActions)
 }
 
 func TestImplementCodeOnceRejectsWorkerMismatch(t *testing.T) {

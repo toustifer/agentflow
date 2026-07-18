@@ -74,9 +74,211 @@ func (s *Server) Tools() []ToolSpec {
 		{Name: "flow_ping"},
 	}
 	for i := range tools {
-		tools[i].InputSchema = map[string]any{"type": "object"}
+		tools[i].InputSchema = toolInputSchema(tools[i].Name)
 	}
 	return tools
+}
+
+func toolInputSchema(name string) map[string]any {
+	stringProp := map[string]any{"type": "string"}
+	boolProp := map[string]any{"type": "boolean"}
+	numberProp := map[string]any{"type": "number"}
+	stringListProp := map[string]any{"type": "array", "items": stringProp}
+	stringMapProp := map[string]any{"type": "object", "additionalProperties": stringProp}
+	properties := map[string]any{}
+	add := func(keys ...string) {
+		for _, key := range keys {
+			properties[key] = stringProp
+		}
+	}
+	addStringLists := func(keys ...string) {
+		for _, key := range keys {
+			properties[key] = stringListProp
+		}
+	}
+
+	required := []string{}
+	switch name {
+	case "flow_ping", "namespace_list":
+		if name == "namespace_list" {
+			add("workdir_contains")
+		}
+	case "namespace_create":
+		add("id", "name")
+		properties["metadata"] = stringMapProp
+		required = []string{"id", "name"}
+	case "namespace_get", "dag_list", "worker_list", "project_next_tasks", "project_blockers", "project_report":
+		add("namespace_id")
+		required = []string{"namespace_id"}
+	case "project_init":
+		add("project_id", "project_name", "workdir", "main_branch", "worktree_root", "user_name", "user_email")
+		properties["init_git"] = boolProp
+		required = []string{"project_id", "workdir"}
+	case "project_next_steps":
+		add("namespace_id", "workdir", "dag_id")
+	case "project_inspect":
+		add("namespace_id", "focus", "dag_id", "task_id")
+		required = []string{"namespace_id"}
+	case "dag_create":
+		add("namespace_id", "dag_id", "title", "branch", "execution_branch", "base_branch")
+		properties["metadata"] = stringMapProp
+		required = []string{"namespace_id", "dag_id", "title"}
+	case "dag_get", "dag_report", "dag_flowchart":
+		add("namespace_id", "dag_id", "with")
+		required = []string{"namespace_id", "dag_id"}
+	case "dag_update":
+		add("namespace_id", "dag_id", "title", "branch", "execution_branch", "base_branch")
+		properties["metadata"] = stringMapProp
+		required = []string{"namespace_id", "dag_id"}
+	case "worker_register":
+		add("namespace_id", "worker_id", "name", "scope", "kind", "stuck_playbook", "escalation_mode", "launch_mode", "prompt_template")
+		addStringLists("skills", "task_tags", "required_reads", "recommended_mcp", "handoff_targets", "recovery_policy", "fallback_mcp")
+		properties["metadata"] = stringMapProp
+		required = []string{"namespace_id", "worker_id", "name", "prompt_template"}
+	case "worker_get", "worker_status":
+		add("namespace_id", "worker_id")
+		required = []string{"namespace_id", "worker_id"}
+	case "worker_prompt_get":
+		add("namespace_id", "worker_id", "task_id", "title")
+		properties["as_reviewer"] = boolProp
+		required = []string{"namespace_id", "worker_id"}
+	case "task_create":
+		add("namespace_id", "task_id", "title", "assigned_worker", "description", "dag_id")
+		addStringLists("acceptance_criteria", "output_files", "depends_on", "tags")
+		properties["priority"] = numberProp
+		properties["estimated_hours"] = numberProp
+		properties["metadata"] = stringMapProp
+		required = []string{"namespace_id", "task_id", "title"}
+	case "task_create_batch":
+		add("namespace_id", "dag_id")
+		properties["tasks"] = map[string]any{
+			"type": "array",
+			"items": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"task_id": stringProp, "title": stringProp, "assigned_worker": stringProp,
+					"description": stringProp, "acceptance_criteria": stringListProp,
+					"output_files": stringListProp, "depends_on": stringListProp,
+					"tags": stringListProp, "priority": numberProp, "estimated_hours": numberProp,
+					"metadata": stringMapProp,
+				},
+				"required": []string{"task_id", "title"},
+			},
+		}
+		required = []string{"namespace_id", "tasks"}
+	case "task_list":
+		add("namespace_id")
+		addStringLists("states")
+		required = []string{"namespace_id"}
+	case "task_query":
+		add("namespace_id", "dag_id", "assigned_worker")
+		addStringLists("states", "tags")
+		properties["priority_gte"] = numberProp
+		properties["ready_only"] = boolProp
+		required = []string{"namespace_id"}
+	case "task_get", "task_history", "worktree_get":
+		add("namespace_id", "task_id")
+		required = []string{"namespace_id", "task_id"}
+	case "task_prepare_start":
+		add("namespace_id", "task_id")
+		properties["allow_repair"] = boolProp
+		properties["resume_targeted"] = boolProp
+		required = []string{"namespace_id", "task_id"}
+	case "task_transition":
+		add("namespace_id", "task_id", "transition", "actor_role")
+		properties["transition"] = map[string]any{"type": "string", "enum": []string{"start", "submit", "pass", "rework", "reassign", "resume", "cancel"}}
+		properties["metadata"] = stringMapProp
+		required = []string{"namespace_id", "task_id", "transition"}
+	case "task_worker_sync":
+		add("namespace_id", "task_id", "worker_agent_id", "event")
+		properties["payload"] = stringMapProp
+		required = []string{"namespace_id", "task_id", "worker_agent_id", "event"}
+	case "git_status":
+		add("namespace_id", "task_id")
+		required = []string{"namespace_id"}
+	case "worker_diary_write":
+		add("namespace_id", "worker_id", "date", "content", "task_id")
+		addStringLists("tags")
+		required = []string{"namespace_id", "worker_id", "date", "content"}
+	case "leader_tick":
+		// dag_id optional: single open DAG auto-focuses; multi open requires explicit dag_id.
+		add("namespace_id", "dag_id")
+		required = []string{"namespace_id"}
+	case "lifecycle_tick":
+		// Test/diagnostic glue only; assumes skill-primary start already happened.
+		add("namespace_id", "task_id", "worker_id", "reviewer_id", "review_decision_input", "doc_record_content", "doc_record_title", "diary_entry_content")
+		required = []string{"namespace_id", "task_id", "worker_id", "reviewer_id", "review_decision_input"}
+	case "bt_list_trees":
+		// no required inputs
+	case "bt_show_tree":
+		add("tree")
+		required = []string{"tree"}
+	case "bt_validate_tree":
+		add("json")
+		required = []string{"json"}
+	case "bt_tick":
+		add("tree", "namespace_id")
+		properties["input"] = map[string]any{"type": "object"}
+		required = []string{"tree"}
+	case "doc_write":
+		add("namespace_id", "title", "content", "scope", "task_id", "worker_id")
+		addStringLists("tags")
+		required = []string{"namespace_id"}
+	case "doc_get", "doc_delete":
+		add("namespace_id")
+		properties["id"] = numberProp
+		required = []string{"namespace_id", "id"}
+	case "doc_list":
+		add("namespace_id", "scope", "task_id")
+		required = []string{"namespace_id"}
+	case "doc_search":
+		add("namespace_id", "query", "scope")
+		required = []string{"namespace_id", "query"}
+	case "worker_update":
+		add("namespace_id", "worker_id", "name", "scope", "kind", "stuck_playbook", "escalation_mode", "launch_mode", "prompt_template")
+		addStringLists("skills", "task_tags", "required_reads", "recommended_mcp", "handoff_targets", "recovery_policy", "fallback_mcp")
+		properties["metadata"] = stringMapProp
+		required = []string{"namespace_id", "worker_id"}
+	case "worker_handbook_write":
+		add("namespace_id", "worker_id", "title", "content")
+		required = []string{"namespace_id", "worker_id"}
+	case "worker_handbook_get":
+		add("namespace_id", "worker_id")
+		required = []string{"namespace_id", "worker_id"}
+	case "worker_handbook_list":
+		add("namespace_id")
+		required = []string{"namespace_id"}
+	case "find_knowledge", "find_pitfalls":
+		add("namespace_id", "query")
+		required = []string{"namespace_id", "query"}
+	case "worker_diary_get":
+		add("namespace_id", "worker_id", "date")
+		required = []string{"namespace_id", "worker_id", "date"}
+	case "worker_diary_list":
+		add("namespace_id", "worker_id")
+		required = []string{"namespace_id", "worker_id"}
+	case "leader_diary_write":
+		add("namespace_id", "date", "content")
+		required = []string{"namespace_id", "date", "content"}
+	case "leader_diary_get":
+		add("namespace_id", "date")
+		required = []string{"namespace_id", "date"}
+	case "leader_diary_list":
+		add("namespace_id")
+		required = []string{"namespace_id"}
+	case "namespace_delete":
+		add("namespace_id", "confirm")
+		required = []string{"namespace_id"}
+	default:
+		add("namespace_id", "worker_id", "task_id", "dag_id", "date", "query", "scope", "title", "content", "confirm")
+		addStringLists("tags")
+		properties["metadata"] = stringMapProp
+	}
+	schema := map[string]any{"type": "object", "properties": properties}
+	if len(required) > 0 {
+		schema["required"] = required
+	}
+	return schema
 }
 
 func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) (map[string]any, error) {

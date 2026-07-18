@@ -42,6 +42,40 @@ func decodeBlackboard(t *testing.T, payload map[string]any) map[string]any {
 	return raw
 }
 
+
+// skillPrimaryStart prepares (if needed) then starts with a real agent id.
+// Mirrors the Skill-primary contract: prepare → spawn → transition(start).
+func skillPrimaryStart(t *testing.T, srv *Server, namespaceID, taskID, agentID string) *engine.Task {
+	t.Helper()
+	task, err := srv.engine.GetTask(context.Background(), namespaceID, taskID)
+	require.NoError(t, err)
+	ticket := ""
+	if task.Metadata != nil {
+		ticket = task.Metadata["launch.ticket"]
+	}
+	if ticket == "" || task.Metadata["launch.ticket_state"] != "issued" {
+		resp, err := srv.dispatchTaskOnce(context.Background(), namespaceID, taskID)
+		require.NoError(t, err)
+		ticket, _ = resp.WorkerLaunch["launch_ticket"].(string)
+		require.NotEmpty(t, ticket)
+	}
+	if agentID == "" {
+		agentID = "agent-test-" + taskID
+	}
+	_, err = srv.engine.TransitionTask(context.Background(), namespaceID, taskID, engine.TransStart, map[string]string{
+		"actor_role":       "leader",
+		"launch.ticket":    ticket,
+		"worker_agent_id":  agentID,
+		"runtime.provider": "claude_code",
+		"runtime.status":   "started",
+	})
+	require.NoError(t, err)
+	task, err = srv.engine.GetTask(context.Background(), namespaceID, taskID)
+	require.NoError(t, err)
+	require.Equal(t, engine.TaskExecuting, task.State)
+	return task
+}
+
 func TestLeaderTickViaPythonShape(t *testing.T) {
 	// Use repo root so bt_service and trees/ are discoverable.
 	useBTTestEnv(t)
@@ -120,10 +154,13 @@ func TestLeaderTickDispatchesTaskViaPython(t *testing.T) {
 	require.Equal(t, "success", result["tree_status"])
 	require.Equal(t, "execute", result["phase"])
 
+	// Skill-primary: leader_tick/dispatch prepares only — state stays assigned.
 	task, err := eng.GetTask(context.Background(), "ns-dispatch", "T1")
 	require.NoError(t, err)
-	require.Equal(t, engine.TaskExecuting, task.State)
+	require.Equal(t, engine.TaskAssigned, task.State)
 	require.NotEmpty(t, task.Metadata["git.worktree_path"])
+	require.Equal(t, "issued", task.Metadata["launch.ticket_state"])
+	require.Empty(t, task.WorkerAgentID)
 
 }
 
@@ -173,6 +210,9 @@ func TestLeaderTickMonitorTasksViaPython(t *testing.T) {
 	_, err = srv.handleLeaderTick(context.Background(), map[string]any{"namespace_id": "ns-monitor"})
 	require.NoError(t, err)
 
+	// prepare-only leaves assigned; skill path must start before monitor.
+	skillPrimaryStart(t, srv, "ns-monitor", "T1", "agent-monitor-1")
+
 	result, err := srv.handleLeaderTick(context.Background(), map[string]any{"namespace_id": "ns-monitor"})
 	require.NoError(t, err)
 	require.Equal(t, "success", result["tree_status"])
@@ -208,9 +248,13 @@ func TestLeaderTickReportStuckViaPython(t *testing.T) {
 	srv, err := New(eng, Config{})
 	require.NoError(t, err)
 
+	repoPath := initTestGitRepo(t)
 	_, err = eng.CreateNamespace(context.Background(), engine.CreateNamespaceRequest{
 		ID:   "ns-stuck",
 		Name: "stuck-ns",
+		Metadata: map[string]string{
+			"workdir": repoPath,
+		},
 	})
 	require.NoError(t, err)
 	_, err = eng.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
@@ -235,8 +279,8 @@ func TestLeaderTickReportStuckViaPython(t *testing.T) {
 		DAGID:          "dag-1",
 	})
 	require.NoError(t, err)
-	_, err = srv.dispatchTaskOnce(context.Background(), "ns-stuck", "T1")
-	require.NoError(t, err)
+	// prepare + real start, then submit/rework so task is rework_needed (next candidate).
+	skillPrimaryStart(t, srv, "ns-stuck", "T1", "agent-stuck-1")
 	_, err = eng.TransitionTask(context.Background(), "ns-stuck", "T1", engine.TransSubmit, map[string]string{"actor_role": "worker"})
 	require.NoError(t, err)
 	_, err = eng.TransitionTask(context.Background(), "ns-stuck", "T1", engine.TransRework, map[string]string{"actor_role": "reviewer"})
@@ -244,9 +288,15 @@ func TestLeaderTickReportStuckViaPython(t *testing.T) {
 
 	result, err := srv.handleLeaderTick(context.Background(), map[string]any{"namespace_id": "ns-stuck"})
 	require.NoError(t, err)
-	require.Equal(t, "failure", result["tree_status"])
+	// rework_needed is a next candidate; prepare-only dispatch succeeds (Skill-primary).
+	require.Equal(t, "success", result["tree_status"])
 	require.Equal(t, "execute", result["phase"])
 	require.Equal(t, []map[string]any{{"assigned_worker": "worker-a", "task_id": "T1", "title": "task 1"}}, result["next_tasks"])
+
+	task, err := eng.GetTask(context.Background(), "ns-stuck", "T1")
+	require.NoError(t, err)
+	require.Equal(t, engine.TaskReworkNeeded, task.State)
+	require.Equal(t, "issued", task.Metadata["launch.ticket_state"])
 
 	bridge := btBridgeForRequest(srv)
 	require.NotNil(t, bridge)
@@ -262,6 +312,8 @@ func TestLeaderTickReportStuckViaPython(t *testing.T) {
 	require.Equal(t, "execute", bb["phase"])
 	require.Equal(t, true, bb["has_next_tasks"])
 	require.Equal(t, false, bb["has_stuck_tasks"])
+	require.Equal(t, "T1", bb["last_dispatch_task_id"])
+	require.Equal(t, "rework_needed", bb["last_dispatch_state"])
 }
 
 func TestLifecycleEndToEndViaPython(t *testing.T) {
@@ -318,7 +370,12 @@ func TestLifecycleEndToEndViaPython(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "execute", leaderResult["phase"])
 
+	// Skill-primary: prepare via leader_tick, then real start before worker tree.
 	task, err := eng.GetTask(context.Background(), "ns-lifecycle", "T1")
+	require.NoError(t, err)
+	require.Equal(t, engine.TaskAssigned, task.State)
+	skillPrimaryStart(t, srv, "ns-lifecycle", "T1", "agent-life-1")
+	task, err = eng.GetTask(context.Background(), "ns-lifecycle", "T1")
 	require.NoError(t, err)
 	require.Equal(t, engine.TaskExecuting, task.State)
 

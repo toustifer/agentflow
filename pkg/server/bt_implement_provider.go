@@ -20,6 +20,8 @@ type implementCodeRequest struct {
 }
 
 type implementCodeResponse struct {
+	// Mode is always briefing_only: this provider does not write code.
+	Mode             string         `json:"mode"`
 	Task             map[string]any `json:"task"`
 	DAG              map[string]any `json:"dag,omitempty"`
 	Git              map[string]any `json:"git,omitempty"`
@@ -94,6 +96,7 @@ func (s *Server) implementCodeOnce(ctx context.Context, namespaceID, taskID, wor
 	}
 
 	return implementCodeResponse{
+		Mode: "briefing_only",
 		Task: taskToMap(task),
 		DAG:  dagMap,
 		Git: map[string]any{
@@ -114,8 +117,16 @@ func (s *Server) implementCodeOnce(ctx context.Context, namespaceID, taskID, wor
 			"name":  worker.Name,
 			"scope": worker.Scope,
 		},
-		Prompt:           prompt,
-		SuggestedActions: []string{"worker_prompt_get", "worktree_get", "git_status"},
+		Prompt: prompt,
+		// External Worker Agent must implement product code; this step only returns context.
+		SuggestedActions: []string{
+			"spawn_or_continue_worker_agent",
+			"implement_in_worktree",
+			"git_commit_in_worktree",
+			"worker_prompt_get",
+			"worktree_get",
+			"git_status",
+		},
 	}, nil
 }
 

@@ -64,35 +64,53 @@ func (s *Server) buildWorkerLaunchBriefing(ctx context.Context, ns *engine.Names
 	stuckPlaybook := w.StuckPlaybook
 	escalationMode := w.EscalationMode
 
+	// Skill-primary: prepare/dispatch never starts the worker.
+	// Only an existing executing task reports started=true (real agent already bound).
+	started := task.State == engine.TaskExecuting && task.WorkerAgentID != ""
+	leaderNext := "launch_worker_manually"
+	warning := "This call only prepared the worker context (prepare-only). BT dispatch_task does NOT start the task. Spawn a real Agent, then task_transition(start) with launch.ticket + real worker_agent_id. Do NOT implement product code in the main session."
+	instructions := []string{
+		"Read required_reads first.",
+		"Keep the leader primary workdir on base_branch; never implement in the main session.",
+		"Spawn a real Agent subagent with cwd/isolation set to worktree_path.",
+		"Pass prompt_template together with task context and launch_ticket.",
+		"Call task_transition(start) only after the Agent is spawned, with launch.ticket + real worker_agent_id + runtime.provider + runtime.status=started.",
+		"BT dispatch_task / leader_tick prepare path will NOT call TransStart and will NOT mint synthetic bt: agent ids.",
+		"If prepare/start fails, repair worktree/branch ownership or escalate; do not hand-write the task.",
+		"Keep task ownership when blocked and follow recovery_policy before escalating.",
+		"Do not assume this MCP call already started the worker.",
+	}
+	if started {
+		leaderNext = "monitor_or_sync_worker"
+		warning = "Task is already executing with a bound worker_agent_id. Monitor progress via task_worker_sync / diary; do not re-start or re-spawn unless rework."
+		instructions = []string{
+			"Task is already started — do not call task_transition(start) again.",
+			"Monitor the running Agent; collect diary / commits.",
+			"Use task_worker_sync with the same worker_agent_id when needed.",
+			"On completion path: submit for review after clean worktree + review metadata.",
+		}
+	}
+
 	briefing := workerLaunchBriefing{
-		Required:         true,
-		Started:          false,
-		LeaderNextAction: "launch_worker_manually",
-		Warning:          "This call only prepared the worker context. The leader must explicitly launch the worker and must NOT implement product code in the main session.",
-		WorkerID:         task.AssignedWorker,
-		TaskID:           task.ID,
-		TaskTitle:        task.Title,
-		WorktreePath:     task.Metadata["git.worktree_path"],
-		Branch:           task.Metadata["git.branch"],
-		DispatchMode:     launchMode,
-		PromptTemplate:   prompt,
-		RequiredReads:    requiredReads,
-		RecommendedMCP:   recommendedMCP,
+		Required:          true,
+		Started:           started,
+		LeaderNextAction:  leaderNext,
+		Warning:           warning,
+		WorkerID:          task.AssignedWorker,
+		TaskID:            task.ID,
+		TaskTitle:         task.Title,
+		WorktreePath:      task.Metadata["git.worktree_path"],
+		Branch:            task.Metadata["git.branch"],
+		DispatchMode:      launchMode,
+		PromptTemplate:    prompt,
+		RequiredReads:     requiredReads,
+		RecommendedMCP:    recommendedMCP,
 		RecommendedSkills: []string{},
-		RecoveryPolicy:   recoveryPolicy,
-		FallbackMCP:      fallbackMCP,
-		StuckPlaybook:    stuckPlaybook,
-		EscalationMode:   escalationMode,
-		LaunchInstructions: []string{
-			"Read required_reads first.",
-			"Keep the leader primary workdir on base_branch; never implement in the main session.",
-			"Spawn a real Agent subagent with cwd/isolation set to worktree_path.",
-			"Pass prompt_template together with task context and launch_ticket.",
-			"Call task_transition(start) only after the Agent is spawned, with launch.ticket + real worker_agent_id.",
-			"If prepare/start fails, repair worktree/branch ownership or escalate; do not hand-write the task.",
-			"Keep task ownership when blocked and follow recovery_policy before escalating.",
-			"Do not assume this MCP call already started the worker.",
-		},
+		RecoveryPolicy:    recoveryPolicy,
+		FallbackMCP:       fallbackMCP,
+		StuckPlaybook:     stuckPlaybook,
+		EscalationMode:    escalationMode,
+		LaunchInstructions: instructions,
 	}
 	return map[string]any{
 		"required":            briefing.Required,

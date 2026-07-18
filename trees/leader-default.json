@@ -1,5 +1,6 @@
 {
   "name": "leader-default",
+  "desc": "Phase router. dispatch_task is prepare-only (Skill-primary): issues launch ticket + worktree, does NOT TransStart. Leader must spawn real Agent then task_transition(start).",
   "blackboard": {},
   "tree": {
     "type": "ReactiveSequence",

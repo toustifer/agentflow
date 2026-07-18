@@ -88,12 +88,20 @@ func (s *Server) handleProjectNextSteps(ctx context.Context, input map[string]an
 		completed = append(completed, fmt.Sprintf("已注册 %d 个 Worker", len(workers)))
 	}
 
-	// DAG 情况
+	// DAG focus: explicit dag_id, single-auto, or multi-DAG error (no silent pick).
 	dags, _ := s.engine.ListDAGs(ctx, nsID)
-	activeDAG := pickResumeDAG(dags, targetDAGID)
+	activeDAG, focusSource, focusErr := resolveDAGFocus(dags, targetDAGID)
+	if focusErr != nil {
+		return nil, focusErr
+	}
+	// All open primary gone (e.g. all done): keep a display DAG for summaries only.
 	if activeDAG == nil && len(dags) > 0 {
 		activeDAG = &dags[0]
+		if focusSource == focusSourceNone {
+			focusSource = focusSourceNone
+		}
 	}
+	recommended := pickResumeDAG(dags, "")
 
 	// Task 情况
 	tasks, _ := s.engine.ListTasks(ctx, nsID, engine.StateFilter{})
@@ -111,10 +119,16 @@ func (s *Server) handleProjectNextSteps(ctx context.Context, input map[string]an
 		// 有 DAG，检查 task 完成情况
 		if totalTasks > 0 {
 			pct := float64(doneTasks) * 100 / float64(totalTasks)
+			dagTitle := ""
+			if activeDAG != nil {
+				dagTitle = activeDAG.Title
+			}
 			if doneTasks == totalTasks {
 				phase = "done"
 				phaseName = fmt.Sprintf("已完成（%d/%d）", doneTasks, totalTasks)
-				completed = append(completed, fmt.Sprintf("DAG %q 全部完成", activeDAG.Title))
+				if dagTitle != "" {
+					completed = append(completed, fmt.Sprintf("DAG %q 全部完成", dagTitle))
+				}
 				result := map[string]any{
 					"phase":           phase,
 					"phase_name":      phaseName,
@@ -126,16 +140,17 @@ func (s *Server) handleProjectNextSteps(ctx context.Context, input map[string]an
 					"actions":         []string{"goal", "doc_list"},
 					"dag":             dagToSummaryMap(activeDAG),
 					"resume_targeted": targetDAGID != "",
+					"focus_source":    focusSource,
 				}
-				if activeDAG != nil {
-					result["legacy_dags_skipped"] = summarizeSkippedLegacyDAGs(dags, activeDAG.ID)
-				}
+				attachDAGFocusFields(result, activeDAG, recommended, dags, focusSource)
 				return result, nil
 			}
 
 			phase = "execute"
 			phaseName = fmt.Sprintf("执行中（%d/%d）", doneTasks, totalTasks)
-			completed = append(completed, fmt.Sprintf("DAG %q 进度 %d/%d", activeDAG.Title, doneTasks, totalTasks))
+			if dagTitle != "" {
+				completed = append(completed, fmt.Sprintf("DAG %q 进度 %d/%d", dagTitle, doneTasks, totalTasks))
+			}
 
 			nextCandidates, _ := s.engine.ProjectNextTasks(ctx, nsID)
 			nextTasks := projectNextTaskSummaries(nextCandidates, activeDAG)
@@ -152,13 +167,12 @@ func (s *Server) handleProjectNextSteps(ctx context.Context, input map[string]an
 				"dag":             dagToSummaryMap(activeDAG),
 				"active_dags":     len(dags),
 				"resume_targeted": targetDAGID != "",
+				"focus_source":    focusSource,
 			}
-			if activeDAG != nil {
-				result["legacy_dags_skipped"] = summarizeSkippedLegacyDAGs(dags, activeDAG.ID)
-			}
+			attachDAGFocusFields(result, activeDAG, recommended, dags, focusSource)
 			if len(nextTasks) > 0 {
-				result["next_steps"] = append(result["next_steps"].([]string), fmt.Sprintf("派发 task %s（%s）→ task_transition start", nextTasks[0]["task_id"], nextTasks[0]["title"]))
-				result["actions"] = append(result["actions"].([]string), "task_transition start")
+				result["next_steps"] = append(result["next_steps"].([]string), fmt.Sprintf("派发 task %s（%s）→ prepare_start + spawn Agent + transition start", nextTasks[0]["task_id"], nextTasks[0]["title"]))
+				result["actions"] = append(result["actions"].([]string), "task_prepare_start")
 				result["next_tasks"] = nextTasks
 			}
 			if len(activeList) > 0 {
@@ -168,18 +182,20 @@ func (s *Server) handleProjectNextSteps(ctx context.Context, input map[string]an
 			}
 
 			if len(nextTasks) == 0 && len(activeList) == 0 {
-				return map[string]any{
-					"phase":               "stuck",
-					"phase_name":          "阻塞",
-					"progress":            fmt.Sprintf("%.0f%%", pct),
-					"completed":           completed,
-					"dag":                 dagToSummaryMap(activeDAG),
-					"stuck_tasks":         stuckTasks,
-					"next_steps":          []string{"检查 stuck_tasks 中的任务状态，手动修复阻塞后就恢复正常"},
-					"actions":             []string{"task_get", "project_blockers"},
-					"resume_targeted":     targetDAGID != "",
-					"legacy_dags_skipped": summarizeSkippedLegacyDAGs(dags, activeDAG.ID),
-				}, nil
+				stuckResult := map[string]any{
+					"phase":           "stuck",
+					"phase_name":      "阻塞",
+					"progress":        fmt.Sprintf("%.0f%%", pct),
+					"completed":       completed,
+					"dag":             dagToSummaryMap(activeDAG),
+					"stuck_tasks":     stuckTasks,
+					"next_steps":      []string{"检查 stuck_tasks 中的任务状态，手动修复阻塞后就恢复正常"},
+					"actions":         []string{"task_get", "project_blockers"},
+					"resume_targeted": targetDAGID != "",
+					"focus_source":    focusSource,
+				}
+				attachDAGFocusFields(stuckResult, activeDAG, recommended, dags, focusSource)
+				return stuckResult, nil
 			}
 
 			return result, nil
@@ -204,15 +220,14 @@ func (s *Server) handleProjectNextSteps(ctx context.Context, input map[string]an
 		"active_dags":     len(dags),
 		"workers":         len(workers),
 		"resume_targeted": targetDAGID != "",
+		"focus_source":    focusSource,
 	}
-	if activeDAG != nil {
-		result["legacy_dags_skipped"] = summarizeSkippedLegacyDAGs(dags, activeDAG.ID)
-	}
+	attachDAGFocusFields(result, activeDAG, recommended, dags, focusSource)
 
 	switch phase {
 	case "shape":
 		result["next_steps"] = []string{"和用户确认技术栈/功能清单/做和不做的边界", "写入 .claude/PROJECT_FINAL_SHAPE.md", "注册 Worker"}
-		result["actions"] = []string{"brainstorm", "worker_register"}
+		result["actions"] = []string{"shape", "worker_register"}
 	case "plan":
 		if len(workers) > 0 && len(dags) == 0 {
 			result["next_steps"] = []string{"拆解第一个 DAG", "用 dag_create + task_create_batch 创建"}
@@ -282,6 +297,25 @@ func (s *Server) namespaceIDForWorkdir(ctx context.Context, workdir string) stri
 		}
 	}
 	return ""
+}
+
+
+func attachDAGFocusFields(result map[string]any, activeDAG, recommended *engine.DAG, dags []engine.DAG, focusSource string) {
+	if result == nil {
+		return
+	}
+	if focusSource != "" {
+		result["focus_source"] = focusSource
+	}
+	if activeDAG != nil {
+		result["focused_dag_id"] = activeDAG.ID
+		if _, ok := result["legacy_dags_skipped"]; !ok {
+			result["legacy_dags_skipped"] = summarizeSkippedLegacyDAGs(dags, activeDAG.ID)
+		}
+	}
+	if recommended != nil {
+		result["recommended_dag_id"] = recommended.ID
+	}
 }
 
 func projectNextTaskSummaries(next []engine.NextTask, dag *engine.DAG) []map[string]any {

@@ -39,6 +39,22 @@ agentflow/
 - 主仓保持 `base_branch`；禁止在主仓 checkout `execution_branch` 后由 leader 手写交付
 - prepare/start 失败时只修 git/worktree 或 escalate，**禁止**主会话代做 task
 
+### Skill-primary 派工（唯一真相）
+
+```text
+leader_tick(namespace_id, dag_id)     # 只读 phase/next；BT dispatch = prepare-only
+task_prepare_start                    # ticket + worktree；state 仍 assigned
+spawn 真实 Agent
+task_transition(start)                # launch.ticket + real worker_agent_id
+                                      # + runtime.provider + runtime.status=started
+```
+
+- **禁止**把 `leader_tick` / BT `dispatch_task` 当成已 start
+- **禁止**合成 `worker_agent_id`（如 `bt:...`）
+- 多 DAG 时必须显式 `dag_id`；单 DAG 可由 server `single_auto`
+- `lifecycle_tick` 仅测试/诊断 glue，不是生产 execute 主循环
+- Worker BT 树的 `implement_code` / `git_commit_changes` 是 briefing / 录 metadata，不代替 Worker Agent 写代码/commit
+
 完整派工协议见 `flows/goal.md` 的 Execute 段。
 
 ## Sticky Mode（会话保持）

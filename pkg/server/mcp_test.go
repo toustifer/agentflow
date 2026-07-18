@@ -165,7 +165,7 @@ func TestProjectInspectAggregatesBucketsAndTaskRuntime(t *testing.T) {
 	require.NotEmpty(t, dagDetail["tasks"])
 }
 
-func TestLeaderTickDoesNotEnterStuckOnSharedWorkerConcurrency(t *testing.T) {
+func TestLeaderTickRequiresDagIDWhenMultipleActive(t *testing.T) {
 	t.Parallel()
 
 	srv := newTestServer(t)
@@ -192,13 +192,53 @@ func TestLeaderTickDoesNotEnterStuckOnSharedWorkerConcurrency(t *testing.T) {
 	_, err = srv.engine.TransitionTask(context.Background(), "ns-1", "T-shared-1", engine.TransStart, map[string]string{"actor_role": "leader"})
 	require.NoError(t, err)
 
-	result, err := srv.Handle(context.Background(), "leader_tick", map[string]any{"namespace_id": "ns-1"})
+	// No dag_id with multiple open DAGs → error (no silent focus).
+	_, err = srv.Handle(context.Background(), "leader_tick", map[string]any{"namespace_id": "ns-1"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "dag_id required")
+	require.Contains(t, err.Error(), "dag-1")
+	require.Contains(t, err.Error(), "dag-2")
+
+	// Explicit dag-2 focuses T-shared-2 even while worker is busy on dag-1.
+	result, err := srv.Handle(context.Background(), "leader_tick", map[string]any{
+		"namespace_id": "ns-1",
+		"dag_id":       "dag-2",
+	})
 	require.NoError(t, err)
 	require.Equal(t, "execute", result["phase"])
+	require.Equal(t, "dag-2", result["focused_dag_id"])
+	require.Equal(t, "explicit", result["focus_source"])
 	nextTasks, ok := result["next_tasks"].([]map[string]any)
 	require.True(t, ok)
 	require.NotEmpty(t, nextTasks)
 	require.Equal(t, "T-shared-2", nextTasks[0]["task_id"])
+}
+
+func TestLeaderTickAutoFocusesSingleDAG(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t)
+	_, err := srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
+		NamespaceID: "ns-1", ID: "worker-x", Name: "Worker X", PromptTemplate: "Task {task_id}",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateDAG(context.Background(), engine.CreateDAGRequest{
+		NamespaceID: "ns-1", ID: "dag-only", Title: "Only DAG", ExecutionBranch: "feat/only",
+	})
+	require.NoError(t, err)
+	_, err = srv.engine.CreateTask(context.Background(), engine.CreateTaskRequest{
+		NamespaceID: "ns-1", ID: "T-only", Title: "only", DAGID: "dag-only", AssignedWorker: "worker-x",
+	})
+	require.NoError(t, err)
+
+	result, err := srv.Handle(context.Background(), "leader_tick", map[string]any{"namespace_id": "ns-1"})
+	require.NoError(t, err)
+	require.Equal(t, "execute", result["phase"])
+	require.Equal(t, "dag-only", result["focused_dag_id"])
+	require.Equal(t, "single_auto", result["focus_source"])
+	nextTasks, ok := result["next_tasks"].([]map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "T-only", nextTasks[0]["task_id"])
 }
 
 func TestToolRegistryIncludesCoreTools(t *testing.T) {
@@ -298,8 +338,9 @@ func TestTaskTransitionAdvancesState(t *testing.T) {
 	workerLaunch, ok := result["worker_launch"].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, true, workerLaunch["required"])
-	require.Equal(t, false, workerLaunch["started"])
-	require.Equal(t, "launch_worker_manually", workerLaunch["leader_next_action"])
+	// After real start with bound agent, briefing is honest: started=true.
+	require.Equal(t, true, workerLaunch["started"])
+	require.Equal(t, "monitor_or_sync_worker", workerLaunch["leader_next_action"])
 	require.Equal(t, "worker-b", workerLaunch["worker_id"])
 	require.Equal(t, "T-transition", workerLaunch["task_id"])
 	require.Equal(t, "feat/test", workerLaunch["branch"])
@@ -898,6 +939,9 @@ func TestLifecycleTickRunsEndToEnd(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	// Skill-primary: lifecycle_tick requires task already started with real agent.
+	skillPrimaryStart(t, srv, "ns-1", "T-life", "agent-life-mcp-1")
+
 	result, err := srv.Handle(context.Background(), "lifecycle_tick", map[string]any{
 		"namespace_id":          "ns-1",
 		"task_id":               "T-life",
@@ -986,7 +1030,7 @@ func TestLifecycleTickRejectsUndispatchedTask(t *testing.T) {
 		"diary_entry_content":   "done",
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "was not dispatched")
+	require.Contains(t, err.Error(), "is not started")
 
 	if globalBTBridge != nil {
 		globalBTBridge.Stop()
@@ -998,11 +1042,12 @@ func TestLifecycleTickRejectsMissingPromptTemplate(t *testing.T) {
 	useBTTestEnv(t)
 
 	srv := newTestServer(t)
+	// Empty PromptTemplate so WorkerPromptGet preflight fails (engine allows empty; MCP register is stricter).
 	_, err := srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
 		NamespaceID:    "ns-1",
 		ID:             "worker-a",
 		Name:           "Worker A",
-		PromptTemplate: "Task {task_id} in {worktree_path} on {branch}",
+		PromptTemplate: "",
 	})
 	require.NoError(t, err)
 	_, err = srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{

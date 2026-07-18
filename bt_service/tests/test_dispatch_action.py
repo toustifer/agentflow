@@ -45,9 +45,10 @@ def test_dispatch_task_provider_success_writes_blackboard(monkeypatch):
     def fake_dispatch(namespace_id: str, task_id: str) -> dict:
         assert namespace_id == "ns-1"
         assert task_id == "T1"
+        # Skill-primary: prepare-only response keeps state assigned.
         return {
             "task_id": "T1",
-            "state": "executing",
+            "state": "assigned",
             "assigned_worker": "worker-a",
             "worktree_path": "D:/tmp/worktree/T1",
             "branch": "feat/test",
@@ -55,6 +56,7 @@ def test_dispatch_task_provider_success_writes_blackboard(monkeypatch):
                 "required": True,
                 "started": False,
                 "leader_next_action": "launch_worker_manually",
+                "launch_ticket": "lt_test_ticket",
             },
         }
 
@@ -69,10 +71,11 @@ def test_dispatch_task_provider_success_writes_blackboard(monkeypatch):
     assert ok is True
     assert err is None
     assert bb.get("last_dispatch_task_id") == "T1"
-    assert bb.get("last_dispatch_state") == "executing"
+    assert bb.get("last_dispatch_state") == "assigned"
     assert bb.get("last_dispatch_worker") == "worker-a"
     assert bb.get("last_dispatch_worktree_path") == "D:/tmp/worktree/T1"
     assert bb.get("last_dispatch_branch") == "feat/test"
+    assert bb.get("last_dispatch_launch_ticket") == "lt_test_ticket"
 
 
 def test_dispatch_task_provider_error_returns_failure(monkeypatch):

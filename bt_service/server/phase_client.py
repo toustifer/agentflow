@@ -15,7 +15,7 @@ class PhaseProviderError(RuntimeError):
     pass
 
 
-def fetch_phase(namespace_id: str, workdir: str = "") -> dict:
+def fetch_phase(namespace_id: str, workdir: str = "", dag_id: str = "") -> dict:
     url = os.getenv("AGENTFLOW_BT_PHASE_URL", "")
     token = os.getenv("AGENTFLOW_BT_PHASE_TOKEN", "")
     if not url:
@@ -26,6 +26,8 @@ def fetch_phase(namespace_id: str, workdir: str = "") -> dict:
     payload = {"namespace_id": namespace_id}
     if workdir:
         payload["workdir"] = workdir
+    if dag_id:
+        payload["dag_id"] = dag_id
 
     req = urllib.request.Request(
         url,

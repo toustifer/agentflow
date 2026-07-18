@@ -117,8 +117,7 @@ func TestReportStuckOnceRejectsExecutingTask(t *testing.T) {
 	require.NoError(t, err)
 	_, err = eng.CreateTask(context.Background(), engine.CreateTaskRequest{NamespaceID: "ns-1", ID: "T1", Title: "task 1", AssignedWorker: "worker-a", DAGID: "dag-1"})
 	require.NoError(t, err)
-	_, err = srv.dispatchTaskOnce(context.Background(), "ns-1", "T1")
-	require.NoError(t, err)
+	skillPrimaryStart(t, srv, "ns-1", "T1", "agent-stuck-exec-1")
 
 	_, err = srv.reportStuckOnce(context.Background(), "ns-1", "T1")
 	require.Error(t, err)

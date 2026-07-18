@@ -64,11 +64,15 @@ func (s *Server) handleLeaderTick(ctx context.Context, input map[string]any) (ma
 	if err != nil {
 		return nil, err
 	}
+	dagID, err := optionalString(input, "dag_id")
+	if err != nil {
+		return nil, err
+	}
 	if _, err := s.engine.GetNamespace(ctx, namespaceID); err != nil {
 		return nil, err
 	}
 
-	phaseData, err := s.buildPhaseProviderResult(ctx, namespaceID)
+	phaseData, err := s.buildPhaseProviderResult(ctx, namespaceID, dagID)
 	if err != nil {
 		return nil, err
 	}
@@ -76,25 +80,38 @@ func (s *Server) handleLeaderTick(ctx context.Context, input map[string]any) (ma
 	bridge := btBridgeForRequest(s)
 	if bridge == nil {
 		// Fallback to prior Go behavior if Python is unavailable.
-		return map[string]any{
-			"tree_status": statusFromPhase(phaseData.Phase),
-			"phase":       phaseData.Phase,
-			"phase_name":  phaseData.PhaseName,
-			"progress":    phaseData.Progress,
-			"actions":     phaseData.Actions,
-			"next_tasks":  phaseData.NextTasks,
+		out := map[string]any{
+			"tree_status":  statusFromPhase(phaseData.Phase),
+			"phase":        phaseData.Phase,
+			"phase_name":   phaseData.PhaseName,
+			"progress":     phaseData.Progress,
+			"actions":      phaseData.Actions,
+			"next_tasks":   phaseData.NextTasks,
 			"active_tasks": phaseData.ActiveTasks,
-			"stuck_tasks": phaseData.StuckTasks,
-		}, nil
+			"stuck_tasks":  phaseData.StuckTasks,
+		}
+		if phaseData.FocusedDAGID != "" {
+			out["focused_dag_id"] = phaseData.FocusedDAGID
+		}
+		if phaseData.FocusSource != "" {
+			out["focus_source"] = phaseData.FocusSource
+		}
+		return out, nil
 	}
 
+	bb := map[string]any{
+		"namespace_id": namespaceID,
+		"phase_data":   phaseData.toMap(),
+	}
+	if dagID != "" {
+		bb["dag_id"] = dagID
+	} else if phaseData.FocusedDAGID != "" {
+		bb["dag_id"] = phaseData.FocusedDAGID
+	}
 	result, err := bridge.RPC("tick", map[string]any{
-		"tree_name": "leader-default",
-		"blackboard": map[string]any{
-			"namespace_id": namespaceID,
-			"phase_data":   phaseData.toMap(),
-		},
-		"options": map[string]any{"return_blackboard": true},
+		"tree_name":  "leader-default",
+		"blackboard": bb,
+		"options":    map[string]any{"return_blackboard": true},
 	})
 	if err != nil {
 		return nil, err
@@ -111,6 +128,12 @@ func (s *Server) handleLeaderTick(ctx context.Context, input map[string]any) (ma
 		"phase_name":  toString(outputs["phase_name"]),
 		"progress":    toString(outputs["progress"]),
 		"actions":     toStringSlice(outputs["actions"]),
+	}
+	if phaseData.FocusedDAGID != "" {
+		response["focused_dag_id"] = phaseData.FocusedDAGID
+	}
+	if phaseData.FocusSource != "" {
+		response["focus_source"] = phaseData.FocusSource
 	}
 	if nextTasks := toMapSlice(outputs["next_tasks"]); len(nextTasks) > 0 {
 		response["next_tasks"] = nextTasks
