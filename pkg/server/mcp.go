@@ -10,11 +10,12 @@ import (
 )
 
 type ToolSpec struct {
-	Name string `json:"name"`
+	Name        string         `json:"name"`
+	InputSchema map[string]any `json:"inputSchema"`
 }
 
 func (s *Server) Tools() []ToolSpec {
-	return []ToolSpec{
+	tools := []ToolSpec{
 		{Name: "namespace_create"},
 		{Name: "namespace_get"},
 		{Name: "namespace_delete"},
@@ -72,6 +73,10 @@ func (s *Server) Tools() []ToolSpec {
 		{Name: "doc_delete"},
 		{Name: "flow_ping"},
 	}
+	for i := range tools {
+		tools[i].InputSchema = map[string]any{"type": "object"}
+	}
+	return tools
 }
 
 func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) (map[string]any, error) {
