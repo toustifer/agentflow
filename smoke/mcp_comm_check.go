@@ -1,14 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -21,36 +19,42 @@ func main() {
 	dbPath := filepath.Join(os.TempDir(), fmt.Sprintf("agentflow-smoke-%d.db", time.Now().UnixNano()))
 	defer os.Remove(dbPath)
 	cmd := exec.Command(agentflow, "stdio")
-	cmd.Env = append(os.Environ(), "AGENTFLOW_DB_PATH="+dbPath)
+	cmd.Env = append(os.Environ(), "AGENTFLOW_DB_PATH="+dbPath, "HUB_SYNC=0")
 	stdin, _ := cmd.StdinPipe()
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
-	cmd.Start()
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "start agentflow: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Drain stderr in background.
-	go func() { io.ReadAll(stderr) }()
+	go func() {
+		b, _ := io.ReadAll(stderr)
+		if len(b) > 0 {
+			fmt.Fprintf(os.Stderr, "agentflow stderr: %s\n", string(b))
+		}
+	}()
 
-	reader := bufio.NewReader(stdout)
+	// agentflow stdio is NDJSON (one JSON object per line), not LSP Content-Length.
+	decoder := json.NewDecoder(stdout)
 	send := func(obj map[string]any) {
-		body, _ := json.Marshal(obj)
-		fmt.Fprintf(stdin, "Content-Length: %d\r\n\r\n%s", len(body), body)
+		body, err := json.Marshal(obj)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "marshal: %v\n", err)
+			os.Exit(1)
+		}
+		if _, err := fmt.Fprintf(stdin, "%s\n", body); err != nil {
+			fmt.Fprintf(os.Stderr, "stdin write failed: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	recv := func() map[string]any {
-		// Read Content-Length header line.
-		line, _ := reader.ReadString('\n')
-		cl, _ := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "Content-Length:")))
-		// Consume blank line.
-		for {
-			b, _ := reader.ReadByte()
-			if b == '\n' {
-				break
-			}
-		}
-		// Read body.
-		body := make([]byte, cl)
-		io.ReadFull(reader, body)
 		var v map[string]any
-		json.Unmarshal(body, &v)
+		if err := decoder.Decode(&v); err != nil {
+			fmt.Fprintf(os.Stderr, "stdout decode failed: %v\n", err)
+			os.Exit(1)
+		}
 		return v
 	}
 	var callID int = 1
@@ -91,7 +95,15 @@ func main() {
 	send(map[string]any{"jsonrpc": "2.0", "id": 0, "method": "initialize",
 		"params": map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "test", "version": "1"}}})
 	initResp := recv()
-	fmt.Printf("[init] server=%v\n", initResp["result"].(map[string]any)["serverInfo"].(map[string]any)["name"])
+	if res, _ := initResp["result"].(map[string]any); res != nil {
+		if info, _ := res["serverInfo"].(map[string]any); info != nil {
+			fmt.Printf("[init] server=%v\n", info["name"])
+		} else {
+			fmt.Printf("[init] result=%v\n", res)
+		}
+	} else {
+		fmt.Printf("[init] raw=%v\n", initResp)
+	}
 	// Skip notifications/initialized — agentflow doesn't require it.
 
 	pass, fail := 0, 0

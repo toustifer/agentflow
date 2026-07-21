@@ -26,6 +26,8 @@ jobs:
       - name: Smoke test (MCP communication)
         if: matrix.os == 'ubuntu-latest'
         timeout-minutes: 5
+        env:
+          HUB_SYNC: "0"
         run: |
           go build -o bin/mcp_comm_check ./smoke/mcp_comm_check.go
           AGENTFLOW_BIN=./bin/agentflow ./bin/mcp_comm_check
