@@ -4,6 +4,42 @@
 
 agentflow 是一个 Go 语言的 MCP 服务，通过 stdio 协议与 Claude Code 通信，提供 24 个 `mcp__agentflow__*` 工具。
 
+### 与 Agent Hub 的对齐
+
+本机调度（namespace / task / dag / worktree）与团队云端索引（branch / dag 摘要 / workers…）的边界、团队页每个 Tab 的数据来源、已齐/未齐矩阵与 soft-sync 路线图见：
+
+- 本仓副本：[`docs/HUB_ALIGNMENT.md`](../../docs/HUB_ALIGNMENT.md)
+- 线上（与 Hub 同源）：https://hub.stifer.xyz/agentflow-alignment.md
+
+**自动写 Hub 的 soft 路径（有 JWT + business_code 时）：**
+
+- branch report：`task_prepare_start` / start / `submit`
+- **task 投影（A1）：** `task_create` / `task_create_batch` / 任意 `task_transition`（含 prepare_start）→ `hub_dag_state`  
+  响应字段 `hub_task_sync`（`ok` / `skipped` / `disabled` / `failed`），**从不挡本地任务**
+
+配置：`~/.agent-hub/config.json` 或 `.mycompany/hub-client.json`。  
+**与正常使用解耦（`pkg/hub`）：** 未配置 / `HUB_SYNC=0` 时完全本地。见 `pkg/hub/README.md`（分支 `feat/agentflow-hub-federation`）。
+
+### AI 绑定团队（推荐主路径）
+
+配好 agentflow MCP 后，**不必**让人去 Web 抄 `business_code`。模型直接：
+
+1. `hub_status` — 看是否已登录 / 已绑定  
+2. `hub_login` — 无 code 拿 `verification_url`；用户浏览器 Approve 后 `hub_login({code})` 落 JWT  
+3. `hub_list_teams` — 读当前用户所属团队  
+4. `hub_bind_team({business_code})` — 写入 `~/.agent-hub/config.json`（可选 workdir 镜像）
+
+之后 task create/transition 会 soft 投影。未绑定 / 未登录 → 完全本地，不影响 `flow_ping` 与任务流。
+
+| 工具 | 作用 |
+|------|------|
+| `hub_status` | 本地状态 + `next` 步骤提示 |
+| `hub_login` | 设备码登录（JWT → `~/.agent-hub/config.json`） |
+| `hub_list_teams` | `GET /v1/hub/me/businesses` |
+| `hub_bind_team` | 绑定 / 解绑 `business_code` |
+
+建团仍可在 Dashboard；绑定由 AI 完成。
+
 ## 前置条件
 
 - **Go 1.25+**：编译 agentflow

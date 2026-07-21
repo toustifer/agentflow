@@ -16,6 +16,8 @@ var (
 	ErrInvalidTransition  = errors.New("invalid task transition")
 	ErrDuplicateTask      = errors.New("task already exists")
 	ErrDuplicateNamespace = errors.New("namespace already exists")
+	// ErrDocVersionConflict: optimistic concurrency on doc update (CAS).
+	ErrDocVersionConflict = errors.New("doc version conflict")
 )
 
 type Engine struct {

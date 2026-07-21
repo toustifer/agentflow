@@ -25,12 +25,40 @@ func insertProjectDoc(db *sql.DB, doc *ProjectDoc) error {
 }
 
 func updateProjectDoc(db *sql.DB, doc *ProjectDoc) error {
-	tags := mustMarshalJSON(doc.Tags)
-	_, err := db.Exec(
-		`UPDATE project_docs SET section=?, path=?, title=?, content=?, tags=?, version=?, updated_at=? WHERE id=? AND namespace_id=?`,
-		doc.Section, doc.Path, doc.Title, doc.Content, tags, doc.Version, doc.UpdatedAt.Format(time.RFC3339Nano), doc.ID, doc.NamespaceID,
-	)
+	_, err := updateProjectDocCAS(db, doc, 0)
 	return err
+}
+
+// updateProjectDocCAS updates a doc. When expectedVersion > 0, the WHERE clause
+// includes the previous version (version = expectedVersion) so concurrent writers conflict.
+// doc.Version must already be set to the new version (expected+1).
+// Returns rows affected.
+func updateProjectDocCAS(db *sql.DB, doc *ProjectDoc, expectedVersion int) (int64, error) {
+	tags := mustMarshalJSON(doc.Tags)
+	var (
+		result sql.Result
+		err    error
+	)
+	if expectedVersion > 0 {
+		result, err = db.Exec(
+			`UPDATE project_docs SET section=?, path=?, title=?, content=?, tags=?, version=?, updated_at=?
+			 WHERE id=? AND namespace_id=? AND version=?`,
+			doc.Section, doc.Path, doc.Title, doc.Content, tags, doc.Version, doc.UpdatedAt.Format(time.RFC3339Nano),
+			doc.ID, doc.NamespaceID, expectedVersion,
+		)
+	} else {
+		result, err = db.Exec(
+			`UPDATE project_docs SET section=?, path=?, title=?, content=?, tags=?, version=?, updated_at=?
+			 WHERE id=? AND namespace_id=?`,
+			doc.Section, doc.Path, doc.Title, doc.Content, tags, doc.Version, doc.UpdatedAt.Format(time.RFC3339Nano),
+			doc.ID, doc.NamespaceID,
+		)
+	}
+	if err != nil {
+		return 0, err
+	}
+	n, _ := result.RowsAffected()
+	return n, nil
 }
 
 func deleteProjectDoc(db *sql.DB, id int64) error {

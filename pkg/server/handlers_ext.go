@@ -234,11 +234,20 @@ func (s *Server) handleTaskCreateBatch(ctx context.Context, input map[string]any
 		return nil, err
 	}
 
+	workdir := s.namespaceWorkdir(ctx, nsID)
 	tasks := make([]any, 0, len(result.Created))
+	syncNotes := make([]string, 0, len(result.Created))
 	for _, t := range result.Created {
-		tasks = append(tasks, taskToMap(t))
+		m := taskToMap(t)
+		note := softHubAfterTask(ctx, workdir, t, "", "")
+		m["hub_task_sync"] = note
+		syncNotes = append(syncNotes, note)
+		tasks = append(tasks, m)
 	}
-	return map[string]any{"tasks": tasks}, nil
+	return map[string]any{
+		"tasks":         tasks,
+		"hub_task_sync": syncNotes,
+	}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -509,6 +518,7 @@ func (s *Server) handleHandbookWrite(ctx context.Context, input map[string]any) 
 	if err != nil {
 		return nil, err
 	}
+	s.bestEffortMirrorDocs(ctx, nsID)
 	return handbookToMap(hb), nil
 }
 
@@ -628,6 +638,7 @@ func (s *Server) handleWorkerDiaryWrite(ctx context.Context, input map[string]an
 	if err != nil {
 		return nil, err
 	}
+	s.bestEffortMirrorDocs(ctx, nsID)
 	return workerDiaryToMap(d), nil
 }
 
@@ -702,6 +713,7 @@ func (s *Server) handleLeaderDiaryWrite(ctx context.Context, input map[string]an
 	if err != nil {
 		return nil, err
 	}
+	s.bestEffortMirrorDocs(ctx, nsID)
 	return leaderDiaryToMap(ld), nil
 }
 
