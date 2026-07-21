@@ -168,16 +168,19 @@ func (b *BTBridge) Start(owner *Server) error {
 	root := findBTDir()
 	if root != "" {
 		cmd.Dir = root
-		env := os.Environ()
+		// On Windows the first PYTHONPATH wins — replace, do not append a second key.
 		sep := string(os.PathListSeparator)
 		pyPathVal := root
-		for _, kv := range env {
+		rawEnv := os.Environ()
+		env := make([]string, 0, len(rawEnv)+20)
+		for _, kv := range rawEnv {
 			if len(kv) > 11 && kv[:11] == "PYTHONPATH=" {
 				if existing := kv[11:]; existing != "" {
 					pyPathVal = root + sep + existing
 				}
-				break
+				continue
 			}
+			env = append(env, kv)
 		}
 		env = append(env,
 			"PYTHONPATH="+pyPathVal,
