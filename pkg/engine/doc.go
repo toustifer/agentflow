@@ -39,7 +39,17 @@ type ProjectDocRef struct {
 // Engine CRUD — in-memory backed by SQLite
 // ---------------------------------------------------------------------------
 
+// WriteProjectDoc creates or updates a project doc.
+// On update, if ExpectedVersion is set (>0) and does not match the stored version,
+// returns ErrDocVersionConflict so the client can re-read and retry (CAS).
+// When ExpectedVersion is 0, the write is unconditional (legacy clients / import).
 func (e *Engine) WriteProjectDoc(ctx context.Context, nsID string, doc ProjectDoc) (*ProjectDoc, error) {
+	return e.WriteProjectDocCAS(ctx, nsID, doc, 0)
+}
+
+// WriteProjectDocCAS is like WriteProjectDoc with explicit expected_version CAS.
+// expectedVersion==0 means "no CAS check" (force overwrite / create).
+func (e *Engine) WriteProjectDocCAS(ctx context.Context, nsID string, doc ProjectDoc, expectedVersion int) (*ProjectDoc, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -66,17 +76,44 @@ func (e *Engine) WriteProjectDoc(ctx context.Context, nsID string, doc ProjectDo
 			doc.ID = e.nextProjectDocID[nsID]
 		}
 	} else {
-		// Update existing — bump version
+		// Update existing — bump version with optional CAS
 		for i := range e.projectDocs[nsID] {
 			if e.projectDocs[nsID][i].ID == doc.ID {
-				doc.NamespaceID = nsID
-				doc.Version = e.projectDocs[nsID][i].Version + 1
-				doc.CreatedAt = e.projectDocs[nsID][i].CreatedAt
-				doc.UpdatedAt = now
-				e.projectDocs[nsID][i] = doc
-				if e.db != nil {
-					_ = updateProjectDoc(e.db, &doc)
+				cur := e.projectDocs[nsID][i]
+				if expectedVersion > 0 && cur.Version != expectedVersion {
+					return nil, fmt.Errorf("%w: doc %d expected version %d, have %d — re-read and retry",
+						ErrDocVersionConflict, doc.ID, expectedVersion, cur.Version)
 				}
+				// Preserve fields not supplied by caller (partial update safety)
+				if doc.Section == "" {
+					doc.Section = cur.Section
+				}
+				if doc.Path == "" {
+					doc.Path = cur.Path
+				}
+				if doc.Title == "" {
+					doc.Title = cur.Title
+				}
+				// Content empty is allowed only if caller intentionally clears; if both empty keep old
+				if doc.Content == "" && cur.Content != "" && expectedVersion == 0 {
+					// keep caller content (empty) for force; CAS clients usually send full content
+				}
+				doc.NamespaceID = nsID
+				doc.Version = cur.Version + 1
+				doc.CreatedAt = cur.CreatedAt
+				doc.UpdatedAt = now
+				if e.db != nil {
+					// SQL CAS: when expectedVersion > 0, require matching version row
+					n, err := updateProjectDocCAS(e.db, &doc, expectedVersion)
+					if err != nil {
+						return nil, err
+					}
+					if expectedVersion > 0 && n == 0 {
+						return nil, fmt.Errorf("%w: doc %d expected version %d (sql)",
+							ErrDocVersionConflict, doc.ID, expectedVersion)
+					}
+				}
+				e.projectDocs[nsID][i] = doc
 				return &doc, nil
 			}
 		}

@@ -9,9 +9,11 @@ on:
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -23,10 +25,14 @@ jobs:
         run: go build -o bin/agentflow${{ matrix.os == 'windows' && '.exe' || '' }} ./cmd/agentflow/
       - name: Smoke test (MCP communication)
         if: matrix.os == 'ubuntu-latest'
+        timeout-minutes: 5
+        env:
+          HUB_SYNC: "0"
         run: |
           go build -o bin/mcp_comm_check ./smoke/mcp_comm_check.go
           AGENTFLOW_BIN=./bin/agentflow ./bin/mcp_comm_check
       - name: Upload binary
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: agentflow-${{ matrix.os }}

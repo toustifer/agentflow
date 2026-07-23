@@ -1,143 +1,73 @@
 # agentflow Setup Guide
 
+> Canonical public mirror: https://hub.stifer.xyz/agentflow-setup.md  
+> Updated: 2026-07-24
+
 ## 概述
 
-agentflow 是一个 Go 语言的 MCP 服务，通过 stdio 协议与 Claude Code 通信，提供 24 个 `mcp__agentflow__*` 工具。
+agentflow 本地侧是 **三件套**（缺一不可）：
+
+| 组件 | 作用 |
+|------|------|
+| **Skill** `~/.claude/skills/agentflow/` | `/agentflow`、flows、hooks |
+| **MCP 二进制** + Host stdio | `mcp__agentflow__*` 工具 |
+| **Sticky hooks** | `/agentflow on` 跨轮注入规则 |
+
+**本地 MCP 服务器 = Go 二进制 `agentflow stdio`。**  
+不要再走 `agent-company` + Node `agentflow-mcp.mjs` 主路径（已废弃）。
+
+## 验收三层（不要混）
+
+| 层 | 检查 | 通过才算 |
+|----|------|----------|
+| 配置 | `~/.claude.json` 有 `mcpServers.agentflow` | 仅「写过配置」 |
+| 进程/UI | `/mcp` 列出 agentflow 且 **非 failed** | 用户侧必过 |
+| **会话工具** | 模型本轮能调用 `mcp__agentflow__flow_ping` | **唯一业务验收** |
+
+`claude mcp list` Connected、`agentflow:on` statusline、Bash 调 stdio 写库 —— **都不算** MCP 可用。
+
+MCP 未通过时：agent 必须停并让用户修 MCP，**禁止** JSON-RPC / sqlite 旁路继续 goal。
 
 ## 前置条件
 
-- **Go 1.25+**：编译 agentflow
-- **Node.js 18+**：运行 MCP 桥接脚本
-- **Git**：克隆源码
+- **Go 1.22+**（能 `go build ./cmd/agentflow` 即可；版本以仓库 `go.mod` 为准）
+- **Node.js 18+**（仅 sticky hooks / statusline，**不是** MCP 主路径）
+- **Git**
 
 ## 快速安装
 
 ### Windows
 
 ```powershell
-# 1. 克隆并编译
 git clone https://github.com/toustifer/agentflow.git
 cd agentflow
-go build -o $env:USERPROFILE\.claude\skills\agent-company\bin\agentflow.exe .\cmd\agentflow\
 
-# 2. 安装 MCP SDK（一次性）
-cd $env:USERPROFILE\.claude\skills\agent-company\bin
-npm init -y
-npm install @modelcontextprotocol/sdk
+# 1) Skill（含 hooks / flows / MCP GATE）
+$dst = "$env:USERPROFILE\.claude\skills\agentflow"
+New-Item -ItemType Directory -Force -Path $dst | Out-Null
+Copy-Item -Recurse -Force .\skills\agentflow\* $dst
 
-# 3. 配置 MCP（手动，见下方说明）
-# 4. 重启 Claude Code
+# 2) 本地 MCP 二进制（放 skill/bin）
+$bin = "$dst\bin"
+New-Item -ItemType Directory -Force -Path $bin | Out-Null
+go build -o "$bin\agentflow.exe" .\cmd\agentflow\
 ```
 
-### macOS / Linux
-
-```bash
-# 1. 克隆并编译
-git clone https://github.com/toustifer/agentflow.git
-cd agentflow
-go build -o ~/.claude/skills/agent-company/bin/agentflow ./cmd/agentflow/
-
-# 2. 安装 MCP SDK（一次性）
-cd ~/.claude/skills/agent-company/bin
-npm init -y
-npm install @modelcontextprotocol/sdk
-
-# 3. 配置 MCP（手动，见下方说明）
-# 4. 重启 Claude Code
-```
-
-## MCP 配置
-
-编辑 `~/.claude.json`（用户级配置，**不是** `~/.claude/.mcp.json`），在 `mcpServers` 中添加：
+`~/.claude.json`（用户级；**不是** `~/.claude/.mcp.json`）：
 
 ```json
 {
   "mcpServers": {
     "agentflow": {
-      "command": "cmd",
-      "args": ["/c", "node", "C:\\Users\\你的用户名\\.claude\\skills\\agent-company\\bin\\agentflow-mcp.mjs"],
+      "command": "C:\\Users\\YOU\\.claude\\skills\\agentflow\\bin\\agentflow.exe",
+      "args": ["stdio"],
       "type": "stdio"
     }
   }
 }
 ```
 
-macOS/Linux 版本的 command：
-
-```json
-{
-  "mcpServers": {
-    "agentflow": {
-      "command": "node",
-      "args": ["~/.claude/skills/agent-company/bin/agentflow-mcp.mjs"],
-      "type": "stdio"
-    }
-  }
-}
-```
-
-**注意：** `agentflow-mcp.mjs` 会从同目录启动 `agentflow` 二进制。确保编译好的二进制放在 `bin/` 目录下。
-
-## 验证
-
-重启 Claude Code 后，输入：
-
-```
-/mcp
-```
-
-应显示：
-
-```
-User MCPs (C:\Users\你的用户名\.claude.json)
-  agentflow · ✔ connected · 24 tools
-```
-
-或手动测试：
-
-```
-mcp__agentflow__flow_ping
-```
-
-返回 `{"ok": true}` 即成功。
-
-## 升级
-
-```bash
-cd ~/agentflow
-git pull
-go build -o ~/.claude/skills/agent-company/bin/agentflow ./cmd/agentflow/
-```
-
-重启 Claude Code 即可生效。
-
-## Sticky Mode（会话保持 /agentflow on）
-
-目标：`/agentflow on` 后，后续普通对话仍自动带上 agentflow 规则。
-
-> Claude Code **不能**在输入框 UI 里挂住 `agentflow` 文本前缀。  
-> Sticky mode 用 mode 文件 + `UserPromptSubmit` hook 实现等价效果。
-
-### 1. 安装 skill hooks
-
-确保本仓库 skill 已同步到 Claude skills 目录，例如：
-
-```bash
-# Windows 示例
-xcopy /E /I /Y D:\myprogram\agentflow\skills\agentflow %USERPROFILE%\.claude\skills\agentflow
-```
-
-hooks 路径（安装后）：
-
-```text
-~/.claude/skills/agentflow/hooks/mode-cli.js
-~/.claude/skills/agentflow/hooks/mode-inject.js
-~/.claude/skills/agentflow/hooks/statusline.js
-```
-
-### 2. 注册 UserPromptSubmit hook
-
-编辑 `~/.claude/settings.json`，在现有 `hooks` 中**追加**（不要覆盖你已有的 Stop/SubagentStop）：
+`~/.claude/settings.json` sticky hooks（**合并**，勿整文件覆盖）：
 
 ```json
 {
@@ -147,66 +77,120 @@ hooks 路径（安装后）：
         "hooks": [
           {
             "type": "command",
-            "command": "node C:\\\\Users\\\\你的用户名\\\\.claude\\\\skills\\\\agentflow\\\\hooks\\\\mode-inject.js",
+            "command": "node C:\\Users\\YOU\\.claude\\skills\\agentflow\\hooks\\mode-inject.js",
             "timeout": 5
           }
         ]
       }
     ]
-  }
-}
-```
-
-macOS / Linux：
-
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ~/.claude/skills/agentflow/hooks/mode-inject.js",
-            "timeout": 5
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-### 3.（可选）statusline 指示器
-
-```json
-{
+  },
   "statusLine": {
     "type": "command",
-    "command": "node C:\\\\Users\\\\你的用户名\\\\.claude\\\\skills\\\\agentflow\\\\hooks\\\\statusline.js",
+    "command": "node C:\\Users\\YOU\\.claude\\skills\\agentflow\\hooks\\statusline.js",
     "refreshInterval": 5
   }
 }
 ```
 
-mode on 时输出类似：`agentflow:on`  
-有 `status.json` 时升级为两级摘要：第一行显示 `dag + working/ready/blocked`，第二行显示 `phase/progress + workers + busy workers`。  
-mode off 时输出空字符串。
+把 `YOU` 换成真实用户名；路径用绝对路径。
 
-### 4. 使用
+### macOS / Linux
 
-`/agentflow resume` 与 `/agentflow inspect ...` 现在共享同一条本地渲染链：
+```bash
+git clone https://github.com/toustifer/agentflow.git
+cd agentflow
 
-```text
-mcp__agentflow__project_inspect(...)
--> node ~/.claude/skills/agentflow/hooks/render-inspect.js
+mkdir -p ~/.claude/skills/agentflow
+rsync -a skills/agentflow/ ~/.claude/skills/agentflow/
+# 或: cp -R skills/agentflow/. ~/.claude/skills/agentflow/
+
+mkdir -p ~/.claude/skills/agentflow/bin
+go build -o ~/.claude/skills/agentflow/bin/agentflow ./cmd/agentflow/
 ```
 
-这会同时：
-- 渲染树状项目 / DAG / task 视图
-- 刷新 `<project>/.claude/agentflow/status.json`
-- 让 `statusline.js` 读取到最新摘要
+`~/.claude.json`：
 
+```json
+{
+  "mcpServers": {
+    "agentflow": {
+      "command": "/Users/YOU/.claude/skills/agentflow/bin/agentflow",
+      "args": ["stdio"],
+      "type": "stdio"
+    }
+  }
+}
+```
+
+`~/.claude/settings.json`：
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/YOU/.claude/skills/agentflow/hooks/mode-inject.js",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "node /Users/YOU/.claude/skills/agentflow/hooks/statusline.js",
+    "refreshInterval": 5
+  }
+}
+```
+
+Linux 把 `/Users/YOU` 换成 `$HOME` 展开后的绝对路径。
+
+### Codex CLI（可选，同一二进制）
+
+```bash
+codex mcp add agentflow -- "$HOME/.claude/skills/agentflow/bin/agentflow" stdio
+```
+
+Hub 团队协作另见：https://hub.stifer.xyz/codex-setup.md
+
+## 验证（全部过才算装好）
+
+1. **完全退出并重启** Claude Code  
+2. `/mcp` → 有 `agentflow` 且 **不是 failed**  
+3. 本会话能调用 `mcp__agentflow__flow_ping`（**唯一业务验收**；仅 `claude mcp list` Connected 不够）  
+4. `grep -n "MCP GATE" ~/.claude/skills/agentflow/hooks/mode-lib.js` 有命中  
+5. `/agentflow on` → mode 文件生成；`mode-cli` / status 可带 `mcp` 探测与 warnings  
+6. statusline：`agentflow:on · MCP:cfg|missing|broken`（有 MCP badge 说明新 statusline 已生效）  
+7. MCP 不可用时 agent **必须停**，禁止 Bash/JSON-RPC/sqlite 旁路  
+
+| Symptom | Fix |
+|---------|-----|
+| No `/agentflow` | Skill 未拷到 `~/.claude/skills/agentflow` |
+| `/mcp` 无 agentflow / failed | 二进制路径错、缺 `args:["stdio"]`、需重启 |
+| `MCP GATE` grep 无 | skill 未更新到含门禁的版本；`git pull` + 重拷 skill |
+| `on` 但不 sticky | settings.json hooks 路径错或未装 Node |
+| 模型 Bash 调 stdio | **无效**；修 MCP，不要接受旁路 |
+
+## 升级 skill + 二进制
+
+```bash
+cd /path/to/agentflow
+git pull
+rsync -a skills/agentflow/ ~/.claude/skills/agentflow/
+go build -o ~/.claude/skills/agentflow/bin/agentflow ./cmd/agentflow/   # Windows: agentflow.exe
+```
+
+重启 Claude Code。确认：
+
+```bash
+grep -n "MCP GATE" ~/.claude/skills/agentflow/hooks/mode-lib.js
+```
+
+## Sticky Mode 使用
 
 ```text
 /agentflow on
@@ -215,7 +199,7 @@ mcp__agentflow__project_inspect(...)
 /agentflow off
 ```
 
-底层等价命令：
+底层：
 
 ```bash
 node ~/.claude/skills/agentflow/hooks/mode-cli.js on
@@ -223,16 +207,27 @@ node ~/.claude/skills/agentflow/hooks/mode-cli.js status
 node ~/.claude/skills/agentflow/hooks/mode-cli.js off
 ```
 
-mode 文件写在当前项目：
+mode 文件：`<project>/.claude/agentflow/mode.json`  
+`agentflow:on` **只表示 mode 开了**，不表示 MCP 可用。
+
+inspect 渲染会刷新 `status.json` 供 statusline 使用：
 
 ```text
-<project>/.claude/agentflow/mode.json
+mcp__agentflow__project_inspect(...)
+-> node ~/.claude/skills/agentflow/hooks/render-inspect.js
 ```
 
-### 5. 验证
+## 已废弃（勿再教）
 
-1. `/agentflow on`
-2. 确认生成了 `.claude/agentflow/mode.json` 且 `"enabled": true`
-3. 发一条普通消息（不带 /agentflow）
-4. 模型应仍遵守 agentflow 规则（任务用 `id + title`、launch-ticket 等）
-5. `/agentflow off` 后普通对话不再注入
+- `~/.claude/skills/agent-company/bin/agentflow-mcp.mjs` + `@modelcontextprotocol/sdk` 作为主 MCP 路径  
+- 无 `args: ["stdio"]` 的裸 `command`（会挂死 / 超时）  
+- 把 `claude mcp list` Connected 当成会话可用  
+- MCP 失败时用 Bash JSON-RPC / 直接 sqlite 继续 goal  
+
+## 可选：Hub 团队 MCP
+
+```json
+"hub": { "type": "http", "url": "https://hub.stifer.xyz/mcp" }
+```
+
+soft-sync：`~/.agent-hub/config.json` — 见 https://hub.stifer.xyz/agent-setup.md

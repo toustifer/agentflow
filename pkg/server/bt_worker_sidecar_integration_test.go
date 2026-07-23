@@ -33,7 +33,9 @@ func TestWorkerTaskGetConfirmViaPython(t *testing.T) {
 	require.NoError(t, err)
 
 	bridge := btBridgeForRequest(srv)
-	require.NotNil(t, bridge)
+	if bridge == nil {
+		t.Skip("bt_service Python sidecar not available (import/start failed)")
+	}
 	miniTree := map[string]any{
 		"name":       "worker-task-confirm-mini",
 		"blackboard": map[string]any{},

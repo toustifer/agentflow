@@ -11,7 +11,9 @@ import (
 // MCP handlers for project_docs
 // ---------------------------------------------------------------------------
 
-// doc_write - Create or update a project doc
+// doc_write - Create or update a project doc.
+// Optional expected_version (int) enables optimistic concurrency on update:
+// if the stored version differs, returns conflict so client re-reads and retries.
 func (s *Server) handleDocWrite(ctx context.Context, input map[string]any) (map[string]any, error) {
 	nsID, err := requiredString(input, "namespace_id")
 	if err != nil {
@@ -24,6 +26,7 @@ func (s *Server) handleDocWrite(ctx context.Context, input map[string]any) (map[
 	content, _ := optionalString(input, "content")
 	tags, _ := optionalStringSlice(input, "tags")
 	docID, _ := optionalInt64(input, "id")
+	expectedVersion, _ := optionalInt(input, "expected_version")
 
 	doc := engine.ProjectDoc{
 		ID:      docID,
@@ -34,10 +37,16 @@ func (s *Server) handleDocWrite(ctx context.Context, input map[string]any) (map[
 		Tags:    tags,
 	}
 
-	result, err := s.engine.WriteProjectDoc(ctx, nsID, doc)
+	var result *engine.ProjectDoc
+	if expectedVersion > 0 && docID > 0 {
+		result, err = s.engine.WriteProjectDocCAS(ctx, nsID, doc, expectedVersion)
+	} else {
+		result, err = s.engine.WriteProjectDoc(ctx, nsID, doc)
+	}
 	if err != nil {
 		return nil, err
 	}
+	s.bestEffortMirrorDocs(ctx, nsID)
 	return projectDocToMap(result), nil
 }
 
@@ -123,6 +132,7 @@ func (s *Server) handleDocDelete(ctx context.Context, input map[string]any) (map
 	if err := s.engine.DeleteProjectDoc(ctx, nsID, docID); err != nil {
 		return nil, err
 	}
+	s.bestEffortMirrorDocs(ctx, nsID)
 	return map[string]any{"deleted": docID}, nil
 }
 

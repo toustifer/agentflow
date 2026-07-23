@@ -71,7 +71,13 @@ func (s *Server) Tools() []ToolSpec {
 		{Name: "doc_list"},
 		{Name: "doc_search"},
 		{Name: "doc_delete"},
+		{Name: "docs_sync"},
 		{Name: "flow_ping"},
+		// Hub federation (optional; soft — local-only without login/bind)
+		{Name: "hub_status"},
+		{Name: "hub_login"},
+		{Name: "hub_list_teams"},
+		{Name: "hub_bind_team"},
 	}
 	for i := range tools {
 		tools[i].InputSchema = toolInputSchema(tools[i].Name)
@@ -99,10 +105,17 @@ func toolInputSchema(name string) map[string]any {
 
 	required := []string{}
 	switch name {
-	case "flow_ping", "namespace_list":
+	case "flow_ping", "namespace_list", "hub_status", "hub_list_teams":
 		if name == "namespace_list" {
 			add("workdir_contains")
 		}
+		if name == "hub_status" || name == "hub_list_teams" {
+			add("workdir", "namespace_id")
+		}
+	case "hub_login":
+		add("code", "workdir", "namespace_id", "base_url")
+	case "hub_bind_team":
+		add("business_code", "workdir", "namespace_id")
 	case "namespace_create":
 		add("id", "name")
 		properties["metadata"] = stringMapProp
@@ -221,8 +234,10 @@ func toolInputSchema(name string) map[string]any {
 		properties["input"] = map[string]any{"type": "object"}
 		required = []string{"tree"}
 	case "doc_write":
-		add("namespace_id", "title", "content", "scope", "task_id", "worker_id")
+		add("namespace_id", "title", "content", "scope", "task_id", "worker_id", "section", "path")
 		addStringLists("tags")
+		properties["id"] = numberProp
+		properties["expected_version"] = numberProp
 		required = []string{"namespace_id"}
 	case "doc_get", "doc_delete":
 		add("namespace_id")
@@ -234,6 +249,9 @@ func toolInputSchema(name string) map[string]any {
 	case "doc_search":
 		add("namespace_id", "query", "scope")
 		required = []string{"namespace_id", "query"}
+	case "docs_sync":
+		add("namespace_id", "workdir", "direction")
+		required = []string{"namespace_id"}
 	case "worker_update":
 		add("namespace_id", "worker_id", "name", "scope", "kind", "stuck_playbook", "escalation_mode", "launch_mode", "prompt_template")
 		addStringLists("skills", "task_tags", "required_reads", "recommended_mcp", "handoff_targets", "recovery_policy", "fallback_mcp")
@@ -438,12 +456,22 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 		return s.handleDocSearch(ctx, input)
 	case "doc_delete":
 		return s.handleDocDelete(ctx, input)
+	case "docs_sync":
+		return s.handleDocsSync(ctx, input)
 	case "project_next_steps":
 		return s.handleProjectNextSteps(ctx, input)
 	case "flow_ping":
 		result := map[string]any{"ok": true}
 		s.syncPing(ctx)
 		return result, nil
+	case "hub_status":
+		return s.handleHubStatus(ctx, input)
+	case "hub_login":
+		return s.handleHubLogin(ctx, input)
+	case "hub_list_teams":
+		return s.handleHubListTeams(ctx, input)
+	case "hub_bind_team":
+		return s.handleHubBindTeam(ctx, input)
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnknownTool, tool)
 	}
@@ -564,6 +592,17 @@ func (s *Server) handleTaskPrepareStart(ctx context.Context, input map[string]an
 	if err != nil {
 		return taskResult{}, err
 	}
+	// Soft-fail Hub branch report + task projection (team index)
+	workdir := ""
+	if ns.Metadata != nil {
+		workdir = ns.Metadata["workdir"]
+	}
+	repoURL := detectRemoteURL(ctx, metadata["git.repo_path"])
+	hubNote := reportBranchToHub(ctx, workdir, repoURL, metadata["git.branch"], metadata["git.head_sha"], "task", taskID, task.AssignedWorker)
+	if dag.ID != "" {
+		_ = reportBranchToHub(ctx, workdir, repoURL, metadata["git.branch"], metadata["git.head_sha"], "dag", dag.ID, task.AssignedWorker)
+	}
+	hubTaskNote := softHubAfterTask(ctx, workdir, task, metadata["git.branch"], metadata["git.head_sha"])
 	payload := taskToMap(task)
 	briefing, err := s.buildWorkerLaunchBriefing(ctx, ns, task)
 	if err != nil {
@@ -571,6 +610,8 @@ func (s *Server) handleTaskPrepareStart(ctx context.Context, input map[string]an
 	}
 	payload["launch_ticket"] = ticket
 	payload["worker_launch"] = briefing
+	payload["hub_branch_report"] = hubNote
+	payload["hub_task_sync"] = hubTaskNote
 	return taskResult{task: task, payload: payload}, nil
 }
 
@@ -789,9 +830,14 @@ func (s *Server) handleTaskCreate(ctx context.Context, input map[string]any) (ta
 		return taskResult{}, err
 	}
 
+	// Soft Hub task projection (SYNC_CONTRACT A1). Local create already committed.
+	workdir := s.namespaceWorkdir(ctx, task.NamespaceID)
+	payload := taskToMap(task)
+	payload["hub_task_sync"] = softHubAfterTask(ctx, workdir, task, "", "")
+
 	return taskResult{
 		task:    task,
-		payload: taskToMap(task),
+		payload: payload,
 	}, nil
 }
 
@@ -847,12 +893,21 @@ func (s *Server) handleTaskTransition(ctx context.Context, input map[string]any)
 		if err != nil {
 			return taskResult{}, err
 		}
+		workdir := ""
+		if ns.Metadata != nil {
+			workdir = ns.Metadata["workdir"]
+		}
+		repoURL := detectRemoteURL(ctx, metadata["git.repo_path"])
+		hubNote := reportBranchToHub(ctx, workdir, repoURL, metadata["git.branch"], metadata["git.head_sha"], "task", task.ID, task.AssignedWorker)
+		hubTaskNote := softHubAfterTask(ctx, workdir, task, metadata["git.branch"], metadata["git.head_sha"])
 		payload := taskToMap(task)
 		briefing, err := s.buildWorkerLaunchBriefing(ctx, ns, task)
 		if err != nil {
 			return taskResult{}, err
 		}
 		payload["worker_launch"] = briefing
+		payload["hub_branch_report"] = hubNote
+		payload["hub_task_sync"] = hubTaskNote
 		return taskResult{task: task, payload: payload}, nil
 	}
 
@@ -913,9 +968,24 @@ func (s *Server) handleTaskTransition(ctx context.Context, input map[string]any)
 		return taskResult{}, err
 	}
 
+	// Soft Hub projections after any non-start transition (local already committed).
+	workdir := s.namespaceWorkdir(ctx, namespaceID)
+	branch, head := "", ""
+	if task.Metadata != nil {
+		branch = task.Metadata["git.branch"]
+		head = firstNonEmpty(metadata["review.commit"], task.Metadata["git.head_sha"], task.Metadata["review.commit"])
+	}
+	if transitionValue == "submit" && task.Metadata != nil {
+		repoPath := task.Metadata["git.repo_path"]
+		repoURL := detectRemoteURL(ctx, repoPath)
+		_ = reportBranchToHub(ctx, workdir, repoURL, branch, head, "task", task.ID, task.AssignedWorker)
+	}
+	payload := taskToMap(task)
+	payload["hub_task_sync"] = softHubAfterTask(ctx, workdir, task, branch, head)
+
 	return taskResult{
 		task:    task,
-		payload: taskToMap(task),
+		payload: payload,
 	}, nil
 }
 
