@@ -9,6 +9,7 @@ const {
   readMode,
   isEnabled,
   stickyModeReadiness,
+  probeAgentflowMcpConfig,
 } = require("./mode-lib");
 
 function parseArgs(argv) {
@@ -46,6 +47,23 @@ function main() {
       },
       root
     );
+    const mcp = probeAgentflowMcpConfig();
+    const warnings = [];
+    if (!mcp.configured) {
+      warnings.push(
+        "MCP GATE: agentflow is not in ~/.claude.json. Mode is ON but work is blocked until /mcp shows agentflow connected. Fix MCP first — do not Bash-bridge."
+      );
+    } else if (!mcp.paths_ok) {
+      warnings.push(
+        "MCP GATE: agentflow config has missing paths (" +
+          (mcp.missing_paths || []).join(", ") +
+          "). Fix paths and restart Claude Code before any project work."
+      );
+    } else {
+      warnings.push(
+        "MCP config present, but still verify THIS session has mcp__agentflow__* tools (open /mcp; call flow_ping). claude mcp list Connected is not enough."
+      );
+    }
     process.stdout.write(
       JSON.stringify(
         {
@@ -54,6 +72,8 @@ function main() {
           path: result.path,
           mode: result.data,
           readiness: stickyModeReadiness(),
+          mcp,
+          warnings,
         },
         null,
         2
@@ -92,6 +112,7 @@ function main() {
           mode: m ? m.data : null,
           project_dir: root,
           readiness: stickyModeReadiness(),
+          mcp: probeAgentflowMcpConfig(),
         },
         null,
         2

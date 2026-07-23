@@ -30,6 +30,27 @@ agentflow/
 
 先确认 `agentflow` MCP 是否可用，再决定进入哪个业务 flow。
 
+## MCP 硬门禁（禁止旁路）
+
+**有 sticky `agentflow:on` ≠ MCP 可用。** `on` 只写本地 `mode.json`；`/mcp` 里没有 `agentflow` 或显示 failed 时，**禁止**继续推进业务。
+
+| 层 | 含义 | 能否当验收 |
+|----|------|------------|
+| 配置 | `~/.claude.json` / 项目 mcp 里有 `agentflow` | 否（只说明写过配置） |
+| 进程 | `claude mcp list` → Connected | **否**（不等于本会话工具已注入） |
+| **会话工具** | 当前模型工具列表里有 `mcp__agentflow__*` | **是** |
+| UI | `/mcp` 列出 agentflow 且非 failed | 用户侧必查 |
+
+**MCP 不可用时（无 `mcp__agentflow__*`、调用失败、`/mcp` 无 agentflow 或 failed）：**
+
+1. **立刻停止** goal / resume / prepare / start / submit / 写产品代码。
+2. **禁止**用 Bash/shell 跑 `agentflow`、`agentflow stdio`、手写 JSON-RPC `tools/call`、直接 sqlite 改 agentflow DB，当作 MCP 替代。
+3. **禁止**谎报 lifecycle 成功或「已在用 agentflow」。
+4. **明确告诉用户**先修好 MCP：打开 `/mcp` → 修好 `agentflow`（必要时一并修 `hub`）→ 重启 Claude Code → 确认本会话能调用 `mcp__agentflow__flow_ping`。
+5. 只进入 `flows/setup.md` 做安装/修复指导，修好前不回到业务 flow。
+
+sticky 注入（`hooks/mode-inject.js`）每轮重复上述门禁；statusline 在配置缺失时显示 `MCP:missing` / `MCP:broken`。
+
 ## Leader / Worker 执行边界
 
 `/agentflow` 打开后，**主会话默认是 leader，不是实现工人**。
@@ -73,17 +94,21 @@ statusline     -> 可选显示 agentflow:on
 
 ## MCP 前置检查
 
-在进入 `goal` 或 `resume` 之前，先做两层判断：
+在进入 `goal` 或 `resume` 之前（以及 sticky 开启后的**每一轮**业务意图），做判断：
 
-1. 当前会话里是否已经有 `mcp__agentflow__*` 工具
-2. 如果有，`mcp__agentflow__flow_ping` 是否成功
+1. 当前会话工具列表是否已有 `mcp__agentflow__*`（不是 `claude mcp list`）
+2. 若有，`mcp__agentflow__flow_ping` 是否成功
+3. 用户侧 `/mcp`：是否列出 `agentflow` 且非 failed
 
 如果任一失败：
 - 读取 `flows/setup.md`
 - 按 setup flow 做安装/修复/验证
+- **停止一切旁路**（见上节「MCP 硬门禁」）
 - 不要假装业务 flow 可以继续推进
 
-`on` / `off` / `status` **不要求** MCP 可用（它们只读写 mode 文件）。
+`on` / `off` / `status` **不要求** MCP 已连通（它们只读写 mode 文件），但：
+- `on` 必须向用户打印 MCP 配置探测结果与 **「先修好 MCP 再干活」** 警告
+- sticky 开启后若 MCP 仍不可用，每轮注入仍强制停在 setup，而不是静默干活
 
 ## 调度逻辑
 

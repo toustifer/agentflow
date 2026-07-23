@@ -11,7 +11,12 @@
 // Prints nothing when mode is off (so it can be chained or used alone).
 
 const fs = require("fs");
-const { readMode, readStatus, projectDir } = require("./mode-lib");
+const {
+  readMode,
+  readStatus,
+  projectDir,
+  probeAgentflowMcpConfig,
+} = require("./mode-lib");
 
 function readStdinJson() {
   try {
@@ -33,11 +38,22 @@ function detectProjectDir(input) {
 }
 
 function color(code, text) {
-  return `[${code}m${text}[0m`;
+  return `\x1b[${code}m${text}\x1b[0m`;
 }
 
-function renderFallback(mode) {
-  const parts = [color(32, "agentflow:on")];
+function mcpBadge(mcp) {
+  if (!mcp || !mcp.configured) {
+    return color(31, "MCP:missing");
+  }
+  if (!mcp.paths_ok) {
+    return color(31, "MCP:broken");
+  }
+  // Config OK only — session tools may still be absent
+  return color(33, "MCP:cfg");
+}
+
+function renderFallback(mode, mcp) {
+  const parts = [color(32, "agentflow:on"), mcpBadge(mcp)];
   if (mode.namespace_id) parts.push("ns=" + mode.namespace_id);
   if (mode.dag_id) parts.push("dag=" + mode.dag_id);
   return parts.join(" · ");
@@ -68,11 +84,11 @@ function pickBusyWorkers(status) {
   return rest > 0 ? `${head},+${rest}` : head;
 }
 
-function renderSummary(status, mode) {
+function renderSummary(status, mode, mcp) {
   const summary = status && status.summary;
-  if (!summary) return renderFallback(mode);
+  if (!summary) return renderFallback(mode, mcp);
   const dagLabel = pickDagLabel(status, mode);
-  const line1 = [color(32, "agentflow:on")];
+  const line1 = [color(32, "agentflow:on"), mcpBadge(mcp)];
   if (dagLabel) line1.push(`dag:${dagLabel}`);
   line1.push(color(33, `working:${summary.running_count ?? 0}`));
   line1.push(color(32, `ready:${summary.ready_count ?? 0}`));
@@ -81,9 +97,14 @@ function renderSummary(status, mode) {
   const phaseText = `${summary.phase_name || summary.phase || "active"} ${summary.progress || ""}`.trim();
   const line2 = [];
   if (phaseText) line2.push(color(2, phaseText));
-  line2.push(color(2, `workers:${summary.worker_busy ?? 0}/${summary.worker_total ?? 0}`));
+  line2.push(
+    color(2, `workers:${summary.worker_busy ?? 0}/${summary.worker_total ?? 0}`)
+  );
   const busyWorkers = pickBusyWorkers(status);
   if (busyWorkers) line2.push(color(2, `busy:${busyWorkers}`));
+  if (mcp && (!mcp.configured || !mcp.paths_ok)) {
+    line2.push(color(31, "fix MCP before work"));
+  }
   return `${line1.join(" · ")}\n${line2.join(" · ")}`;
 }
 
@@ -97,7 +118,8 @@ function main() {
   }
 
   const status = readStatus(root);
-  process.stdout.write(renderSummary(status, m.data));
+  const mcp = probeAgentflowMcpConfig();
+  process.stdout.write(renderSummary(status, m.data, mcp));
   process.exit(0);
 }
 
