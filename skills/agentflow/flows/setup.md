@@ -15,6 +15,31 @@ setup flow 的目标不是直接做产品，而是：
 - 指导用户安装或修复 agentflow MCP
 - 在确认 MCP 恢复可用后，把控制权交回 `/agentflow` 主流程
 
+## 硬停止（进入本 flow 后立刻遵守）
+
+进入 setup 即表示 **MCP 门禁未通过**。在 `mcp__agentflow__flow_ping` 成功之前：
+
+| 禁止 | 说明 |
+|------|------|
+| Bash 调 `agentflow` / `agentflow stdio` | 与 Host MCP 双开，且绕过工具权限 |
+| 手写 JSON-RPC `tools/call` | 旁路，不算合规 agentflow |
+| 直接读写 agentflow sqlite | 旁路 |
+| 继续 goal/resume/prepare/start | 业务未门禁 |
+| 声称「已用 agentflow 完成 xx」 | 谎报 |
+
+**允许：** 诊断、读 `SETUP.md`、给用户可复制的安装/配置命令、在用户确认后改可逆配置、请用户打开 `/mcp` 并重启。
+
+对用户的首屏话术（照抄或等价）：
+
+```text
+agentflow MCP 在本会话不可用，请先修好 MCP，不要继续旁路推进。
+1) 打开 /mcp，确认列表里有 agentflow 且状态不是 failed
+2) 按 SETUP.md 修好 ~/.claude.json 路径与二进制
+3) 重启 Claude Code
+4) 再试 /agentflow；本会话必须能直接调用 mcp__agentflow__flow_ping
+`agentflow:on` 只表示 mode 开了，不表示 MCP 好了。
+```
+
 ## 诊断顺序
 
 ### Step 1. 先判断是不是“完全没有 agentflow MCP”
@@ -89,8 +114,14 @@ setup flow 不应该：
 ## 结束条件
 
 当且仅当以下条件满足时，setup flow 才结束：
-- `mcp__agentflow__flow_ping` 成功
-- 或者用户明确决定暂时不继续安装/修复
+- **本会话**成功调用 `mcp__agentflow__flow_ping`（必须是模型侧 `mcp__agentflow__*` 工具，不是 Bash 桥）
+- 或者用户明确决定暂时不继续安装/修复（此时仍禁止旁路推进业务；可建议 `/agentflow off`）
+
+**不算**结束条件：
+- 仅 `claude mcp list` Connected
+- 仅 sticky `agentflow:on`
+- 仅 statusline 绿灯而无 MCP badge 健康
+- Bash/JSON-RPC 旁路「也能写库」
 
 成功后：
 - 如果当前是新项目，回到 goal flow

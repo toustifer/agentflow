@@ -37,7 +37,12 @@ node <skill>/hooks/mode-cli.js on --namespace <ns> --dag <dag_id> --note "..."
    - mode 已开启
    - mode 文件路径
    - 若 hook 未安装，提示按 `SETUP.md` 的 sticky mode 段配置 `UserPromptSubmit`
-4. 不要在 on 时强行进入 goal；只打开模式。用户下一步可继续普通对话，或 `/agentflow resume` / `goal ...`
+   - **MCP 探测结果**（`mode-cli` 输出的 `mcp` + `warnings`）：
+     - `configured: false` → 明确说：mode 开了但 **MCP 未配置**，先装/配 agentflow，打开 `/mcp` 直到出现 agentflow 且非 failed；**禁止** Bash/JSON-RPC 旁路干活
+     - `paths_ok: false` → 配置路径坏了，先修 `~/.claude.json` 再重启
+     - 配置看起来 OK → 仍提醒：必须在本会话看到 `mcp__agentflow__*` 工具；`claude mcp list` Connected 不够
+4. 不要在 on 时强行进入 goal；只打开模式。
+5. 若 MCP 未就绪：下一步只能是 setup/修 MCP，**不要**自动 `/agentflow resume` 或 goal。
 
 ### `/agentflow off`
 
@@ -75,7 +80,9 @@ node <skill>/hooks/mode-cli.js status
 
 当 `enabled=true` 时，`hooks/mode-inject.js` 每轮注入：
 
-- 优先使用 `mcp__agentflow__*` 工具
+- **MCP 硬门禁（Rule 0）**：无本会话 `mcp__agentflow__*` 时立即停止业务；禁止 Bash/stdio JSON-RPC/sqlite 旁路；要求用户先 `/mcp` 修好
+- 配置探测 banner：`MCP:missing` / 路径坏掉时注入 CONFIG ALERT
+- MCP 通过后才：只用 `mcp__agentflow__*` 工具
 - 当前会话应把普通自然语言请求也默认视为 agentflow 工作，除非用户明确要求离开 agentflow mode
 - 每个新对话轮都应视为同一 agentflow working session，优先路由到 `resume` / `inspect` / `goal` / 当前激活 flow，而不是先走自由回答
 - 新的项目目标应直接落回 agentflow 的 goal/intake 主链，而不是脱离工作流单独处理
@@ -84,18 +91,22 @@ node <skill>/hooks/mode-cli.js status
 - **Leader 禁止代写产品代码**；prepare/start 失败只能修 worktree/分支占用或 escalate
 - 主仓留在 `base_branch`；`execution_branch` 只在 DAG worktree
 - DAG 拥有 shared worktree lease，task 只持有阶段性租约
+- **`agentflow:on` ≠ MCP OK**
 
 ## 安装检查清单
 
 Leader/用户第一次用 sticky mode 时确认：
 
 1. `hooks/mode-inject.js` 已在 `UserPromptSubmit` 注册
-2. `node hooks/mode-cli.js on` 能写出 mode 文件
-3. 下一轮普通用户消息后，模型行为仍保持 agentflow 约束
-4. （可选）statusline 显示 `agentflow:on`
-5. 若项目里已有 `.claude/agentflow/status.json`，statusline 应升级成两级摘要：
-   - 第 1 行：`agentflow:on · dag:<title|id> · working:<n> · ready:<n> · blocked:<n>`
-   - 第 2 行：`<phase> <progress> · workers:<busy>/<total> · busy:<top workers>`
+2. `node hooks/mode-cli.js on` 能写出 mode 文件，且输出含 `mcp` 探测与 `warnings`
+3. **`/mcp` 列出 `agentflow` 且非 failed**；本会话能调用 `mcp__agentflow__flow_ping`
+4. 下一轮普通用户消息后，模型行为仍保持 agentflow 约束；MCP 缺失时会停在 setup 话术而不是旁路
+5. statusline：`agentflow:on` 旁应有 MCP badge
+   - `MCP:missing` / `MCP:broken`（红）= 先修配置
+   - `MCP:cfg`（黄）= 配置在，仍须会话内工具可用
+6. 若项目里已有 `.claude/agentflow/status.json`，statusline 应升级成两级摘要：
+   - 第 1 行：`agentflow:on · MCP:… · dag:<title|id> · working:<n> · ready:<n> · blocked:<n>`
+   - 第 2 行：`<phase> <progress> · workers:<busy>/<total> · busy:<top workers>`（MCP 坏时追加 `fix MCP before work`）
    其中 `busy:<top workers>` 最多显示 2 个 busy worker，超出部分折叠成 `+N`
    若没有 snapshot，则回退到静态 badge
 
