@@ -282,6 +282,15 @@ func insertNamespace(db *sql.DB, ns *Namespace) error {
 	return err
 }
 
+func updateNamespace(db *sql.DB, ns *Namespace) error {
+	meta := mustMarshalJSON(ns.Metadata)
+	_, err := db.Exec(
+		`UPDATE namespaces SET name = ?, updated_at = ?, metadata = ? WHERE id = ?`,
+		ns.Name, ns.UpdatedAt.Format(time.RFC3339Nano), meta, ns.ID,
+	)
+	return err
+}
+
 func loadNamespaces(db *sql.DB) (map[string]*Namespace, error) {
 	rows, err := db.Query(`SELECT id, name, created_at, updated_at, metadata FROM namespaces`)
 	if err != nil {

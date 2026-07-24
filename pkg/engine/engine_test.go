@@ -161,6 +161,80 @@ func TestEngineFilePersistence_NamespacesAndTasks(t *testing.T) {
 	require.Len(t, tasks, 1)
 }
 
+func TestEngineUpdateNamespace_MergesMetadata(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "ns-update.db")
+	e, err := NewEngine(NewEngineConfig{DBPath: dbPath})
+	require.NoError(t, err)
+
+	_, err = e.CreateNamespace(context.Background(), CreateNamespaceRequest{
+		ID:   "insighttutor",
+		Name: "InsightTutor",
+		Metadata: map[string]string{
+			"workdir": "D:/projects/insighttutor",
+			"env":     "dev",
+		},
+	})
+	require.NoError(t, err)
+
+	updated, err := e.UpdateNamespace(context.Background(), UpdateNamespaceRequest{
+		ID: "insighttutor",
+		Metadata: map[string]string{
+			"hub.business_code": "z8gw",
+			"hub.bound_at":      "2026-07-25T00:00:00Z",
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "InsightTutor", updated.Name)
+	require.Equal(t, "D:/projects/insighttutor", updated.Metadata["workdir"])
+	require.Equal(t, "dev", updated.Metadata["env"])
+	require.Equal(t, "z8gw", updated.Metadata["hub.business_code"])
+	require.Equal(t, "2026-07-25T00:00:00Z", updated.Metadata["hub.bound_at"])
+
+	// Rename + overwrite one hub key without wiping others
+	renamed, err := e.UpdateNamespace(context.Background(), UpdateNamespaceRequest{
+		ID:   "insighttutor",
+		Name: "InsightTutor Local",
+		Metadata: map[string]string{
+			"hub.business_code": "4b4w",
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "InsightTutor Local", renamed.Name)
+	require.Equal(t, "4b4w", renamed.Metadata["hub.business_code"])
+	require.Equal(t, "D:/projects/insighttutor", renamed.Metadata["workdir"])
+	require.Equal(t, "2026-07-25T00:00:00Z", renamed.Metadata["hub.bound_at"])
+
+	require.NoError(t, e.Close())
+
+	// Survive restart
+	e2, err := NewEngine(NewEngineConfig{DBPath: dbPath})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, e2.Close()) }()
+
+	got, err := e2.GetNamespace(context.Background(), "insighttutor")
+	require.NoError(t, err)
+	require.Equal(t, "InsightTutor Local", got.Name)
+	require.Equal(t, "4b4w", got.Metadata["hub.business_code"])
+	require.Equal(t, "D:/projects/insighttutor", got.Metadata["workdir"])
+	require.Equal(t, "dev", got.Metadata["env"])
+}
+
+func TestEngineUpdateNamespace_NotFound(t *testing.T) {
+	t.Parallel()
+
+	e, err := NewEngine(NewEngineConfig{})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, e.Close()) }()
+
+	_, err = e.UpdateNamespace(context.Background(), UpdateNamespaceRequest{
+		ID: "missing",
+		Metadata: map[string]string{"hub.business_code": "z8gw"},
+	})
+	require.ErrorIs(t, err, ErrNamespaceNotFound)
+}
+
 func TestEngineFilePersistence_TransitionsAndHistory(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "agentflow-trans.db")
 

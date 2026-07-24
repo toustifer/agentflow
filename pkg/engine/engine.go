@@ -47,6 +47,15 @@ type CreateNamespaceRequest struct {
 	Metadata map[string]string
 }
 
+// UpdateNamespaceRequest patches an existing namespace.
+// Metadata is shallow-merged into the current map (existing keys preserved unless overwritten).
+// Empty Name leaves the name unchanged.
+type UpdateNamespaceRequest struct {
+	ID       string
+	Name     string
+	Metadata map[string]string
+}
+
 type CreateTaskRequest struct {
 	NamespaceID        string
 	ID                 string
@@ -273,6 +282,40 @@ func (e *Engine) GetNamespace(ctx context.Context, nsID string) (*Namespace, err
 	ns, ok := e.namespaces[nsID]
 	if !ok {
 		return nil, ErrNamespaceNotFound
+	}
+	return cloneNamespace(ns), nil
+}
+
+// UpdateNamespace merges metadata and optionally renames a namespace.
+func (e *Engine) UpdateNamespace(ctx context.Context, req UpdateNamespaceRequest) (*Namespace, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if req.ID == "" {
+		return nil, errors.New("namespace id is required")
+	}
+	ns, ok := e.namespaces[req.ID]
+	if !ok {
+		return nil, ErrNamespaceNotFound
+	}
+
+	if req.Name != "" {
+		ns.Name = req.Name
+	}
+	if len(req.Metadata) > 0 {
+		if ns.Metadata == nil {
+			ns.Metadata = make(map[string]string, len(req.Metadata))
+		}
+		for k, v := range req.Metadata {
+			ns.Metadata[k] = v
+		}
+	}
+	ns.UpdatedAt = time.Now().UTC()
+
+	if e.db != nil {
+		if err := updateNamespace(e.db, ns); err != nil {
+			return nil, fmt.Errorf("persist namespace update: %w", err)
+		}
 	}
 	return cloneNamespace(ns), nil
 }

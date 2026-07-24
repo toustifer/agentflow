@@ -18,8 +18,11 @@ func (s *Server) Tools() []ToolSpec {
 	tools := []ToolSpec{
 		{Name: "namespace_create"},
 		{Name: "namespace_get"},
+		{Name: "namespace_update"},
 		{Name: "namespace_delete"},
 		{Name: "namespace_list"},
+		{Name: "hub_status"},
+		{Name: "hub_bind_team"},
 		{Name: "task_create"},
 		{Name: "task_prepare_start"},
 		{Name: "task_transition"},
@@ -107,6 +110,16 @@ func toolInputSchema(name string) map[string]any {
 		add("id", "name")
 		properties["metadata"] = stringMapProp
 		required = []string{"id", "name"}
+	case "namespace_update":
+		add("namespace_id", "name")
+		properties["metadata"] = stringMapProp
+		required = []string{"namespace_id"}
+	case "hub_status":
+		add("namespace_id", "workdir")
+	case "hub_bind_team":
+		add("namespace_id", "business_code", "workdir")
+		properties["set_home_fallback"] = boolProp
+		required = []string{"namespace_id", "business_code"}
 	case "namespace_get", "dag_list", "worker_list", "project_next_tasks", "project_blockers", "project_report":
 		add("namespace_id")
 		required = []string{"namespace_id"}
@@ -294,8 +307,19 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 		return s.handleNamespaceList(ctx, input)
 	case "namespace_get":
 		return s.handleNamespaceGet(ctx, input)
+	case "namespace_update":
+		result, err := s.handleNamespaceUpdate(ctx, input)
+		if err != nil {
+			return nil, err
+		}
+		s.syncNamespace(ctx, result.namespace)
+		return result.payload, nil
 	case "namespace_delete":
 		return s.handleNamespaceDelete(ctx, input)
+	case "hub_status":
+		return s.handleHubStatus(ctx, input)
+	case "hub_bind_team":
+		return s.handleHubBindTeam(ctx, input)
 	case "task_create":
 		result, err := s.handleTaskCreate(ctx, input)
 		if err != nil {
@@ -718,6 +742,21 @@ func (s *Server) handleNamespaceGet(ctx context.Context, input map[string]any) (
 	return namespaceToMap(ns), nil
 }
 
+func (s *Server) handleNamespaceUpdate(ctx context.Context, input map[string]any) (namespaceCreateResult, error) {
+	req, err := decodeUpdateNamespaceRequest(input)
+	if err != nil {
+		return namespaceCreateResult{}, err
+	}
+	ns, err := s.engine.UpdateNamespace(ctx, req)
+	if err != nil {
+		return namespaceCreateResult{}, err
+	}
+	return namespaceCreateResult{
+		namespace: ns,
+		payload:   namespaceToMap(ns),
+	}, nil
+}
+
 func (s *Server) handleNamespaceDelete(ctx context.Context, input map[string]any) (map[string]any, error) {
 	nsID, err := requiredString(input, "namespace_id")
 	if err != nil {
@@ -1093,6 +1132,29 @@ func decodeCreateNamespaceRequest(input map[string]any) (engine.CreateNamespaceR
 	}
 
 	return engine.CreateNamespaceRequest{
+		ID:       id,
+		Name:     name,
+		Metadata: metadata,
+	}, nil
+}
+
+func decodeUpdateNamespaceRequest(input map[string]any) (engine.UpdateNamespaceRequest, error) {
+	var req engine.UpdateNamespaceRequest
+
+	id, err := requiredString(input, "namespace_id")
+	if err != nil {
+		return req, err
+	}
+	name, err := optionalString(input, "name")
+	if err != nil {
+		return req, err
+	}
+	metadata, err := optionalStringMap(input, "metadata")
+	if err != nil {
+		return req, err
+	}
+
+	return engine.UpdateNamespaceRequest{
 		ID:       id,
 		Name:     name,
 		Metadata: metadata,

@@ -197,10 +197,30 @@ Hub：https://hub.stifer.xyz/codex-setup.md
 - 把 `claude mcp list` Connected 当会话可用  
 - MCP 失败时 Bash JSON-RPC / sqlite 旁路  
 
-## 可选：Hub 团队 MCP
+## 可选：Hub 团队 MCP + namespace 绑定
 
 ```json
 "hub": { "type": "http", "url": "https://hub.stifer.xyz/mcp" }
 ```
 
-见 https://hub.stifer.xyz/agent-setup.md
+**产品模型：一个 workdir / namespace ↔ 一个 Hub 团队（4 位 `business_code`，如 `z8gw`）。**
+
+| 层 | 作用 |
+|----|------|
+| `namespace.metadata["hub.business_code"]` | 该项目绑定的团队（主真相） |
+| `{workdir}/.mycompany/hub-client.json` | 目录侧镜像 code |
+| `~/.agent-hub/config.json` | JWT + **fallback** code（整机默认，不是多项目真相） |
+
+解析顺序：`env` → **namespace** → workdir → home。
+
+```text
+# 1) Hub MCP 登录拿 JWT → ~/.agent-hub/config.json
+# 2) 选团队 4 位码（Dashboard / hub_list_my_businesses）
+# 3) agentflow MCP：
+hub_bind_team({ "namespace_id": "insighttutor", "business_code": "z8gw" })
+# 也可粘贴 zhiji-z8gw → 存 z8gw
+hub_status({ "namespace_id": "insighttutor" })  # source=namespace
+```
+
+勿把展示路径 `zhiji-z8gw` 当库内主键；勿把 JWT 写进 SQLite。  
+详见 repo `docs/HUB_SOFT_SYNC.md` 与 https://hub.stifer.xyz/agent-setup.md
