@@ -2,12 +2,12 @@
 # Download-first install of agentflow skill + MCP binary (no Go, no git clone).
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.sh | bash
-#   VERSION=v0.2.3 bash install.sh
+#   VERSION=v0.2.4 bash install.sh
 #   bash install.sh --write-config   # also merge ~/.claude.json mcp entry (backup first)
 set -euo pipefail
 
 REPO="${REPO:-toustifer/agentflow}"
-VERSION="${VERSION:-v0.2.3}"
+VERSION="${VERSION:-v0.2.4}"
 BASE="${BASE:-https://github.com/${REPO}/releases/download/${VERSION}}"
 DEST="${DEST:-$HOME/.claude/skills/agentflow}"
 WRITE_CONFIG=0

@@ -2,7 +2,7 @@
 
 > Canonical public mirror: https://hub.stifer.xyz/agentflow-setup.md  
 > **Default install = download Release (no Go, no git clone).**  
-> Updated: 2026-07-25 · Release **v0.2.3**
+> Updated: 2026-07-25 · Release **v0.2.4**
 
 ## 概述
 
@@ -41,7 +41,7 @@ curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.sh \
-  | VERSION=v0.2.3 bash -s -- --write-config
+  | VERSION=v0.2.4 bash -s -- --write-config
 ```
 
 脚本会：
@@ -63,7 +63,7 @@ curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/
 ```powershell
 irm https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.ps1 | iex
 # 或:
-# $env:VERSION='v0.2.3'; irm ... | iex
+# $env:VERSION='v0.2.4'; irm ... | iex
 # .\install.ps1 -WriteConfig
 ```
 
@@ -71,7 +71,7 @@ irm https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install
 
 ## 手动下载（不用 install 脚本）
 
-Release：https://github.com/toustifer/agentflow/releases/tag/v0.2.3
+Release：https://github.com/toustifer/agentflow/releases/tag/v0.2.4
 
 | 资产 | 用途 |
 |------|------|
@@ -82,7 +82,7 @@ Release：https://github.com/toustifer/agentflow/releases/tag/v0.2.3
 | `agentflow-windows-amd64.exe` | Windows x64 |
 
 ```bash
-VERSION=v0.2.3
+VERSION=v0.2.4
 BASE=https://github.com/toustifer/agentflow/releases/download/$VERSION
 DEST=~/.claude/skills/agentflow
 mkdir -p "$DEST/bin"
@@ -179,7 +179,7 @@ node ~/.claude/skills/agentflow/hooks/mode-cli.js update
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.sh \
-  | VERSION=v0.2.3 bash -s -- --write-config
+  | VERSION=v0.2.4 bash -s -- --write-config
 ```
 
 然后**完全退出并重启** Claude Code，再跑一次 `/agentflow update`。
@@ -204,8 +204,8 @@ rsync -a skills/agentflow/ ~/.claude/skills/agentflow/
 mkdir -p ~/.claude/skills/agentflow/bin
 go build -o ~/.claude/skills/agentflow/bin/agentflow ./cmd/agentflow/
 # 发布者：
-# VERSION=v0.2.3 bash scripts/build-release.sh
-# gh release create v0.2.3 dist/agentflow-* dist/skill.tgz
+# VERSION=v0.2.4 bash scripts/build-release.sh
+# gh release create v0.2.4 dist/agentflow-* dist/skill.tgz
 ```
 
 ## Codex CLI（可选，同一二进制）
