@@ -118,7 +118,6 @@ func toolInputSchema(name string) map[string]any {
 		add("namespace_id", "workdir")
 	case "hub_bind_team":
 		add("namespace_id", "business_code", "workdir")
-		properties["set_home_fallback"] = boolProp
 		required = []string{"namespace_id", "business_code"}
 	case "namespace_get", "dag_list", "worker_list", "project_next_tasks", "project_blockers", "project_report":
 		add("namespace_id")

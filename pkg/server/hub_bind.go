@@ -9,6 +9,7 @@ import (
 )
 
 // handleHubStatus reports resolved business_code + source layers for a namespace.
+// Home config is JWT-only; residual home business_code is reported as legacy and not used.
 func (s *Server) handleHubStatus(ctx context.Context, input map[string]any) (map[string]any, error) {
 	nsID, _ := optionalString(input, "namespace_id")
 	workdir, _ := optionalString(input, "workdir")
@@ -24,9 +25,6 @@ func (s *Server) handleHubStatus(ctx context.Context, input map[string]any) (map
 			workdir = strings.TrimSpace(nsMeta["workdir"])
 		}
 	}
-	if workdir == "" {
-		workdir, _ = optionalString(input, "workdir")
-	}
 
 	snap := hub.SnapshotForNamespace(nsMeta, workdir)
 	snap.NamespaceID = nsID
@@ -37,11 +35,12 @@ func (s *Server) handleHubStatus(ctx context.Context, input map[string]any) (map
 		"namespace_stored_code": snap.NSStoredCode,
 		"workdir":               snap.Workdir,
 		"workdir_code":          snap.WorkdirCode,
-		"home_code":             snap.HomeCode,
+		"home_legacy_code":      snap.HomeLegacyCode,
 		"has_token":             snap.HasToken,
 		"bound":                 snap.Bound,
 		"hint":                  snap.Hint,
-		"resolve_order":         []string{"env", "namespace", "workdir", "home"},
+		"resolve_order":         []string{"env", "namespace", "workdir"},
+		"note":                  "No machine-wide team bind. ~/.agent-hub/config.json is JWT-only; one namespace ↔ one Hub team.",
 	}
 	if !snap.Bound {
 		out["next"] = []string{
@@ -52,7 +51,8 @@ func (s *Server) handleHubStatus(ctx context.Context, input map[string]any) (map
 	return out, nil
 }
 
-// handleHubBindTeam binds a Hub team (4-char code) to a namespace (+ workdir file).
+// handleHubBindTeam binds a Hub team (4-char code) to one namespace (+ workdir file).
+// Never writes team code to home config.
 func (s *Server) handleHubBindTeam(ctx context.Context, input map[string]any) (map[string]any, error) {
 	nsID, err := requiredString(input, "namespace_id")
 	if err != nil {
@@ -63,43 +63,35 @@ func (s *Server) handleHubBindTeam(ctx context.Context, input map[string]any) (m
 		return nil, err
 	}
 	workdir, _ := optionalString(input, "workdir")
-	setHome := false
-	if v, ok := input["set_home_fallback"]; ok {
-		switch t := v.(type) {
-		case bool:
-			setHome = t
-		case string:
-			setHome = strings.EqualFold(strings.TrimSpace(t), "true") || t == "1"
-		}
-	}
 
 	res, err := hub.BindNamespaceTeam(ctx, s.engine, nsID, rawCode, hub.BindOptions{
-		Workdir:         workdir,
-		SetHomeFallback: setHome,
+		Workdir: workdir,
 	})
 	if err != nil {
 		return map[string]any{
-			"status":  "failed",
-			"error":   err.Error(),
-			"hint":    "Pass namespace_id + 4-char business_code (or display path like zhiji-z8gw).",
+			"status": "failed",
+			"error":  err.Error(),
+			"hint":   "Pass namespace_id + 4-char business_code (or display path like zhiji-z8gw). No home team bind.",
 		}, nil
 	}
 
-	// Soft-sync namespace for any external watchers.
 	if ns, gerr := s.engine.GetNamespace(ctx, nsID); gerr == nil {
 		s.syncNamespace(ctx, ns)
 	}
 
 	return map[string]any{
-		"status":         "ok",
-		"namespace_id":   res.NamespaceID,
-		"business_code":  res.BusinessCode,
-		"source":         res.Source,
-		"workdir":        res.Workdir,
-		"workdir_wrote":  res.WorkdirWrote,
-		"home_wrote":     res.HomeWrote,
-		"bound_at":       res.BoundAt,
-		"message":        res.Message,
-		"hint":           fmt.Sprintf("Product truth is namespace.metadata[%q]=%s", hub.MetaBusinessCode, res.BusinessCode),
+		"status":              "ok",
+		"namespace_id":        res.NamespaceID,
+		"business_code":       res.BusinessCode,
+		"source":              res.Source,
+		"workdir":             res.Workdir,
+		"workdir_wrote":       res.WorkdirWrote,
+		"home_legacy_cleared": res.HomeCleared,
+		"bound_at":            res.BoundAt,
+		"message":             res.Message,
+		"hint": fmt.Sprintf(
+			"Product truth is namespace.metadata[%q]=%s (not ~/.agent-hub/config.json)",
+			hub.MetaBusinessCode, res.BusinessCode,
+		),
 	}, nil
 }

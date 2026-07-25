@@ -13,28 +13,29 @@ import (
 type BindOptions struct {
 	// Workdir overrides ns.metadata["workdir"] when non-empty.
 	Workdir string
-	// SetHomeFallback writes business_code into ~/.agent-hub/config.json
-	// when true, or when home has no business_code yet.
-	SetHomeFallback bool
 	// TeamName optional display metadata only.
 	TeamName string
+	// ClearHomeLegacy strips business_code from ~/.agent-hub/config.json after bind
+	// (default true) so machine-wide team bind cannot conflict across namespaces.
+	// Set false only for tests that assert home file left alone.
+	KeepHomeLegacyCode bool
 }
 
 // BindResult is the durable bind outcome (no network).
 type BindResult struct {
-	NamespaceID  string `json:"namespace_id"`
-	BusinessCode string `json:"business_code"`
-	Source       string `json:"source"` // after bind, typically "namespace"
-	Workdir      string `json:"workdir,omitempty"`
-	WorkdirWrote bool   `json:"workdir_wrote"`
-	HomeWrote    bool   `json:"home_wrote"`
-	BoundAt      string `json:"bound_at"`
-	Message      string `json:"message"`
+	NamespaceID    string `json:"namespace_id"`
+	BusinessCode   string `json:"business_code"`
+	Source         string `json:"source"` // after bind, typically "namespace"
+	Workdir        string `json:"workdir,omitempty"`
+	WorkdirWrote   bool   `json:"workdir_wrote"`
+	HomeCleared    bool   `json:"home_legacy_cleared"`
+	BoundAt        string `json:"bound_at"`
+	Message        string `json:"message"`
 }
 
 // BindNamespaceTeam normalizes code, merges hub.* into namespace metadata,
-// writes workdir hub-client.json when workdir is known, and optionally
-// sets home fallback business_code. JWT is never written to SQLite.
+// and writes workdir hub-client.json when workdir is known.
+// Does NOT write team code to ~/.agent-hub/config.json (JWT-only home).
 func BindNamespaceTeam(ctx context.Context, eng *engine.Engine, namespaceID, rawCode string, opts BindOptions) (*BindResult, error) {
 	if eng == nil {
 		return nil, fmt.Errorf("engine is required")
@@ -93,56 +94,51 @@ func BindNamespaceTeam(ctx context.Context, eng *engine.Engine, namespaceID, raw
 		res.WorkdirWrote = true
 	}
 
-	homeCode := HomeBusinessCode()
-	if opts.SetHomeFallback || homeCode == "" {
-		if err := SaveHomeConfig(homeConfigFile{
-			BusinessCode: code,
-			BoundAt:      boundAt,
-		}); err != nil {
-			// Home may be unwritable in some sandboxes — surface but keep ns bind.
-			res.Message = fmt.Sprintf("namespace bound to %s; home fallback write failed: %v", code, err)
-			return res, nil
+	if !opts.KeepHomeLegacyCode {
+		if err := ClearHomeBusinessCode(); err == nil {
+			res.HomeCleared = true
 		}
-		res.HomeWrote = true
+		// home missing is fine
 	}
 
-	// Confirm resolve sees namespace first.
 	resolved, source := ResolveBusinessCode(updated.Metadata, workdir)
 	res.BusinessCode = resolved
 	res.Source = source
-	if res.Message == "" {
-		res.Message = fmt.Sprintf("bound namespace %s → %s (source=%s)", namespaceID, resolved, source)
-	}
+	res.Message = fmt.Sprintf(
+		"bound namespace %s → %s (source=%s); home team code not used",
+		namespaceID, resolved, source,
+	)
 	return res, nil
 }
 
 // StatusSnapshot is local Hub bind state for one namespace (no network).
 type StatusSnapshot struct {
-	NamespaceID     string `json:"namespace_id,omitempty"`
-	BusinessCode    string `json:"business_code"`
-	Source          string `json:"source"`
-	NSStoredCode    string `json:"namespace_stored_code,omitempty"`
-	Workdir         string `json:"workdir,omitempty"`
-	WorkdirCode     string `json:"workdir_code,omitempty"`
-	HomeCode        string `json:"home_code,omitempty"`
-	HasToken        bool   `json:"has_token"`
-	Bound           bool   `json:"bound"`
-	Hint            string `json:"hint,omitempty"`
+	NamespaceID      string `json:"namespace_id,omitempty"`
+	BusinessCode     string `json:"business_code"`
+	Source           string `json:"source"`
+	NSStoredCode     string `json:"namespace_stored_code,omitempty"`
+	Workdir          string `json:"workdir,omitempty"`
+	WorkdirCode      string `json:"workdir_code,omitempty"`
+	HomeLegacyCode   string `json:"home_legacy_code,omitempty"` // residual; ignored for resolve
+	HasToken         bool   `json:"has_token"`
+	Bound            bool   `json:"bound"`
+	Hint             string `json:"hint,omitempty"`
 }
 
-// SnapshotForNamespace reports resolved code + layered sources.
+// SnapshotForNamespace reports resolved code + layered sources (no home resolve).
 func SnapshotForNamespace(nsMeta map[string]string, workdir string) StatusSnapshot {
 	if workdir == "" && nsMeta != nil {
 		workdir = strings.TrimSpace(nsMeta["workdir"])
 	}
 	code, source := ResolveBusinessCode(nsMeta, workdir)
+	legacyHome := HomeBusinessCodeLegacy()
 	s := StatusSnapshot{
-		BusinessCode: code,
-		Source:       source,
-		Workdir:      workdir,
-		HasToken:     HasHomeToken(),
-		HomeCode:     HomeBusinessCode(),
-		Bound:        code != "" && source != "unbound",
+		BusinessCode:   code,
+		Source:         source,
+		Workdir:        workdir,
+		HasToken:       HasHomeToken(),
+		HomeLegacyCode: legacyHome,
+		Bound:          code != "" && source != "unbound",
 	}
 	if nsMeta != nil {
 		s.NSStoredCode = strings.TrimSpace(nsMeta[MetaBusinessCode])
@@ -152,19 +148,22 @@ func SnapshotForNamespace(nsMeta map[string]string, workdir string) StatusSnapsh
 	}
 	switch {
 	case !s.HasToken:
-		s.Hint = "No Hub JWT in ~/.agent-hub/config.json. Login via Hub MCP hub_login, then bind."
+		s.Hint = "No Hub JWT in ~/.agent-hub/config.json. Login via Hub MCP hub_login, then hub_bind_team per namespace."
 	case code == "":
-		s.Hint = "No team bound. Call hub_bind_team({namespace_id, business_code}) with a 4-char code."
+		s.Hint = "No team on this namespace. Call hub_bind_team({namespace_id, business_code}). Home config is not a team bind."
 	case source == "namespace":
-		s.Hint = "Bound on namespace metadata (product truth for this project)."
+		s.Hint = "Bound on namespace metadata (one namespace ↔ one Hub team)."
 	case source == "workdir":
-		s.Hint = "Using workdir hub-client.json; prefer hub_bind_team to pin namespace metadata."
-	case source == "home":
-		s.Hint = "Using home fallback only; bind namespace for multi-project isolation."
+		s.Hint = "Using workdir hub-client.json only; prefer hub_bind_team to pin namespace metadata."
 	case source == "env":
-		s.Hint = "HUB_BUSINESS_CODE env overrides all file/namespace sources."
+		s.Hint = "HUB_BUSINESS_CODE env overrides namespace/workdir for this process."
 	default:
 		s.Hint = "Incomplete Hub bind."
+	}
+	if legacyHome != "" && source != "unbound" {
+		s.Hint += " Note: residual home business_code=" + legacyHome + " is ignored."
+	} else if legacyHome != "" && source == "unbound" {
+		s.Hint += " Residual home business_code=" + legacyHome + " is ignored — bind the namespace explicitly."
 	}
 	return s
 }

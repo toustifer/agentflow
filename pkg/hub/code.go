@@ -23,17 +23,14 @@ var shortCodeRe = regexp.MustCompile(`^[a-z0-9]{4}$`)
 
 // NormalizeBusinessCode accepts a bare 4-char code or a display path like
 // "zhiji-z8gw" / "insighttutor-z8gw" and returns the canonical short code.
-// Rejects empty and non-short-code inputs after strip.
 func NormalizeBusinessCode(input string) (string, error) {
 	s := strings.TrimSpace(strings.ToLower(input))
 	if s == "" {
 		return "", fmt.Errorf("business_code is required")
 	}
-	// Strip URL path prefixes if pasted.
 	if i := strings.LastIndex(s, "/"); i >= 0 {
 		s = s[i+1:]
 	}
-	// Display form: {slug}-{code} — take last segment after final '-'.
 	if i := strings.LastIndex(s, "-"); i >= 0 {
 		tail := s[i+1:]
 		if shortCodeRe.MatchString(tail) {
@@ -50,15 +47,21 @@ func NormalizeBusinessCode(input string) (string, error) {
 }
 
 // ResolveBusinessCode picks the active team code for a namespace/workdir.
-// Priority: env HUB_BUSINESS_CODE|HUB_BUSINESS → ns.metadata[hub.business_code]
-// → {workdir}/.mycompany/hub-client.json → ~/.agent-hub/config.json.
+//
+// Priority (no machine-wide team bind):
+//
+//	env HUB_BUSINESS_CODE|HUB_BUSINESS
+//	  > namespace.metadata["hub.business_code"]
+//	  > {workdir}/.mycompany/hub-client.json
+//
+// ~/.agent-hub/config.json may hold JWT only — its business_code is IGNORED
+// so multiple namespaces never fight over one global team.
 // Returns ("", "unbound") when nothing is set.
 func ResolveBusinessCode(nsMeta map[string]string, workdir string) (code, source string) {
 	if v := firstNonEmpty(os.Getenv("HUB_BUSINESS_CODE"), os.Getenv("HUB_BUSINESS")); v != "" {
 		if n, err := NormalizeBusinessCode(v); err == nil {
 			return n, "env"
 		}
-		// env set but invalid — still surface raw so operators see it
 		return strings.TrimSpace(strings.ToLower(v)), "env"
 	}
 	if nsMeta != nil {
@@ -80,16 +83,11 @@ func ResolveBusinessCode(nsMeta map[string]string, workdir string) (code, source
 			return v, "workdir"
 		}
 	}
-	if v := readBusinessCodeFile(HomeConfigPath()); v != "" {
-		if n, err := NormalizeBusinessCode(v); err == nil {
-			return n, "home"
-		}
-		return v, "home"
-	}
 	return "", "unbound"
 }
 
 // HomeConfigPath returns ~/.agent-hub/config.json (empty if home unknown).
+// Used for JWT storage only — not for team resolution.
 func HomeConfigPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {

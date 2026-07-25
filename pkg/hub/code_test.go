@@ -45,13 +45,13 @@ func TestNormalizeBusinessCode(t *testing.T) {
 	}
 }
 
-func TestResolveBusinessCode_Priority(t *testing.T) {
+func TestResolveBusinessCode_NoHome(t *testing.T) {
 	clearHubCodeEnv(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 
-	// home fallback
+	// home has code + token — must NOT resolve from home
 	if err := os.MkdirAll(filepath.Join(home, ".agent-hub"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -60,13 +60,12 @@ func TestResolveBusinessCode_Priority(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// unbound with empty ns / workdir → home
 	code, src := ResolveBusinessCode(nil, "")
-	if code != "zk9a" || src != "home" {
-		t.Fatalf("home only: code=%s src=%s", code, src)
+	if code != "" || src != "unbound" {
+		t.Fatalf("home must not bind: code=%s src=%s", code, src)
 	}
 
-	// workdir beats home
+	// workdir still works
 	wd := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(wd, ".mycompany"), 0o755); err != nil {
 		t.Fatal(err)
@@ -95,13 +94,6 @@ func TestResolveBusinessCode_Priority(t *testing.T) {
 	code, src = ResolveBusinessCode(meta, wd)
 	if code != "aryd" || src != "env" {
 		t.Fatalf("env: code=%s src=%s", code, src)
-	}
-
-	// display path in env still normalizes
-	t.Setenv("HUB_BUSINESS_CODE", "zhiji-z8gw")
-	code, src = ResolveBusinessCode(meta, wd)
-	if code != "z8gw" || src != "env" {
-		t.Fatalf("env path: code=%s src=%s", code, src)
 	}
 }
 
