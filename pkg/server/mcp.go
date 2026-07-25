@@ -465,7 +465,12 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 	case "project_next_steps":
 		return s.handleProjectNextSteps(ctx, input)
 	case "flow_ping":
-		result := map[string]any{"ok": true}
+		result := map[string]any{
+			"ok":      true,
+			"version": BuildVersion,
+			"commit":  BuildCommit,
+			"date":    BuildDate,
+		}
 		s.syncPing(ctx)
 		return result, nil
 	default:

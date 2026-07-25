@@ -34,8 +34,21 @@ if ! grep -q "MCP GATE" "$STAGE/agentflow/hooks/mode-lib.js"; then
   echo "ERROR: skills/agentflow/hooks/mode-lib.js missing MCP GATE — refuse pack" >&2
   exit 1
 fi
+if [[ ! -f "$STAGE/agentflow/VERSION" ]]; then
+  echo "ERROR: skills/agentflow/VERSION missing — refuse pack" >&2
+  exit 1
+fi
+if [[ ! -f "$STAGE/agentflow/hooks/version-check.js" ]]; then
+  echo "ERROR: skills/agentflow/hooks/version-check.js missing — refuse pack" >&2
+  exit 1
+fi
+if [[ ! -f "$STAGE/agentflow/flows/update.md" ]]; then
+  echo "ERROR: skills/agentflow/flows/update.md missing — refuse pack" >&2
+  exit 1
+fi
 
 OUT="$OUT_DIR/skill.tgz"
 tar -czf "$OUT" -C "$STAGE" agentflow
 echo "packed $OUT ($(wc -c <"$OUT") bytes)"
+echo "skill VERSION=$(tr -d '\r\n' <"$STAGE/agentflow/VERSION")"
 grep -n "MCP GATE" "$STAGE/agentflow/hooks/mode-lib.js" | head -1

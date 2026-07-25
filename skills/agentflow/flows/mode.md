@@ -58,8 +58,18 @@ node <skill>/hooks/mode-cli.js off
 node <skill>/hooks/mode-cli.js status
 ```
 
-显示 enabled / path / namespace_id / dag_id。
+显示 enabled / path / namespace_id / dag_id，并附带 MCP 配置探测。  
+**完整 skill + MCP 二进制版本对比请用 `/agentflow update`**（见 `flows/update.md`）。
 
+### `/agentflow update`（版本检查）
+
+```bash
+node <skill>/hooks/version-check.js
+# 或
+node <skill>/hooks/mode-cli.js update
+```
+
+同时检查 skill `VERSION`、MCP binary `version`、GitHub latest；落后时打印升级命令与检查路径。
 ## mode 文件格式
 
 路径：`<project>/.claude/agentflow/mode.json`

@@ -2,7 +2,7 @@
 
 > Canonical public mirror: https://hub.stifer.xyz/agentflow-setup.md  
 > **Default install = download Release (no Go, no git clone).**  
-> Updated: 2026-07-25 · Release **v0.2.2**
+> Updated: 2026-07-25 · Release **v0.2.3**
 
 ## 概述
 
@@ -41,7 +41,7 @@ curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.sh \
-  | VERSION=v0.2.2 bash -s -- --write-config
+  | VERSION=v0.2.3 bash -s -- --write-config
 ```
 
 脚本会：
@@ -63,7 +63,7 @@ curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/
 ```powershell
 irm https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.ps1 | iex
 # 或:
-# $env:VERSION='v0.2.2'; irm ... | iex
+# $env:VERSION='v0.2.3'; irm ... | iex
 # .\install.ps1 -WriteConfig
 ```
 
@@ -71,7 +71,7 @@ irm https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install
 
 ## 手动下载（不用 install 脚本）
 
-Release：https://github.com/toustifer/agentflow/releases/tag/v0.2.2
+Release：https://github.com/toustifer/agentflow/releases/tag/v0.2.3
 
 | 资产 | 用途 |
 |------|------|
@@ -82,7 +82,7 @@ Release：https://github.com/toustifer/agentflow/releases/tag/v0.2.2
 | `agentflow-windows-amd64.exe` | Windows x64 |
 
 ```bash
-VERSION=v0.2.2
+VERSION=v0.2.3
 BASE=https://github.com/toustifer/agentflow/releases/download/$VERSION
 DEST=~/.claude/skills/agentflow
 mkdir -p "$DEST/bin"
@@ -148,14 +148,41 @@ chmod +x "$DEST/bin/agentflow"
 | `MCP GATE` grep 无 | 仍是旧 skill；重跑 install 或下新 `skill.tgz` |
 | 模型 Bash 调 stdio | **无效**；修 MCP，不要接受旁路 |
 
-## 升级
+## 升级 / 版本检查
+
+在 Claude 里：
+
+```text
+/agentflow update
+```
+
+会**同时**检查：
+
+| 组件 | 查哪里 |
+|------|--------|
+| Skill | `~/.claude/skills/agentflow/VERSION` |
+| MCP 二进制 | `agentflow version`（路径来自 `~/.claude.json` → `mcpServers.agentflow`） |
+| 最新版 | GitHub `releases/latest` |
+| 会话是否已加载新 MCP | `flow_ping` 的 `version` 字段（升级后需完全重启） |
+
+落后或 skill/MCP 版本不一致时，脚本会打印同一 `VERSION=` 的一键安装命令。
+
+CLI 等价：
+
+```bash
+node ~/.claude/skills/agentflow/hooks/version-check.js
+# 或
+node ~/.claude/skills/agentflow/hooks/mode-cli.js update
+```
+
+手动升级：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.sh \
-  | VERSION=v0.2.2 bash
+  | VERSION=v0.2.3 bash -s -- --write-config
 ```
 
-重启 Claude Code。
+然后**完全退出并重启** Claude Code，再跑一次 `/agentflow update`。
 
 ## Sticky 使用
 
@@ -177,8 +204,8 @@ rsync -a skills/agentflow/ ~/.claude/skills/agentflow/
 mkdir -p ~/.claude/skills/agentflow/bin
 go build -o ~/.claude/skills/agentflow/bin/agentflow ./cmd/agentflow/
 # 发布者：
-# VERSION=v0.2.2 bash scripts/build-release.sh
-# gh release create v0.2.2 dist/agentflow-* dist/skill.tgz
+# VERSION=v0.2.3 bash scripts/build-release.sh
+# gh release create v0.2.3 dist/agentflow-* dist/skill.tgz
 ```
 
 ## Codex CLI（可选，同一二进制）

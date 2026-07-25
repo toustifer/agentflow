@@ -863,7 +863,10 @@ func TestFlowPingReturnsSuccess(t *testing.T) {
 
 	result, err := srv.Handle(context.Background(), "flow_ping", map[string]any{})
 	require.NoError(t, err)
-	require.Equal(t, map[string]any{"ok": true}, result)
+	require.Equal(t, true, result["ok"])
+	require.Contains(t, result, "version")
+	require.Contains(t, result, "commit")
+	require.Contains(t, result, "date")
 }
 
 func TestTaskGetListHistoryReturnCorrectResults(t *testing.T) {
@@ -1101,7 +1104,10 @@ func TestHubSyncFailureDoesNotFailFlowPing(t *testing.T) {
 
 	result, err := srv.Handle(context.Background(), "flow_ping", map[string]any{})
 	require.NoError(t, err)
-	require.Equal(t, map[string]any{"ok": true}, result)
+	require.Equal(t, true, result["ok"])
+	require.Contains(t, result, "version")
+	require.Contains(t, result, "commit")
+	require.Contains(t, result, "date")
 }
 
 func TestHubSyncFailureDoesNotFailNamespaceCreate(t *testing.T) {

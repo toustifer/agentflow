@@ -2,11 +2,12 @@
 
 项目编排引擎调度器。`/agentflow` 是唯一公开入口。
 
-`setup` / `init` / `intake` / `goal` / `resume` / `inspect` / `shape` / `mode` 现在都作为本 bundle 内部 flow 持有：
+`setup` / `init` / `intake` / `goal` / `resume` / `inspect` / `shape` / `mode` / `update` 现在都作为本 bundle 内部 flow 持有：
 
 ```text
 agentflow/
   SKILL.md
+  VERSION                 # skill release pin (e.g. v0.2.2)
   flows/
     setup.md
     init.md
@@ -16,12 +17,14 @@ agentflow/
     inspect.md
     shape.md
     mode.md
+    update.md
   hooks/
     mode-lib.js
     mode-cli.js
     mode-inject.js
     statusline.js
     render-inspect.js
+    version-check.js      # /agentflow update
   references/
     using-superpowers-adapter.md
 ```
@@ -113,10 +116,11 @@ statusline     -> 可选显示 agentflow:on
 ## 调度逻辑
 
 ```text
-如果 agentflow MCP 不可用      -> 读取 flows/setup.md（on/off/status 除外）
+如果 agentflow MCP 不可用      -> 读取 flows/setup.md（on/off/status/update 除外）
 /agentflow on [opts]           -> 读取 flows/mode.md，开启 sticky mode
 /agentflow off                 -> 读取 flows/mode.md，关闭 sticky mode
 /agentflow status              -> 读取 flows/mode.md，显示 mode 状态
+/agentflow update|upgrade|version -> 读取 flows/update.md；检查 skill + MCP 版本
 /agentflow inspect ...         -> 读取 flows/inspect.md，查看项目/DAG/task 树状进度
 /agentflow init [项目名]        -> 读取 flows/init.md
 /agentflow goal [目标]         -> 先读取 flows/intake.md，再读取 flows/goal.md
@@ -136,35 +140,42 @@ statusline     -> 可选显示 agentflow:on
    - 不进入业务 DAG flow
    - 若 hook 未安装，提醒用户按 `SETUP.md` 配置 `UserPromptSubmit`
 
-2. 先确认 agentflow MCP 是否可用
-   - 如果不可用：读取 `flows/setup.md`
+2. 如果 args 以 `update` / `upgrade` / `version` 开头
+   - 读取 `flows/update.md`
+   - 运行 `node hooks/version-check.js`（检查 **skill VERSION + MCP binary** vs GitHub latest）
+   - 若会话有 `mcp__agentflow__flow_ping`，一并对照 `version` 字段
+   - 落后或 skill/MCP 不一致时给出同一 VERSION 的 install 命令与检查路径
+   - **不要求** MCP 已连通即可做磁盘侧检查；升级后必须重启再验 `flow_ping`
 
-3. 如果 args 以 `init` 开头
+3. 先确认 agentflow MCP 是否可用
+   - 如果不可用：读取 `flows/setup.md`（`on`/`off`/`status`/`update` 除外）
+
+4. 如果 args 以 `init` 开头
    - 读取 `flows/init.md`
    - 把它当作已有内容项目首次接入请求
    - 在 `/agentflow` 内完成 repo 绑定、扫描、baseline 建立与后续去向判断
 
-4. 如果 args 以 `goal` 开头
+5. 如果 args 以 `goal` 开头
    - 先读取 `flows/intake.md`
    - 再读取 `flows/goal.md`
    - 只有 intake 接受后，才按 goal flow 进入 shape / plan / execute
 
-5. 如果 args 以 `resume` 开头
+6. 如果 args 以 `resume` 开头
    - 读取 `flows/resume.md`
    - 先恢复项目 snapshot 和 DAG 列表
    - 再按 resume flow 决定继续哪条线
 
-6. 如果 args 以 `inspect` 开头
+7. 如果 args 以 `inspect` 开头
    - 读取 `flows/inspect.md`
    - 优先使用 `project_inspect(namespace_id, focus?, dag_id?, task_id?)`
    - 把返回 snapshot 通过 `node hooks/render-inspect.js` 渲染并刷新 `.claude/agentflow/status.json`
    - 输出树状项目 / DAG / task / worker / blocker 视图
 
-7. 如果 args 为空
+8. 如果 args 为空
    - 默认读取 `flows/resume.md`
    - 默认走同一套项目恢复流程
 
-8. 其他
+9. 其他
    - 全部当作 goal
    - 先读取 `flows/intake.md`
    - 再读取 `flows/goal.md`

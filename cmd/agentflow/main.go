@@ -19,18 +19,60 @@ import (
 	lwserver "github.com/toustifer/agentflow/pkg/server"
 )
 
+// Populated by -ldflags at release build time.
+var (
+	version = "dev"
+	commit  = "unknown"
+	date    = "unknown"
+)
+
+func init() {
+	lwserver.SetBuildInfo(version, commit, date)
+}
+
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "stdio" {
-		if err := runMCPStdio(); err != nil {
-			log.Fatalf("mcp server exited: %v", err)
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "version", "--version", "-V":
+			fmt.Printf("agentflow %s (commit %s, built %s)\n", version, commit, date)
+			return
+		case "version-json":
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]string{
+				"version": version,
+				"commit":  commit,
+				"date":    date,
+			})
+			return
+		case "stdio":
+			if err := runMCPStdio(); err != nil {
+				log.Fatalf("mcp server exited: %v", err)
+			}
+			return
+		case "file":
+			if len(os.Args) < 3 {
+				log.Fatal("usage: agentflow file <path>")
+			}
+			if err := runFile(os.Args[2]); err != nil {
+				log.Fatalf("file: %v", err)
+			}
+			return
+		case "help", "--help", "-h":
+			fmt.Print(`agentflow — local orchestration MCP
+
+Usage:
+  agentflow stdio           Run MCP over stdin/stdout (Claude Code)
+  agentflow version         Print version
+  agentflow version-json    Print version as JSON
+  agentflow file <path>     One-shot JSON-RPC file mode
+  agentflow                 Start HTTP health server (dev)
+
+`)
+			return
+		default:
+			// Unknown subcommand: do NOT fall into HTTP server (old behaviour hung update checks).
+			fmt.Fprintf(os.Stderr, "unknown command %q (try: stdio | version | help)\n", os.Args[1])
+			os.Exit(2)
 		}
-		return
-	}
-	if len(os.Args) > 2 && os.Args[1] == "file" {
-		if err := runFile(os.Args[2]); err != nil {
-			log.Fatalf("file: %v", err)
-		}
-		return
 	}
 	if err := runHTTP(); err != nil {
 		log.Fatalf("agentflow startup failed: %v", err)

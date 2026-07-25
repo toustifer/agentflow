@@ -113,6 +113,7 @@ function main() {
           project_dir: root,
           readiness: stickyModeReadiness(),
           mcp: probeAgentflowMcpConfig(),
+          hint: "For skill+MCP version check run: /agentflow update  (node hooks/version-check.js)",
         },
         null,
         2
@@ -121,8 +122,29 @@ function main() {
     return;
   }
 
+  if (cmd === "update" || cmd === "upgrade" || cmd === "version") {
+    const { checkVersions, formatHumanReport } = require("./version-check");
+    const asJson = args._.includes("--json") || process.argv.includes("--json");
+    const skipNetwork =
+      args._.includes("--offline") || process.argv.includes("--offline");
+    checkVersions({ skipNetwork })
+      .then((report) => {
+        if (asJson) {
+          process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+        } else {
+          process.stdout.write(formatHumanReport(report) + "\n");
+        }
+        process.exit(report.needs_update ? 1 : 0);
+      })
+      .catch((e) => {
+        process.stderr.write(String(e && e.stack ? e.stack : e) + "\n");
+        process.exit(2);
+      });
+    return;
+  }
+
   process.stderr.write(
-    "Usage: node mode-cli.js on|off|status [--namespace ID] [--dag ID] [--note TEXT] [--project DIR]\n"
+    "Usage: node mode-cli.js on|off|status|update [--namespace ID] [--dag ID] [--note TEXT] [--project DIR] [--json] [--offline]\n"
   );
   process.exit(2);
 }
