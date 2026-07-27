@@ -101,6 +101,8 @@ intake 至少要收敛出这些结果：
 - `scope_target`: `existing_dag | new_dag | unknown`
 - `blocking_conditions`: defer/reject 时的阻塞原因
 - `next_action`: `enter_shape | stop | wait | ask_user`
+- `shape_mode`: `reuse | amend | create | rewrite`
+- `product_shape_path`: 默认 `.claude/PROJECT_FINAL_SHAPE.md`（若存在）
 - `constraints_to_carry_forward`: 如果 accepted，进入 shape 时必须继续携带的约束
 
 ## 决策规则

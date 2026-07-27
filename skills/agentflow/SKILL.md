@@ -185,9 +185,10 @@ statusline     -> 可选显示 agentflow:on
 当 goal flow 进入 `shape` 阶段时：
 - 前提是 `intake` 已给出 accepted / enter_shape
 - 必须读取 `flows/shape.md`
+- 已存在 `.claude/PROJECT_FINAL_SHAPE.md` 时默认 `reuse`：产品形态书只读，本轮范围交给 DAG / tasks；不得因普通 goal 静默重写
+- 只有 `create`、用户确认的 `amend` 或 `rewrite` 才能修改产品形态书
+- 复杂 DAG 可使用 `.claude/dags/<dag_id>_SHAPE.md`，只写本轮范围，不复制整本产品书
 - 不得调用通用 `brainstorming`
-- 正式产物必须写入 `.claude/PROJECT_FINAL_SHAPE.md`
-- 默认不得写 `docs/superpowers/specs/*`
 - `shape` 完成后应继续 `worker_register -> dag_create -> task_create_batch`
 
 ## 额外说明

@@ -76,9 +76,11 @@ func (s *Server) handleProjectNextSteps(ctx context.Context, input map[string]an
 
 	// 检查阶段进展
 	shapePath := filepath.Join(cwd, ".claude", "PROJECT_FINAL_SHAPE.md")
+	productShapeExists := false
 	if cwd != "" {
 		if _, err := os.Stat(shapePath); err == nil {
-			completed = append(completed, "形态书已确认")
+			productShapeExists = true
+			completed = append(completed, "产品形态书已锁定")
 		}
 	}
 
@@ -110,8 +112,13 @@ func (s *Server) handleProjectNextSteps(ctx context.Context, input map[string]an
 
 	// 判断阶段
 	if len(workers) == 0 {
-		phase = "shape"
-		phaseName = "等待出形态书"
+		if productShapeExists {
+			phase = "plan"
+			phaseName = "等待注册 Worker / 拆解 DAG"
+		} else {
+			phase = "shape"
+			phaseName = "等待确认产品形态书"
+		}
 	} else if len(dags) == 0 {
 		phase = "plan"
 		phaseName = "等待拆解 DAG"
@@ -299,7 +306,6 @@ func (s *Server) namespaceIDForWorkdir(ctx context.Context, workdir string) stri
 	return ""
 }
 
-
 func attachDAGFocusFields(result map[string]any, activeDAG, recommended *engine.DAG, dags []engine.DAG, focusSource string) {
 	if result == nil {
 		return
@@ -395,5 +401,6 @@ func dagToSummaryMap(dag *engine.DAG) map[string]any {
 		"execution_branch": dag.ExecutionBranch,
 		"base_branch":      dag.BaseBranch,
 		"status":           string(dag.Status),
+		"metadata":         dag.Metadata,
 	}
 }

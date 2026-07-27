@@ -1218,6 +1218,7 @@ func dagToMap(dag *engine.DAG) map[string]any {
 		"execution_branch": dag.ExecutionBranch,
 		"base_branch":      dag.BaseBranch,
 		"status":           string(dag.Status),
+		"metadata":         dag.Metadata,
 		"legacy":           hint.Legacy,
 		"resume_priority":  string(hint.ResumePriority),
 		"superseded_by":    hint.SupersededBy,

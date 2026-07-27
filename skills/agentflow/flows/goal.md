@@ -56,7 +56,7 @@ while phase != "done":
 
   setup   -> namespace / project bootstrap
   intake  -> 已在主入口完成 accept / defer / reject 决策
-  shape   -> 调用 shape flow，写 .claude/PROJECT_FINAL_SHAPE.md
+  shape   -> 读取 shape flow；已有产品形态书默认 reuse，仅按当前 DAG 收敛范围；create/amend/rewrite 才修改产品书
   plan    -> dag_create + task_create_batch
   execute -> prepare-only → spawn Agent → start → monitor / stuck
   done    -> completion reporting

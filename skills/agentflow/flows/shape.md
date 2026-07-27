@@ -2,7 +2,7 @@
 
 这是 `agentflow` bundle 内部的 **shape flow** 文档。
 
-用途：把一个产品目标收敛成 **agentflow 可继续拆 DAG / task 的最终形态书**。
+用途：维护稳定的产品形态书，并把每轮需求收敛成可继续拆 DAG / task 的范围。
 
 ## 边界
 
@@ -11,11 +11,24 @@
 这个 flow 可以做完整设计讨论，不需要刻意轻量化；但它与通用正式 spec 流的边界必须非常清楚：
 
 - 允许：探索上下文、逐步提问、比较方案、呈现设计、迭代修改
-- 必须：把结果写入 `.claude/PROJECT_FINAL_SHAPE.md`
+- 默认：已有产品形态书时只读它，并为当前 DAG 收敛本轮范围
+- 只有 `create`、用户确认的 `amend` 或 `rewrite` 才能修改产品形态书
 - 禁止：写 `docs/superpowers/specs/*`、commit spec、自动转 `writing-plans`
-- 结束方式：让用户确认 shape，然后把控制权交回 goal flow
+- 结束方式：让用户确认本轮范围，然后把控制权交回 goal flow
 
-## 设计目标
+## Shape mode
+
+先检查 `.claude/PROJECT_FINAL_SHAPE.md`：
+
+- `create`：文件不存在，完成完整产品形态书。
+- `reuse`：文件已存在且本轮不改变产品边界；产品书只读，当前范围写入 DAG title/description/tasks；复杂 DAG 可写 `.claude/dags/<dag_id>_SHAPE.md`。
+- `amend`：只增加小范围能力、worker 或依赖；以 diff 方式修改产品书，必须让用户确认。
+- `rewrite`：产品类型、主技术栈或核心用户流发生重大变化；必须先取得用户明确确认，才能重写。
+
+默认规则：已有产品形态书即 `reuse`。单次 bugfix、polish、小功能不得静默进入 `rewrite`。
+
+DAG shape 只写本轮的 Goal、In Scope、Out of Scope、相对产品书的增量和成功标准；不得复制整本产品形态书。
+
 
 shape flow 的目标不是输出 formal spec，而是：
 - 锁定后续拆 DAG / task 必须依赖的 Rigid 决策

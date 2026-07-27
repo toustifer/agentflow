@@ -41,6 +41,20 @@ func (s *Server) buildWorkerLaunchBriefing(ctx context.Context, ns *engine.Names
 	}
 
 	requiredReads := cloneStringSlice(w.RequiredReads)
+	if ns != nil && ns.Metadata != nil {
+		if workdir := ns.Metadata["workdir"]; workdir != "" && task.DAGID != "" {
+			if dag, dagErr := s.engine.GetDAG(ctx, ns.ID, task.DAGID); dagErr == nil && dag.Metadata != nil {
+				if shapePath := dag.Metadata["shape.path"]; shapePath != "" {
+					if !filepath.IsAbs(shapePath) {
+						shapePath = filepath.Join(workdir, shapePath)
+					}
+					if _, statErr := os.Stat(shapePath); statErr == nil && !containsString(requiredReads, shapePath) {
+						requiredReads = append(requiredReads, shapePath)
+					}
+				}
+			}
+		}
+	}
 	if len(requiredReads) == 0 && ns != nil && ns.Metadata != nil {
 		if workdir := ns.Metadata["workdir"]; workdir != "" {
 			shapePath := filepath.Join(workdir, ".claude", "PROJECT_FINAL_SHAPE.md")
@@ -92,24 +106,24 @@ func (s *Server) buildWorkerLaunchBriefing(ctx context.Context, ns *engine.Names
 	}
 
 	briefing := workerLaunchBriefing{
-		Required:          true,
-		Started:           started,
-		LeaderNextAction:  leaderNext,
-		Warning:           warning,
-		WorkerID:          task.AssignedWorker,
-		TaskID:            task.ID,
-		TaskTitle:         task.Title,
-		WorktreePath:      task.Metadata["git.worktree_path"],
-		Branch:            task.Metadata["git.branch"],
-		DispatchMode:      launchMode,
-		PromptTemplate:    prompt,
-		RequiredReads:     requiredReads,
-		RecommendedMCP:    recommendedMCP,
-		RecommendedSkills: []string{},
-		RecoveryPolicy:    recoveryPolicy,
-		FallbackMCP:       fallbackMCP,
-		StuckPlaybook:     stuckPlaybook,
-		EscalationMode:    escalationMode,
+		Required:           true,
+		Started:            started,
+		LeaderNextAction:   leaderNext,
+		Warning:            warning,
+		WorkerID:           task.AssignedWorker,
+		TaskID:             task.ID,
+		TaskTitle:          task.Title,
+		WorktreePath:       task.Metadata["git.worktree_path"],
+		Branch:             task.Metadata["git.branch"],
+		DispatchMode:       launchMode,
+		PromptTemplate:     prompt,
+		RequiredReads:      requiredReads,
+		RecommendedMCP:     recommendedMCP,
+		RecommendedSkills:  []string{},
+		RecoveryPolicy:     recoveryPolicy,
+		FallbackMCP:        fallbackMCP,
+		StuckPlaybook:      stuckPlaybook,
+		EscalationMode:     escalationMode,
 		LaunchInstructions: instructions,
 	}
 	return map[string]any{
@@ -134,6 +148,15 @@ func (s *Server) buildWorkerLaunchBriefing(ctx context.Context, ns *engine.Names
 		"escalation_mode":     briefing.EscalationMode,
 		"launch_instructions": stringSliceToAny(briefing.LaunchInstructions),
 	}, nil
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func stringSliceToAny(values []string) []any {
