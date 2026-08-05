@@ -1,14 +1,15 @@
 # Download-first install for Windows (no Go, no git clone).
 # Usage (PowerShell):
 #   irm https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.ps1 | iex
-#   $env:VERSION='v0.2.4'; .\install.ps1
-#   .\install.ps1 -WriteConfig
+#   $env:VERSION='v0.2.6'; .\install.ps1
+#   .\install.ps1 -WriteConfig -WriteCodexConfig
 
 param(
-  [string]$Version = $(if ($env:VERSION) { $env:VERSION } else { "v0.2.4" }),
+  [string]$Version = $(if ($env:VERSION) { $env:VERSION } else { "v0.2.6" }),
   [string]$Repo = "toustifer/agentflow",
   [string]$Dest = $(Join-Path $env:USERPROFILE ".claude\skills\agentflow"),
-  [switch]$WriteConfig
+  [switch]$WriteConfig,
+  [switch]$WriteCodexConfig
 )
 
 $ErrorActionPreference = "Stop"
@@ -96,6 +97,22 @@ try {
 "@
   }
 
+  if ($WriteCodexConfig) {
+    $codex = Get-Command codex -ErrorAction SilentlyContinue
+    if (-not $codex) {
+      throw "-WriteCodexConfig requires the codex CLI on PATH"
+    }
+    & $codex.Source mcp add agentflow -- $absBin stdio
+    if ($LASTEXITCODE -ne 0) {
+      throw "codex mcp add agentflow failed with exit code $LASTEXITCODE"
+    }
+    Write-Host "==> wrote mcp_servers.agentflow in Codex config"
+  } else {
+    Write-Host ""
+    Write-Host "==> register the same binary with Codex CLI:"
+    Write-Host "codex mcp add agentflow -- `"$absBin`" stdio"
+  }
+
   Write-Host ""
   Write-Host "==> sticky hooks — merge into $env:USERPROFILE\.claude\settings.json :"
   Write-Host @"
@@ -122,7 +139,7 @@ try {
 "@
 
   Write-Host ""
-  Write-Host "Next: restart Claude Code; /mcp agentflow not failed; call mcp__agentflow__flow_ping in-session."
+  Write-Host "Next: restart Claude Code and Codex; verify agentflow is connected, then call mcp__agentflow__flow_ping in-session."
 }
 finally {
   Remove-Item -Recurse -Force $Tmp -ErrorAction SilentlyContinue

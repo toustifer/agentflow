@@ -2,18 +2,21 @@
 # Download-first install of agentflow skill + MCP binary (no Go, no git clone).
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.sh | bash
-#   VERSION=v0.2.4 bash install.sh
+#   VERSION=v0.2.6 bash install.sh
 #   bash install.sh --write-config   # also merge ~/.claude.json mcp entry (backup first)
+#   bash install.sh --write-config --write-codex-config
 set -euo pipefail
 
 REPO="${REPO:-toustifer/agentflow}"
-VERSION="${VERSION:-v0.2.4}"
+VERSION="${VERSION:-v0.2.6}"
 BASE="${BASE:-https://github.com/${REPO}/releases/download/${VERSION}}"
 DEST="${DEST:-$HOME/.claude/skills/agentflow}"
 WRITE_CONFIG=0
+WRITE_CODEX_CONFIG=0
 for arg in "$@"; do
   case "$arg" in
     --write-config) WRITE_CONFIG=1 ;;
+    --write-codex-config) WRITE_CODEX_CONFIG=1 ;;
     --version=*) VERSION="${arg#--version=}"; BASE="https://github.com/${REPO}/releases/download/${VERSION}" ;;
   esac
 done
@@ -108,6 +111,19 @@ if command -v realpath >/dev/null 2>&1; then
   ABS_STATUS="$(realpath "$ABS_STATUS")"
 fi
 
+if [[ "$WRITE_CODEX_CONFIG" -eq 1 ]]; then
+  if ! command -v codex >/dev/null 2>&1; then
+    echo "ERROR: --write-codex-config requires the codex CLI on PATH" >&2
+    exit 1
+  fi
+  codex mcp add agentflow -- "$ABS_BIN" stdio
+  echo "==> wrote mcp_servers.agentflow in Codex config"
+else
+  echo
+  echo "==> register the same binary with Codex CLI:"
+  echo "codex mcp add agentflow -- \"$ABS_BIN\" stdio"
+fi
+
 echo
 echo "==> installed"
 echo "    binary: $ABS_BIN"
@@ -181,8 +197,8 @@ EOF
 echo
 echo "==> next"
 echo "    1. Merge MCP + hooks configs if not --write-config"
-echo "    2. Fully quit and restart Claude Code"
-echo "    3. /mcp -> agentflow not failed"
-echo "    4. Session must call mcp__agentflow__flow_ping (CLI Connected is not enough)"
+echo "    2. Fully quit and restart Claude Code and Codex"
+echo "    3. Claude /mcp and codex mcp list -> agentflow not failed"
+echo "    4. Each new session must call mcp__agentflow__flow_ping (CLI Connected is not enough)"
 echo "    5. statusline may show MCP:cfg|missing|broken"
 echo "Done."

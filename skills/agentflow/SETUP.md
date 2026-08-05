@@ -2,7 +2,7 @@
 
 > Canonical public mirror: https://hub.stifer.xyz/agentflow-setup.md  
 > **Default install = download Release (no Go, no git clone).**  
-> Updated: 2026-07-25 · Release **v0.2.4**
+> Updated: 2026-08-05 · Release **v0.2.6**
 
 ## 概述
 
@@ -21,11 +21,11 @@ agentflow 本地侧是 **三件套**（缺一不可）：
 
 | 层 | 检查 | 通过才算 |
 |----|------|----------|
-| 配置 | `~/.claude.json` 有 `mcpServers.agentflow` | 仅「写过配置」 |
-| 进程/UI | `/mcp` 列出 agentflow 且 **非 failed** | 用户侧必过 |
+| 配置 | Claude/Codex 配置中都有 agentflow | 仅「写过配置」 |
+| 进程/UI | `/mcp` 与 `codex mcp list` 列出 agentflow 且 **非 failed** | 用户侧必过 |
 | **会话工具** | 模型本轮能调用 `mcp__agentflow__flow_ping` | **唯一业务验收** |
 
-`claude mcp list` Connected、`agentflow:on` statusline、Bash 调 stdio 写库 —— **都不算** MCP 可用。
+`claude mcp list` Connected、`codex mcp list` enabled、`agentflow:on` statusline、Bash 调 stdio 写库 —— **都不算会话工具已加载**。
 
 MCP 未通过时：agent 必须停并让用户修 MCP，**禁止** JSON-RPC / sqlite 旁路继续 goal。
 
@@ -41,7 +41,7 @@ curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.sh \
-  | VERSION=v0.2.4 bash -s -- --write-config
+  | VERSION=v0.2.6 bash -s -- --write-config --write-codex-config
 ```
 
 脚本会：
@@ -49,13 +49,14 @@ curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/
 1. 下载 `skill.tgz` + 本机 arch 的预编译二进制（GitHub Release）  
 2. 安装到 `~/.claude/skills/agentflow/`（含 `bin/agentflow`）  
 3. 校验 `MCP GATE` 存在  
-4. 打印（或 `--write-config` 写入）`mcpServers.agentflow` 与 sticky hooks 片段  
+4. `--write-config` 写入 Claude，`--write-codex-config` 通过 Codex CLI 写入同一个二进制
+5. 打印 sticky hooks 片段
 
 然后：
 
-1. 若未用 `--write-config`：把脚本打印的 JSON 合并进 `~/.claude.json`  
+1. 若未用写入参数：按脚本输出分别注册 Claude 与 Codex
 2. 把 sticky hooks 合并进 `~/.claude/settings.json`（**不要整文件覆盖**）  
-3. **完全退出并重启** Claude Code  
+3. **完全退出并重启 Claude Code 和 Codex**
 4. 按下方「验证」清单过一遍  
 
 ## Windows（PowerShell）
@@ -63,15 +64,15 @@ curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/
 ```powershell
 irm https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.ps1 | iex
 # 或:
-# $env:VERSION='v0.2.4'; irm ... | iex
-# .\install.ps1 -WriteConfig
+# $script = irm 'https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.ps1'
+# & ([scriptblock]::Create($script)) -Version 'v0.2.6' -WriteConfig -WriteCodexConfig
 ```
 
 装到 `%USERPROFILE%\.claude\skills\agentflow\`，二进制为 `bin\agentflow.exe`。
 
 ## 手动下载（不用 install 脚本）
 
-Release：https://github.com/toustifer/agentflow/releases/tag/v0.2.4
+Release：https://github.com/toustifer/agentflow/releases/tag/v0.2.6
 
 | 资产 | 用途 |
 |------|------|
@@ -82,7 +83,7 @@ Release：https://github.com/toustifer/agentflow/releases/tag/v0.2.4
 | `agentflow-windows-amd64.exe` | Windows x64 |
 
 ```bash
-VERSION=v0.2.4
+VERSION=v0.2.6
 BASE=https://github.com/toustifer/agentflow/releases/download/$VERSION
 DEST=~/.claude/skills/agentflow
 mkdir -p "$DEST/bin"
@@ -134,12 +135,13 @@ chmod +x "$DEST/bin/agentflow"
 
 ## 验证（全部过才算装好）
 
-1. **完全退出并重启** Claude Code  
-2. `/mcp` → 有 `agentflow` 且 **不是 failed**  
-3. 本会话能调用 `mcp__agentflow__flow_ping`（**唯一业务验收**）  
-4. `grep -n "MCP GATE" ~/.claude/skills/agentflow/hooks/mode-lib.js` 有命中  
-5. `/agentflow on`；statusline 可出现 `MCP:cfg|missing|broken`  
-6. MCP 不可用时 agent **必须停**，禁止 Bash/JSON-RPC/sqlite 旁路  
+1. **完全退出并重启 Claude Code 和 Codex**
+2. Claude `/mcp` → 有 `agentflow` 且 **不是 failed**
+3. `codex mcp list` → `agentflow` 为 enabled
+4. 两边的新会话都能调用 `mcp__agentflow__flow_ping`（**唯一业务验收**）
+5. `grep -n "MCP GATE" ~/.claude/skills/agentflow/hooks/mode-lib.js` 有命中
+6. `/agentflow on`；statusline 可出现 `MCP:cfg|missing|broken`
+7. MCP 不可用时 agent **必须停**，禁止 Bash/JSON-RPC/sqlite 旁路
 
 | Symptom | Fix |
 |---------|-----|
@@ -179,10 +181,10 @@ node ~/.claude/skills/agentflow/hooks/mode-cli.js update
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.sh \
-  | VERSION=v0.2.4 bash -s -- --write-config
+  | VERSION=v0.2.6 bash -s -- --write-config --write-codex-config
 ```
 
-然后**完全退出并重启** Claude Code，再跑一次 `/agentflow update`。
+然后**完全退出并重启 Claude Code 和 Codex**，再跑一次 `/agentflow update`。
 
 ## Sticky 使用
 
@@ -204,14 +206,23 @@ rsync -a skills/agentflow/ ~/.claude/skills/agentflow/
 mkdir -p ~/.claude/skills/agentflow/bin
 go build -o ~/.claude/skills/agentflow/bin/agentflow ./cmd/agentflow/
 # 发布者：
-# VERSION=v0.2.4 bash scripts/build-release.sh
-# gh release create v0.2.4 dist/agentflow-* dist/skill.tgz
+# VERSION=v0.2.6 bash scripts/build-release.sh
+# gh release create v0.2.6 dist/agentflow-* dist/skill.tgz
 ```
 
-## Codex CLI（可选，同一二进制）
+## Codex CLI（同一二进制）
+
+推荐让安装器自动注册：
+
+```bash
+bash scripts/install.sh --write-config --write-codex-config
+```
+
+也可以手动注册或覆盖旧路径：
 
 ```bash
 codex mcp add agentflow -- "$HOME/.claude/skills/agentflow/bin/agentflow" stdio
+codex mcp list
 ```
 
 Hub：https://hub.stifer.xyz/codex-setup.md

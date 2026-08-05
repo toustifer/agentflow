@@ -225,6 +225,15 @@ function statusFor(local, latest) {
   return "up_to_date";
 }
 
+function buildInstallCommands(version) {
+  const target = normalizeVersion(version) || "v0.2.6";
+  const url = `https://raw.githubusercontent.com/${REPO}/master/scripts/install.ps1`;
+  return {
+    unix: `curl -fsSL https://raw.githubusercontent.com/${REPO}/master/scripts/install.sh | VERSION=${target} bash -s -- --write-config --write-codex-config`,
+    windows: `$script = irm '${url}'; & ([scriptblock]::Create($script)) -Version '${target}' -WriteConfig -WriteCodexConfig`,
+  };
+}
+
 async function checkVersions(opts) {
   opts = opts || {};
   const skill = readSkillVersion(opts.skillRoot);
@@ -252,9 +261,10 @@ async function checkVersions(opts) {
     binary.version &&
     skill.version !== binary.version;
 
-  const target = latest.ok ? latest.version : "v0.2.2";
-  const installCmdUnix = `curl -fsSL https://raw.githubusercontent.com/${REPO}/master/scripts/install.sh | VERSION=${target} bash -s -- --write-config`;
-  const installCmdWin = `$env:VERSION='${target}'; irm https://raw.githubusercontent.com/${REPO}/master/scripts/install.ps1 | iex`;
+  const target = latest.ok ? latest.version : skill.version || "v0.2.6";
+  const installCommands = buildInstallCommands(target);
+  const installCmdUnix = installCommands.unix;
+  const installCmdWin = installCommands.windows;
 
   return {
     ok: true,
@@ -316,7 +326,7 @@ function buildNextSteps(x) {
     );
   }
   if (x.skillStatus === "outdated" || x.mcpStatus === "outdated") {
-    steps.push("Run the install command below, then fully quit and restart Claude Code.");
+    steps.push("Run the install command below, then fully quit and restart Claude Code and Codex.");
     steps.push("macOS/Linux: " + x.installCmdUnix);
     steps.push("Windows: " + x.installCmdWin);
     steps.push("After restart: call flow_ping and confirm version field matches latest.");
@@ -374,7 +384,7 @@ function formatHumanReport(report) {
     lines.push("  " + report.install.unix);
     lines.push("Upgrade (Windows PowerShell):");
     lines.push("  " + report.install.windows);
-    lines.push("Then fully quit Claude Code and restart. Re-run /agentflow update.");
+    lines.push("Then fully quit Claude Code and Codex and restart. Re-run /agentflow update.");
   }
   return lines.join("\n");
 }
@@ -387,6 +397,7 @@ module.exports = {
   resolveBinaryFromMcp,
   normalizeVersion,
   compareSemver,
+  buildInstallCommands,
   skillRoot,
 };
 
