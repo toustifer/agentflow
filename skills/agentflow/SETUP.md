@@ -227,6 +227,34 @@ codex mcp list
 
 Hub：https://hub.stifer.xyz/codex-setup.md
 
+## DeepSeek Harness (DSH)（独立维护分支）
+
+DSH 是 DeepSeek 的宿主，与 Claude/Codex 的差异在 **Skill 装载格式**（必须 frontmatter）与 **MCP 注册方式**（`cordis.patch.yml` + `@deepseek-ai/dsh-mcp-client`），同一 Go 二进制。完整安装与验证见 **`docs/dsh-setup.md`**（分支 `deepseek/dsh-support`）。
+
+要点：
+
+```bash
+# Skill → ~/.dsh/skills/agentflow/（SKILL.md 顶部加 name+description frontmatter）
+mkdir -p ~/.dsh/skills/agentflow
+rsync -a skills/agentflow/ ~/.dsh/skills/agentflow/
+```
+
+```yaml
+# ~/.dsh/profiles/web/cordis.patch.yml
+- insert:
+    - id: mcp-agentflow
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: agentflow
+        transport: stdio
+        command: /Users/YOU/.dsh/skills/agentflow/bin/agentflow
+        args: ['stdio']
+```
+
+验收：会话里有 `mcp__agentflow__flow_ping` 且能调通（DSH 无 `/mcp` UI，
+以会话工具存在为准）。**无 UserPromptSubmit hooks**——sticky mode 退化为
+CLI 脚本，不靠每轮注入。
+
 ## 已废弃（勿再教）
 
 - 默认路径要求用户 `git clone` + `go build`  
