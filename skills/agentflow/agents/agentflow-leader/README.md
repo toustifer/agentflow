@@ -1,4 +1,4 @@
-# aimedbox-leader — AI 智能药盒 · Leader 预设
+# agentflow-leader — AgentFlow · Leader 预设
 
 > DSH（DeepSeek Harness）agent preset。基于 `standard` 整份拷贝而成，仅把人格与派发工具改成「Leader」形态，**保留完整编码 Agent 能力**（Bash、文件/网页检索、Skill、计划、目标、子代理、编排、Ralph、后台任务）。
 
@@ -57,12 +57,12 @@ flow_ping 确认 MCP 可用
 
 ## 使用方式
 
-创建 DSH 会话时选择本预设（名称显示为「AI 智能药盒 · Leader」）。确认工具列表含 `subagent` / `subagent_fork` / `spawn_worker`，persona 为 Leader。
+创建 DSH 会话时选择本预设（名称显示为「AgentFlow · Leader」）。确认工具列表含 `subagent` / `subagent_fork` / `spawn_worker`，persona 为 Leader。
 
 ## 文件结构
 
 ```
-aimedbox-leader/
+agentflow-leader/
   agent.cordis.yml                    # DSH preset 组成（人格 + 工具）
   preset.yml                          # 显示名称/描述
   skills/agentflow-leader/SKILL.md    # 可加载的 Leader 深度参考

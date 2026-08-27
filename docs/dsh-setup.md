@@ -125,34 +125,35 @@ printf '%s\n' \
 - **skill 正文里的 Claude 专有引用**（`/mcp`、`claude mcp list`）在 DSH 下
   按「会话工具存在性」等价理解
 
-## 六、DSH agent 预设（aimedbox-leader / aimedbox-worker）
+## 六、DSH agent 预设（agentflow-leader / agentflow-worker）
 
-本仓库在 `skills/agentflow/agents/` 下提供两套面向 **AI 智能药盒（AI MedBox）**
-生态的 DSH agent preset，把 agentflow 的 Leader/Worker 协议深度注入 Agent：
+本仓库在 `skills/agentflow/agents/` 下提供两套**项目无关**的 DSH agent preset，
+把 agentflow 的 Leader/Worker 协议深度注入任意项目的 Agent：
 
 | Preset | 目录 | 角色 | 核心边界 |
 |--------|------|------|----------|
-| `aimedbox-leader` | `skills/agentflow/agents/aimedbox-leader/` | **Leader / 编排** | 不代做（不写产品代码、不自己 commit/submit、不亲自调试/查库） |
-| `aimedbox-worker` | `skills/agentflow/agents/aimedbox-worker/` | **Worker / 实现** | 不 orchestrate（不拆 DAG、不派发、不 spawn 子代理） |
+| `agentflow-leader` | `skills/agentflow/agents/agentflow-leader/` | **Leader / 编排** | 不代做（不写产品代码、不自己 commit/submit、不亲自调试/查库） |
+| `agentflow-worker` | `skills/agentflow/agents/agentflow-worker/` | **Worker / 实现** | 不 orchestrate（不拆 DAG、不派发、不 spawn 子代理） |
 
 两者均基于 DSH 的 `standard` 预设拷贝，保留完整编码能力，仅改写人格与工具边界，
 并各携带一份可加载的深度参考技能（`agentflow-leader` / `agentflow-worker`）。
+预设**不内置任何业务域**；项目自身的 Worker 名册以仓库 `AGENTS.md` / `CLAUDE.md` 为准。
 
 ### 安装到本地 `~/.dsh`
 
 ```bash
 mkdir -p ~/.dsh/.agent-presets
 # 把两个预设目录复制到 DSH 本地预设根
-cp -a skills/agentflow/agents/aimedbox-leader ~/.dsh/.agent-presets/
-cp -a skills/agentflow/agents/aimedbox-worker ~/.dsh/.agent-presets/
+cp -a skills/agentflow/agents/agentflow-leader ~/.dsh/.agent-presets/
+cp -a skills/agentflow/agents/agentflow-worker ~/.dsh/.agent-presets/
 ```
 
-创建 DSH 会话时选择对应预设（显示名「AI 智能药盒 · Leader」/「AI 智能药盒 · Worker」）。
+创建 DSH 会话时选择对应预设（显示名「AgentFlow · Leader」/「AgentFlow · Worker」）。
 
 ### 关键工具：`spawn_worker`
 
 DSH 的子 Agent 通过 `composeFrom` 固定 join 父预设，**无按调用换 preset 的机制**。
-因此 `aimedbox-leader` 内配一个专属 `spawn_worker` 工具实例，用固定
+因此 `agentflow-leader` 内配一个专属 `spawn_worker` 工具实例，用固定
 `persona` + `toolFilter`（deny `subagent`/`subagent_fork`/`subagent_codex`/
 `subagent_claude_code`/`workflow`/`ralph`/`send_message`/`interrupt_agent`/
 `list_agents`）达成「Worker 人格 + 无编排工具」的边界。

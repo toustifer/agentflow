@@ -1,4 +1,4 @@
-# aimedbox-worker — AI 智能药盒 · Worker 预设
+# agentflow-worker — AgentFlow · Worker 预设
 
 > DSH（DeepSeek Harness）agent preset。基于 `standard` 整份拷贝而成，人格改为「Worker（实现者）」，并**移除 `delegation` 组**（`subagent`/`subagent_fork`/`workflow`/`ralph`/`subagent-control`）——使该 Worker 物理上没有编排工具。
 
@@ -6,9 +6,9 @@
 
 这个预设让一个 Agent 以 **Agentflow 领域 Worker** 的身份工作：在 Leader 备好的 worktree 里实现、测试、提交并 submit。它不 orchestrate——不拆 DAG、不派发、不 spawn 子代理。真正的交付物由它产出，边界由人格 + 工具双重约束。
 
-## 与 `aimedbox-leader` 的关系
+## 与 `agentflow-leader` 的关系
 
-| | `aimedbox-leader` | `aimedbox-worker` |
+| | `agentflow-leader` | `agentflow-worker` |
 |---|---|---|
 | 角色 | 编排者 | 实现者 |
 | 拆 DAG / 派发 | ✅ | ❌（人格禁止 + 工具已移除） |
@@ -16,7 +16,7 @@
 | 在 worktree 实现/测试/提交 | ❌ | ✅ |
 | 适用形态 | 独立会话 / 或用 `spawn_worker` 派生 Worker | 独立实现者会话 |
 
-> 主路径中，Leader 会话里派生的 Worker 走 `aimedbox-leader` 预设的 **`spawn_worker`** 工具（worker 人格 + 无编排工具）。`aimedbox-worker` 用于**需要工具级剥离的独立实现者会话**。
+> 主路径中，Leader 会话里派生的 Worker 走 `agentflow-leader` 预设的 **`spawn_worker`** 工具（worker 人格 + 无编排工具）。`agentflow-worker` 用于**需要工具级剥离的独立实现者会话**。
 
 ## 开工前确认现场（每个 task）
 
@@ -52,12 +52,12 @@
 
 ## 使用方式
 
-作为独立实现者会话时选择本预设（名称「AI 智能药盒 · Worker」）。confirm 工具列表里**没有** `subagent`/`workflow`/`ralph`，persona 为 Worker。
+作为独立实现者会话时选择本预设（名称「AgentFlow · Worker」）。confirm 工具列表里**没有** `subagent`/`workflow`/`ralph`，persona 为 Worker。
 
 ## 文件结构
 
 ```
-aimedbox-worker/
+agentflow-worker/
   agent.cordis.yml                    # DSH preset 组成（worker 人格 + 无 delegation）
   preset.yml                          # 显示名称/描述
   skills/agentflow-worker/SKILL.md    # 可加载的 Worker 深度参考

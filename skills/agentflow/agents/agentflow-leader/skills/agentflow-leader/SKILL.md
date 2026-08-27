@@ -1,6 +1,6 @@
 ---
 name: agentflow-leader
-description: AI 智能药盒 (AI MedBox) Agentflow Leader 的完整派工协议、Worker 名册、日志纪律与 playbook。Leader 遇「拆解→派发→验收」或「不确定该谁负责」时加载。
+description: Agentflow Leader 的完整派工协议、Worker 名册建立方法、日志纪律与 playbook。Leader 遇「拆解→派发→验收」或「不确定该谁负责」时加载。
 ---
 
 # Agentflow Leader 参考
@@ -140,32 +140,22 @@ DSH 的 `subagent`/`subagent_fork` 工具只能带 `description`/`prompt`/`run_i
 
 > 这些是 Worker 的职责。Leader **不要**代替 Worker 执行其中任何一步的代码写入。
 
-## 7. Worker 名册（AI 智能药盒）
+## 7. Worker 名册（按项目建立，预设不内置）
 
-业务域 Worker（按产品功能模块划分）：
+预设是项目无关的：这里不硬编码任何业务域。开工前用以下来源建立/核对当前项目的名册：
 
-| Worker | 领域 |
-|--------|------|
-| worker-medication | 用药计划、药品/药方、服药打卡、BLE/WiFi、硬件控制 |
-| worker-user | 微信登录认证、用户信息、个人主页、设置 |
-| worker-data | 依从性分析、服药统计、身体记录、情绪图表、数据看板 |
-| worker-ai | AI 用药简报、对话(WebSocket 流式)、视觉识别(OCR) |
-| worker-social | 好友管理、社区发帖浏览、互动(评论/点赞) |
-| worker-admin | 心理测评后台、开发测试工具 |
-| worker-portal | 门户网站(psyrene.com)、多语言、产品展示、新闻、构建部署 |
-| worker-weixin-test | 微信小程序自动化测试、E2E 回归、真机预览 |
+1. 读仓库自身维护的 Worker 名册（`AGENTS.md` / `CLAUDE.md` 的 Domain Workers 表）；
+2. 若仓库未维护：先扫一遍代码库结构，按产品功能模块划分业务域、按支撑能力划分基础设施域，与用户对齐后写回仓库文档。
 
-基础设施 Worker：
+基础设施域的常见切分可直接复用：
 
 | Worker | 领域 |
 |--------|------|
-| worker-guard | 路由守卫、导航参数、流程编排 |
-| worker-infra | 统一 HTTP 拦截器、错误处理、API 定义、Supabase 封装 |
-| worker-components | 全局复用组件：导航栏、标签页、按钮、弹窗、加载 |
-| worker-config | 小程序编译配置、TS、i18n、设计令牌、功能开关 |
-| worker-ops | Docker、Nginx 网关、CI/CD、服务器部署、SSL |
-| worker-hardware | 便携药盒 BLE 固件(C)、GATT、RTC、ESP32 服务端 |
-| worker-database | Supabase schema、migration、完整性验证、序列号修复 |
+| worker-infra | 统一 HTTP、错误处理、API 定义、持久层封装 |
+| worker-components | 全局复用组件 |
+| worker-config | 编译配置、i18n、设计令牌、功能开关 |
+| worker-database | schema、migration、数据完整性 |
+| worker-ops | CI/CD、部署、网关、SSL |
 
 > 分派前确认该 Worker 的归属域；跨域的 Rigid / 架构决策先与用户重新对齐。
 
@@ -187,8 +177,8 @@ DSH 的 `subagent`/`subagent_fork` 工具只能带 `description`/`prompt`/`run_i
 - **LDR-004 迁移类必有全量审计**：分解时加一个单独审计 task（worker-database），不要逐个打地鼠。
 - **LDR-005 每轮结束后检查日志体系**：检查 workers/{id}/session.json、experience.md、playbook/、memory/decisions.md，缺失立即补。
 - **LDR-006 分派前检索通用技能库**：`python3 .mycompany/skills/retrieve.py <关键词>`，把命中技能注入 Worker prompt；无匹配则 Worker 做完后写回技能库。
-- **LDR-007 微信小程序方案先查文档**：WXML/WXSS/Component 等微信机制，先搜官方文档验证，不凭 Web 经验推断；验收时再确认实际生效。
-- **LDR-008 提交前确认目标分支**：先看分支规则表；后端/Flutter Web 发布 → vision2；小程序/前端实验 → siruoning-v2/phase0-1；硬件 → main；不确定先问。
+- **LDR-007 领域机制先查文档**：当前项目的特有平台/框架约定，先搜官方文档验证，不凭以往项目经验推断；验收时再确认实际生效。
+- **LDR-008 提交前确认目标分支**：先读仓库自身的分支规则（AGENTS.md / CLAUDE.md / agentflow-git.md）；不清楚归属就问用户，不要猜。
 
 ## 10. 边界验收 checklist（每轮派工后自检）
 
