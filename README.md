@@ -338,6 +338,13 @@ trees/
   leader-default.json
   worker-default.json
   reviewer-default.json
+
+skills/
+  agentflow/
+    agents/
+      aimedbox-leader/          DSH preset：Leader（不代做，含 spawn_worker）
+      aimedbox-worker/          DSH preset：Worker（不 orchestrate，无 delegation）
+      README.md                 DSH 预设发现页
 ```
 
 ## Where To Go Deeper
@@ -356,6 +363,12 @@ trees/
   - `.claude/agentflow-git.md` 规则模板来源
 - `trees/*.json`
   - 默认 leader / worker / reviewer 行为树定义
+- `skills/agentflow/agents/`
+  - DSH agent 预设：`aimedbox-leader` / `aimedbox-worker`（Leader 不代做、Worker 不 orchestrate，含 `spawn_worker`）
+- `docs/dsh-setup.md`
+  - DSH（DeepSeek Harness）宿主安装 / 差异 / MCP 门禁
+- `docs/github-committer-and-branch-protection.md`
+  - 如何改提交归属（author/committer）与给分支加保护
 
 ## Caveats
 
