@@ -342,8 +342,8 @@ trees/
 skills/
   agentflow/
     agents/
-      aimedbox-leader/          DSH preset：Leader（不代做，含 spawn_worker）
-      aimedbox-worker/          DSH preset：Worker（不 orchestrate，无 delegation）
+      agentflow-leader/         DSH preset：Leader（不代做，含 spawn_worker）
+      agentflow-worker/         DSH preset：Worker（不 orchestrate，无 delegation）
       README.md                 DSH 预设发现页
 ```
 
@@ -364,7 +364,7 @@ skills/
 - `trees/*.json`
   - 默认 leader / worker / reviewer 行为树定义
 - `skills/agentflow/agents/`
-  - DSH agent 预设：`aimedbox-leader` / `aimedbox-worker`（Leader 不代做、Worker 不 orchestrate，含 `spawn_worker`）
+  - DSH agent 预设：`agentflow-leader` / `agentflow-worker`（项目无关；Leader 不代做、Worker 不 orchestrate，含 `spawn_worker`）
 - `docs/dsh-setup.md`
   - DSH（DeepSeek Harness）宿主安装 / 差异 / MCP 门禁
 - `docs/github-committer-and-branch-protection.md`

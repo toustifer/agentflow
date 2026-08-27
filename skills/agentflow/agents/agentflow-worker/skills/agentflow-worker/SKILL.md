@@ -1,6 +1,6 @@
 ---
 name: agentflow-worker
-description: AI 智能药盒 (AI MedBox) domain Worker 的实现模板、worktree 纪律、记录规范与 Worker 名册。Worker 遇「开工/测试/提交/submit」或「不确定当前现场/归属」时加载。
+description: Agentflow Worker 的实现模板、worktree 纪律、记录规范与边界自检。Worker 遇「开工/测试/提交/submit」或「不确定当前现场/归属」时加载。
 ---
 
 # Agentflow Worker 参考
@@ -42,7 +42,7 @@ description: AI 智能药盒 (AI MedBox) domain Worker 的实现模板、worktre
 - 用真实依赖 / 真实边界（`fake-instead-of-mock`），让完整业务逻辑真正执行。
 - 目标环境确认清楚再操作（`confirm-target-environment-before-debug`）；涉及 DB/服务器先读配置（SUPABASE_URL / DATABASE_URL / 服务器地址）。
 - 数据库写入可验证（`verify-write-in-database`）；不要用假参数 curl 凑数。
-- 微信小程序方案先查官方文档验证（WXML/WXSS/Component 等微信机制），不要凭 Web 经验推断。
+- 目标平台/框架的特有机制先查官方文档验证（组件/模板/生命周期等平台约定），不凭以往项目经验推断。
 
 ## 3. 边界：Worker 不做 Leader 的活
 
@@ -59,25 +59,14 @@ description: AI 智能药盒 (AI MedBox) domain Worker 的实现模板、worktre
 - 有架构决策 / 踩坑 → 在 `experience.md` 或 `decisions.md` 写清楚 Why。
 - 跨域可复用模式由 Leader 提炼进技能库，你负责原样记下来。
 
-## 5. Worker 名册（各自的 domain）
+## 5. Worker 名册（按项目建立，预设不内置）
 
-| Worker | 领域 |
-|--------|------|
-| worker-medication | 用药计划、药品/药方、服药打卡、BLE/WiFi、硬件控制 |
-| worker-user | 微信登录认证、用户信息、个人主页、设置 |
-| worker-data | 依从性分析、服药统计、身体记录、情绪图表、数据看板 |
-| worker-ai | AI 用药简报、对话(WebSocket 流式)、视觉识别(OCR) |
-| worker-social | 好友管理、社区发帖浏览、互动(评论/点赞) |
-| worker-admin | 心理测评后台、开发测试工具 |
-| worker-portal | 门户网站(psyrene.com)、多语言、产品展示、新闻、构建部署 |
-| worker-weixin-test | 微信小程序自动化测试、E2E 回归、真机预览 |
-| worker-guard | 路由守卫、导航参数、流程编排 |
-| worker-infra | 统一 HTTP 拦截器、错误处理、API 定义、Supabase 封装 |
-| worker-components | 全局复用组件：导航栏、标签页、按钮、弹窗、加载 |
-| worker-config | 小程序编译配置、TS、i18n、设计令牌、功能开关 |
-| worker-ops | Docker、Nginx 网关、CI/CD、服务器部署、SSL |
-| worker-hardware | 便携药盒 BLE 固件(C)、GATT、RTC、ESP32 服务端 |
-| worker-database | Supabase schema、migration、完整性验证、序列号修复 |
+预设是项目无关的：这里不硬编码任何业务域。你的归属域以两类来源为准：
+
+1. 仓库自身维护的名册（`AGENTS.md` / `CLAUDE.md` 的 Domain Workers 表）；
+2. Leader 在分派 prompt 里注明的 `assigned_worker` 归属域说明。
+
+两者都不明确时，直接向 Leader 澄清自己的归属域，不要猜。
 
 > 你只在自己的 domain 里交付；跨域 / Rigid / 架构决策先向 Leader 对齐。
 
@@ -94,7 +83,7 @@ description: AI 智能药盒 (AI MedBox) domain Worker 的实现模板、worktre
 - [ ] 我覆盖了成功路径与失败路径，测试用真实依赖/真实边界，没有用假参数 curl 凑数
 - [ ] 我真正跑到了测试绿（`flutter test`/`jest`/`pytest`），把验证命令结果作为「做完了」的证据
 - [ ] 涉及 DB/服务器时先读配置确认目标环境，再操作
-- [ ] 微信小程序方案先查官方文档验证，不凭 Web 经验推断
+- [ ] 当前平台/框架的特有机制已查官方文档验证，不凭旧经验推断
 - [ ] 我 `git commit -m "task=..."` 到当前 `execution_branch`，并带上 `outputFiles`
 - [ ] 我 `doc_write` / `worker_diary_write` 记录了关键变更
 - [ ] 发现新坑/新模式追加到了 `experience.md`（自认「没学到新东西」但任务明显需要学习 → 反查）

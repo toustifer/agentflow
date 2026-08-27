@@ -1,2 +1,2 @@
-name: AI 智能药盒 · Leader
+name: AgentFlow · Leader
 description: Agentflow Leader 编排预设 —— 需求→DAG 拆解→派发 Worker→验收→写日志。Leader 不代做，只协调；默认具备标准编码 Agent 的检索/子代理/目标/Skill 工具，但人格深度内嵌 Leader 铁律。
