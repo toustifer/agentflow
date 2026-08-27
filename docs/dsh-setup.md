@@ -125,7 +125,45 @@ printf '%s\n' \
 - **skill 正文里的 Claude 专有引用**（`/mcp`、`claude mcp list`）在 DSH 下
   按「会话工具存在性」等价理解
 
-## 六、版本与发布
+## 六、DSH agent 预设（aimedbox-leader / aimedbox-worker）
+
+本仓库在 `skills/agentflow/agents/` 下提供两套面向 **AI 智能药盒（AI MedBox）**
+生态的 DSH agent preset，把 agentflow 的 Leader/Worker 协议深度注入 Agent：
+
+| Preset | 目录 | 角色 | 核心边界 |
+|--------|------|------|----------|
+| `aimedbox-leader` | `skills/agentflow/agents/aimedbox-leader/` | **Leader / 编排** | 不代做（不写产品代码、不自己 commit/submit、不亲自调试/查库） |
+| `aimedbox-worker` | `skills/agentflow/agents/aimedbox-worker/` | **Worker / 实现** | 不 orchestrate（不拆 DAG、不派发、不 spawn 子代理） |
+
+两者均基于 DSH 的 `standard` 预设拷贝，保留完整编码能力，仅改写人格与工具边界，
+并各携带一份可加载的深度参考技能（`agentflow-leader` / `agentflow-worker`）。
+
+### 安装到本地 `~/.dsh`
+
+```bash
+mkdir -p ~/.dsh/.agent-presets
+# 把两个预设目录复制到 DSH 本地预设根
+cp -a skills/agentflow/agents/aimedbox-leader ~/.dsh/.agent-presets/
+cp -a skills/agentflow/agents/aimedbox-worker ~/.dsh/.agent-presets/
+```
+
+创建 DSH 会话时选择对应预设（显示名「AI 智能药盒 · Leader」/「AI 智能药盒 · Worker」）。
+
+### 关键工具：`spawn_worker`
+
+DSH 的子 Agent 通过 `composeFrom` 固定 join 父预设，**无按调用换 preset 的机制**。
+因此 `aimedbox-leader` 内配一个专属 `spawn_worker` 工具实例，用固定
+`persona` + `toolFilter`（deny `subagent`/`subagent_fork`/`subagent_codex`/
+`subagent_claude_code`/`workflow`/`ralph`/`send_message`/`interrupt_agent`/
+`list_agents`）达成「Worker 人格 + 无编排工具」的边界。
+
+- 生成领域 Worker → 用 `spawn_worker`；调研/一般子任务 → 用 `subagent`/`subagent_fork`。
+
+### 完整说明
+
+每个预设目录与 `skills/agentflow/agents/` 均带 `README.md`，含角色/边界/使用方式。
+
+## 七、版本与发布
 
 - 分支 `deepseek/dsh-support` 与 master 并行维护；master 的引擎修复会定期合入
 - Release 命名建议 `v0.2.6-dsh` 系列，与 Claude/Codex 版 `v0.2.6` 区分
