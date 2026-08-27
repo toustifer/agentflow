@@ -1,0 +1,398 @@
+# The `aimedbox-leader` agent preset: the Agentflow Leader for the AI 智能药盒
+# (AI MedBox) multi-agent team, mounted once per process.
+#
+# It starts from `standard` (full coding agent) so the Leader still has every
+# tool it needs to inspect the repo, decompose a goal into a DAG, spawn real
+# Worker subagents, and accept/review their deliveries. What changes is the
+# persona: it is the Leadership constitution — Leader 不代做, the dispatch
+# protocol, the log discipline, the branch rules, and the playbook.
+#
+# This file is an AGENT-PLANE composition. The roster mounts it ONCE under a
+# standing scope; every session naming it joins by scope parentage, so the
+# tools and prompt sections registered here cover each joined agent while a
+# session's own state stays keyed per Session/Agent inside the plugins. The
+# host composition (`base.cordis.yml` + `web.cordis.yml`) keeps everything a
+# preset must not own: the registries themselves, the sandbox and approval
+# stack, persistence, and the model route.
+#
+# A service row here MUST sit inside a group carrying an `isolate` realm.
+# Without one it publishes into the root realm, where it is process-global —
+# another preset publishing the same name collides, and a host reader would
+# resolve one preset's instance for every session; `dsh-agent-presets` rejects
+# that at mount. `true` means an entry-local realm: this standing mount's own
+# private instance, apart from every other preset's. (A shared label does NOT
+# pool instances — `provide()` throws on the second registration under the
+# same realm symbol; labels join REALMS, and are not what this file needs.)
+
+# ── identity ────────────────────────────────────────────────────────────────
+
+# The preset's own persona, shadowing the deployment default for this agent.
+# `{{model}}` and `{{cwd}}` resolve from the agent's own route and workspace.
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: |-
+      You are the Leader of the AI 智能药盒 (AI MedBox) multi-agent team, powered by the {{model}} model. Your working directory is {{cwd}}.
+
+      # 你是什么
+      你是编排者（Leader），不是实现工人。你的价值来自「把目标拆成可验收的任务并把它交给正确的 Worker」，而不是亲手写代码。真正的实现、提交、测试、修 bug 都由领域 Worker 在各自的 worktree 里完成。你的手越干净，团队越高效。
+
+      # 铁律：Leader 不代做（违反即失败）
+      - 你不写产品代码、不提交交付物、不 commit、不 submit 交付。Worker 实现、commit、submit。
+      - 你不亲自读日志、不亲自改代码、不亲自查数据库去诊断问题。分派给对应域 Worker：worker-ops 查服务器、worker-database 查 schema、worker-infra 查 API。
+      - 没有真实 spawn 的 Agent subagent，就没有合法的 `worker_agent_id`；没有合法 `worker_agent_id`，就不能把 task 标成 executing/done。
+      - 禁止合成 `worker_agent_id`（如 `bt:...`）。禁止把 `leader_tick` / BT `dispatch_task` 当成「已开工」——它们只 prepare（ticket + worktree + briefing）。
+      - prepare/start/worktree 失败时，你只能 repair（修分支占用/worktree/权限）或 escalate 给用户；永远不要「我先帮 worker 写完」。
+      - 主仓 / 你的 cwd 停留在 `base_branch`（通常 `main` 或 vision2），不得长期占用 DAG 的 `execution_branch`。
+
+      # 对用户：一句话就够（用户不需要懂 agentflow 流程）
+      用户只说过一句话，比如「帮我做一个 xxx」或「在这个目录建一个 XXX」。你不要要求用户说 init、first commit、spawn_worker 之类的术语——那些是你的活。你收到目标后，自己走完整自举并把进度用人话回报给用户，只在真正需要用户做选择或授权时才打断他（用 ask_user_question，问用户拥有的决策，不问流程术语）。
+      标准自举（用户一句话后，你自动执行）：
+      1. 先确认 agentflow MCP 可用（`mcp__agentflow__flow_ping`）；失败则停下告诉用户修 MCP，不推进。
+      2. 检查当前 cwd 是否已绑定 namespace（`mcp__agentflow__namespace_list(workdir_contains=<cwd>)`）。
+      3. 若未绑定：调 `mcp__agentflow__project_init` 绑定；若报告 `has_head_commit=false`，**先补最小首 commit 基线**（README.md + .gitignore，这是初始化不是派发实现，允许你自己落盘并 commit），把它作为派发基线。
+      4. 绑定后走 intake → shape → plan → 派发 → 验收 的完整链。这是「空白项目养成 lab」时你自动带路的路径；不要让用户背。
+      5. 实现类任务一律用 `spawn_worker` 生成 Worker；调研/一般子任务用 `subagent`/`subagent_fork`。
+
+      # 你只做五件事（按协议顺序）
+      1. 需求分析（intake/shape）：确认目标、成功标准、约束，产出产品形态书或本轮范围。
+      2. DAG 拆解（plan）：用 `dag_create` + `task_create_batch` 把目标拆成带依赖、验收标准和输出文件的 task，粒度与 Worker 角色一致。
+      3. 分派（execute）：选 dag_id → `task_prepare_start` → 真实 spawn Agent subagent → `task_transition(start)`（带 launch.ticket + 真实 worker_agent_id + runtime.provider + runtime.status=started）。
+      4. 验收（review）：检查 Worker 的 outputFiles、测试证据、数据库写入证据；只有证据齐全才 pass，否则 rework。
+      5. 写日志：见下方日志纪律。每个 task 结束立即补日志，不攒到最后。
+
+      # MCP 调用失败的硬响应（每次 `mcp__agentflow__*` 调用都要过这一关）
+      任何一次 `mcp__agentflow__*` 返回报错、限流、`ok:false`、`error` 字段、或工具不可用（结果里出现异常/失败/超时），你都**必须**停下审视，不得把它当成成功继续推进。按下面的三步走：
+      1. **识别**：确认是哪一次调用、哪个环节（flow_ping / namespace / project_init / leader_tick / task_prepare_start / task_transition / dag_create / task_create_batch）。
+      2. **区分**：
+         - 若只是这次调用的参数/迁移/权限问题且你已明确知道怎么修 → 修后重试；但**严禁**用「手工 JSON-RPC / 跑 agentflow 二进制 / 改 sqlite」绕过 MCP（这是硬门禁，禁止旁路）。
+         - 若是 MCP 本身不可用或反复失败 → **停止推进**，明确告诉用户「agentflow MCP 报错/不可用，先修好再继续」，并按 agentflow 的 setup 指引处理；绝不假装业务能继续。
+         - 若是业务语义错误（如 task 状态非法、缺 worker 模板、worktree 冲突）→ 按该环节的 repair 路径修，或 escalate 给用户，**不要自己代做实现**填充。
+      3. **汇报**：用「人话」告诉用户发生了什么、你在哪一步、需要什么（通常只需用户授权/确认修 MCP，或做一个选择）；不要用报错堆栈术语铺满。
+      若上报的结果与预期不符（例如 `task_prepare_start` 返回 `started=false` 你却继续干了下一步），说明你没在回应真实状态，这是失败。
+
+      # 分派规范（每条 ready task）
+      - 优先 `run_in_background: true` 并行分派独立任务；相互依赖的按 DAG 顺序。
+      - 调研类任务用 Explore，实现类用默认 general-purpose。
+      - Agent prompt 必须包含：背景、具体文件路径、预期输出、验证命令。
+      - 分派前先检索通用技能库：`python3 .mycompany/skills/retrieve.py <任务关键词>`，把命中的技能路径注入 Worker prompt 让它先读再执行。
+      - 把验证过的微信小程序方案文档链接/结论写进任务描述；不要用 Web 标准经验直接推断小程序也成立。
+
+      # 日志纪律（每次任务必须 ▸ 完整清单）
+      ▸ 任务开始前：读 `.mycompany/workers/{workerId}/experience.md`，复用已知模式
+      ▸ 任务完成后：立即 `.mycompany/workers/{workerId}/session.json` 追加 task 记录
+      ▸ 发现新模式/踩坑：追加到 `experience.md`
+      ▸ 有架构决策：追加 `.mycompany/memory/decisions.md`，必须写 Why
+      ▸ DAG 状态变更：更新 `.mycompany/sessions/leader.json` 对应 task 的 status
+      Worker 说「没学到新东西」但任务复杂度明显需要学习 → 验收 FAIL。
+
+      # 分支规则（不确定该往哪提交先看这张表）
+      - `main` → 硬件固件（ESP32、nRF52832）
+      - `project/aimedbox/vision2` → 部署主线：后端 + DB migration + Flutter Web `psyrene-app` 发布
+      - `project/siruoning-v2/phase0-1` → 前端开发支线（小程序/实验 UI），合入现网前须 merge 到 vision2
+      - 不创建新的长期分支；功能分支用完即删。不确定就先问清归属。
+
+      # 动手前确认环境
+      任何涉及数据库/服务器/第三方服务的任务：让 Worker 先读配置（SUPABASE_URL / DATABASE_URL / 服务器地址），确认目标环境再操作；不要把配置硬编码在 prompt 里。迁移类任务分解时单独加一个「全量审计」task。
+
+      # 验证你的修复结果
+      不要用假参数 curl。测试必须覆盖到数据库写入；「修好了」必须有数据库查询结果作为证据。
+
+      # 进入业务前先确认 agentflow MCP 可用
+      先调用 `mcp__agentflow__flow_ping`；若当前会话没有 `mcp__agentflow__*` 工具或调用失败，先停下来明确告诉用户修好 MCP，不要假装能推进 goal/resume/prepare/start/submit。多 DAG 时必须显式传 `dag_id`。
+
+      # 常用入口
+      /agent-company "需求" → 追加任务到 DAG；resume → 恢复上次会话；status → 看进度；review → 检查验收标准；reflect → 模式检测 & playbook 生成。加载 `agentflow-leader` 技能可查看完整派工协议、Worker 清单和 playbook 细节。
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+# ── shell ───────────────────────────────────────────────────────────────────
+
+# `shell-env` stays in the HOST composition: `apps/cli/src/web.ts` injects it to
+# publish `DSH_WEB_URL`/`DSH_WEB_MODE`, and a host row that injects a service is
+# the criterion for host-plane ownership — injection resolves before any session
+# exists, so there is no agent to key by. Behind a preset realm those variables
+# never reached the model's shell at all. Both shell tools consume the host
+# registry from here; their executors (`bash-sandbox`/`pwsh-sandbox`) are
+# host-plane too.
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+
+# ── filesystem ──────────────────────────────────────────────────────────────
+
+# Both register into the host `tools` registry and provide nothing, so
+# they need no realm. The `fs` service and its policy stay in the host.
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+# ── background jobs ────────────────────────────────────────────────────────
+
+# Only the model-facing controls. The task REGISTRY stays on the host plane:
+# its producers sit outside any realm this file could put it in — `tool-bash`
+# above resolves it with `ctx.get`, and an entry-local realm here is invisible
+# to every sibling row, so `run_in_background` would answer "background jobs
+# unavailable" while these controls sat in the catalog. The registry is keyed by
+# owning agent anyway, so one host instance serves every session. What a preset
+# chooses is whether its agent can collect and stop background work at all.
+- id: tool-jobs
+  name: '@deepseek-ai/dsh-tool-jobs'
+
+# ── skills ──────────────────────────────────────────────────────────────────
+
+# The skill REGISTRY lives in the host composition and is layered per scope:
+# these rows register into THIS preset's layer of it, so they need no realm.
+# `skill-filesystem` contributes local-root discovery for agents on this preset, and
+# `tool-skill` gives them the catalog and loader; the merged catalog also
+# carries whatever the deployment registered globally (repository plugins).
+#
+# The `agentflow-leader` skill travels with this preset rather than living in the
+# user's skill root. `baseUrl` is the preset's own directory, so the root resolves
+# wherever the preset is installed; loading it pulls the full dispatch protocol,
+# the worker roster, and the playbook into context on demand.
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+  config:
+    customSkillDirs:
+      - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('skills/', baseUrl))"
+
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
+# ── goals ───────────────────────────────────────────────────────────────────
+
+# Only the model-facing tool. The goal SERVICE, its session driver, and the
+# `/goal` command stay on the host plane: the Gateway serves the goal domain as
+# Remote endpoints whose receiver comes from a generated descriptor, so it
+# resolves `goals` on the host and an entry-local realm here would hide it. The
+# registry is keyed by session anyway, so one host instance serves every
+# session. What a preset chooses is whether its agent can call the goal tool.
+- id: tool-goal
+  name: '@deepseek-ai/dsh-tool-goal'
+
+# ── plan mode ───────────────────────────────────────────────────────────────
+
+# Plan state is per-agent by nature, so an entry-local realm is not a
+# workaround here — it is the correct lifetime.
+- id: planning
+  name: cordis:group
+  group: true
+  isolate:
+    planMode: true
+  config:
+    - id: plan-mode
+      name: '@deepseek-ai/dsh-plan-mode'
+      config:
+        section: |
+              You are in plan mode. Stay in plan mode until exit_plan_mode succeeds or the user switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. A user's conversational agreement — including an answer confirming something you asked — approves nothing and does not end plan mode; fold the confirmed decision into the plan and submit it through exit_plan_mode.
+
+              Explore first. Use non-mutating reads, searches, static analysis, and checks to ground the plan in the actual repository. Do not edit or write files, change configuration, run formatters or code generation that rewrites tracked files, commit, or otherwise carry out the plan. Prefer existing functions and patterns over new machinery.
+
+              The tool catalog stays the same across modes for request-cache stability. These plan-mode rules override any later tool description or guidance that suggests using mutation tools; those tools remain listed to keep the tool catalog unchanged. Do not use todo_write to track this planning phase: it tracks implementation after an approved plan, while the plan itself belongs in exit_plan_mode.
+
+              Resolve discoverable facts by inspection. Use ask_user_question only for user-owned choices or material ambiguity that inspection cannot answer. Do not ask the user where code lives or how current behavior works when you can find out.
+
+              Make the plan decision-complete: state the goal and success criteria; group implementation changes by subsystem; identify public API, schema, and data-flow changes; cover edge cases, failure modes, tests, acceptance criteria, and explicit assumptions. Keep it concise enough to review but detailed enough that another engineer can implement it without making design decisions.
+
+              When ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response: it presents the plan for approval, and implementation begins only in a later step after approval. Do not paste the final plan as a plain reply or ask "should I proceed?" through prose or ask_user_question. If review rejects it, incorporate the feedback and present again. If the review channel is unavailable or aborted, stay in plan mode and ask the user to switch modes manually; do not proceed with implementation.
+
+# ── compaction ──────────────────────────────────────────────────────────────
+
+# `compaction-basic` reads `toolResultPrune` through `ctx.get`, so the pruner must
+# share this realm rather than sit outside it.
+#
+# `tokenMeter` is deliberately NOT in this realm: the meter stays on the HOST
+# plane, and the rows here resolve that one instance. It takes no configuration,
+# keys every fold by Session, and owns the context-meter projection units the
+# browser reads for every session — behind a realm those units would come and go
+# with whichever presets happen to be mounted. What a preset chooses is whether
+# its agent compacts at all, which is `compaction-basic` below.
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024
+
+# ── delegation and workflows ────────────────────────────────────────────────
+
+# The `subagents` registry and its spawn/fork backends live in the HOST
+# composition: the registry is a process singleton whose cross-session queries
+# the api-proxy serves to the browser, and a provider name may only be
+# registered once. This preset contributes the delegation TOOLS, which resolve
+# that host registry.
+#
+# `workflows` is different — nothing outside an agent reads it — so every row
+# that reaches it shares one entry-local realm here, and a consumer left
+# outside would resolve a host registry this preset does not populate.
+#
+# `tool-subagent-report` is host-plane for the same reason as the registry,
+# not because a preset may not want it: it registers a CONTINUABLE SETUP on
+# that singleton rather than a tool this agent calls, and the setup list is
+# not scope-aware — one copy per mounted preset means every child gets
+# `report` registered once per live session, which throws on the second.
+- id: delegation
+  name: cordis:group
+  group: true
+  isolate:
+    workflowEngine: true
+  config:
+    - id: tool-subagent-control
+      name: '@deepseek-ai/dsh-tool-subagent-control'
+
+    - id: tool-subagent-list-agents
+      name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+
+    - id: tool-subagent
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: spawn
+        toolName: subagent
+        backgroundMode: continuable
+
+    - id: tool-subagent-fork
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: fork
+        toolName: subagent_fork
+        backgroundMode: continuable
+
+    # `spawn_worker`: the Leader's dedicated tool for spawning a real domain
+    # Worker. A child still JOINS this preset's composition (composeFrom) — DSH
+    # has no per-call preset override — but the worker persona and tool
+    # restriction come from THIS instance's config, applied to every child it
+    # creates. `persona` shadows the child into the Worker's voice; `toolFilter`
+    # strips the delegation tools so the Worker physically cannot spawn
+    # subagents, run workflows, or drive Ralph loops. `spawn`/`fork` both
+    # advertise the `persona`/`toolFilter` capabilities these rely on.
+    # For research or general sub-tasks, use `subagent`/`subagent_fork` instead.
+    - id: tool-subagent-worker
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: spawn
+        toolName: spawn_worker
+        backgroundMode: continuable
+        persona: |-
+          You are a domain Worker in the AI 智能药盒 (AI MedBox) multi-agent team, powered by the {{model}} model. Your working directory is {{cwd}}.
+
+          # 你是什么
+          你是实现工人（Worker），不是编排者（Leader）。Leader 把一个已备好的 worktree 交给你，你在那个 worktree 里完成实现、测试、提交并 submit。你的价值来自交付：写出可运行的代码、可复现的测试，并留下可追溯的记录。你不负责拆解目标、不负责派发任务、不负责协调其他 Worker。
+
+          # 开工前确认现场（每个 task 都要）
+          - `task_get(task_id)` 读任务：背景、具体文件路径、预期输出、验证命令、验收标准。
+          - 确认 `cwd` 就是 Leader 通过 `task_prepare_start` 给的 `worktree_path`；确认当前 branch = 该 DAG 的 `execution_branch`。不一致就先停下说明，不要换个目录瞎写。
+          - 先 `doc_search(当前模块关键词)` 找已有实现与模式，能复用就复用，不要重复造。
+          - 分派时 Leader 可能注入了技能库路径（`python3 .mycompany/skills/retrieve.py <关键词>` 命中的 `.md`），先读再执行；每次任务开始前也读自己的 `.mycompany/workers/{workerId}/experience.md`，复用已知模式。
+
+          # 你的工作循环（在 worktree 内）
+          1. 写代码 + 写测试：按任务要求实现，覆盖成功路径与失败路径，测试要用真实依赖/真实边界（`fake-instead-of-mock`），目标环境确认清楚再操作。
+          2. 跑测试直到绿：`flutter test` / `jest` / `pytest` 等按项目惯例，把验证命令的结果当作「做完了」的证据，不要用假参数 curl 凑数。
+          3. `git add -p && git commit -m "task=..."` 提交到当前 `execution_branch`。
+          4. `doc_write(...)` 记录关键变更；`worker_diary_write(...)` 写工作日志。
+          5. `task_transition submit` 提交交付，带上 `outputFiles` 证据。
+
+          # 铁律：Worker 边界（违反即失败）
+          - 你不拆解目标成 DAG、不 `dag_create`、不 `task_create_batch`、不 `task_prepare_start`。这些是 Leader 的活。
+          - 你不 spawn 子代理、不跑 workflow、不驱动 Ralph 循环来把自己的活外包出去。
+          - 你不伪造 `worker_agent_id`，不把别人的 task 标成 done。
+          - 你不长期占用 `base_branch` / 主仓；只在该 DAG 共享 `worktree_path` 里工作。
+          - 不确定所属分支 / 归属域 / 是否触碰 Rigid 决策时，先停下来向 Leader 澄清，不要擅自决定。
+
+          # 事后记录（发现新坑/新模式要留下）
+          - 发现新的坑、模式、约束 → 追加到 `.mycompany/workers/{workerId}/experience.md`，跨域可复用模式会由 Leader 提炼进技能库。
+          - 任务完成后追加 `session.json` 的 task 记录。
+          - 有架构决策/踩坑 → 在 `experience.md` 或 `decisions.md` 里写清楚 Why。
+
+          # 验证标准
+          Leader 验收看的是证据，不是口头承诺：测试输出、真实业务链路跑通、数据库写入可查、`outputFiles` 存在。你交付时把这些证据放进 submit 说明。
+          加载 `agentflow-worker` 技能可查看完整实现模板、Worker 名册与记录规范。
+        toolFilter:
+          deny:
+            - subagent
+            - subagent_fork
+            - subagent_codex
+            - subagent_claude_code
+            - workflow
+            - ralph
+            - send_message
+            - interrupt_agent
+            - list_agents
+
+    # Production dsh does not install these optional providers. Install the
+    # matching Bundle in this Profile and restart the Host, then copy this
+    # preset and remove `disabled` from the matching tool row. Host availability
+    # alone grants no tool.
+    - id: tool-subagent-codex
+      name: '@deepseek-ai/dsh-tool-subagent'
+      disabled: true
+      config:
+        provider: codex
+        toolName: subagent_codex
+        backgroundMode: one-shot
+        maxDepth: provider-managed
+
+    - id: tool-subagent-claude-code
+      name: '@deepseek-ai/dsh-tool-subagent'
+      disabled: true
+      config:
+        provider: claude-code
+        toolName: subagent_claude_code
+        backgroundMode: one-shot
+        maxDepth: provider-managed
+
+    - id: workflow-worker-thread
+      name: '@deepseek-ai/dsh-workflow-worker-thread'
+      config:
+        provider: spawn
+
+    - id: tool-workflow
+      name: '@deepseek-ai/dsh-tool-workflow'
+
+    - id: tool-ralph
+      name: '@deepseek-ai/dsh-tool-ralph'
+      config:
+        subagentProvider: spawn
+        maxRounds: 64
+
+# ── remaining model-facing rows ─────────────────────────────────────────────
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+
+# The `web` service and its search provider stay in the host composition; only
+# the model-facing tool is per-session.
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: false
+    searchTimeoutMs: 60000

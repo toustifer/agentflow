@@ -1,0 +1,2 @@
+name: AI 智能药盒 · Worker
+description: Agentflow Worker 实现预设 —— 在 Leader 备好的 worktree 内实现/测试/提交并 submit。不 orchestrate、不 spawn 子代理。与「AI 智能药盒 · Leader」互补成一对。
