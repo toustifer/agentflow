@@ -49,6 +49,26 @@ prepare/start 失败
 ### 一致性质疑
 若返回状态与预期不符却继续往下走（如 `task_prepare_start` 返回 `launch.started=false` 你却直接 `task_transition(start)`），说明你没在回应真实状态——这是失败。验收前先核对 `task_get` 的真实 state / `worker_agent_id` / `runtime.status`。
 
+### 子代理启动即败：先取证再定性（套餐额度不足是最常见根因）
+
+> 运行时对 continuable 子代理的失败通知**只有一句** "failed before it finished."——429 等真实死因**不回传给 Leader**，只落在子代理自己的会话文件里。连续 ≥2 个子代理秒死（连最小探针也死）时，禁止继续重试，先取证：
+
+```text
+1. list_agents 拿失败 agentId
+2. zstd -dc "$(find ~/.dsh/sessions -type d -name '<agentId>' | head -1)/session.jsonl.zstd" | tail -5
+   → 读 turn/end 的 reason.error.message 原文
+3. 定性：
+   - 429 / QUOTA / UsageLimit / quota / rate limit / 余额
+       → 模型套餐额度不足，不是基础设施故障。向用户如实报告并给三个选项：
+         ① 按 429 里的链接开启余额用量；
+         ② 等配额周期重置；
+         ③ 换模型重派 → 用 spawn_worker_alt（钉在备用模型）或请用户切会话模型
+   - 其它报错 → 按原文定性（网络/权限/参数），不要笼统报「委派基础设施故障」
+4. 额度恢复后旧僵尸 agent 不必唤醒（首轮已死）：重新 task_prepare_start 换新票 → spawn 全新子代理
+```
+
+> 实例教训（2026-08-27 InsightTutor）：三个修复 Worker + 唤醒重试 + 全新 spawn + 最小探针 + fork 探针连死 5 次，全是 `429 GoUsageLimitError: Weekly usage limit reached`；当时没取证，误报为「委派基础设施故障」并堆了 5 次无效重试。父会话最后是手动切到 `opencode2/glm-5.3-flash` 才完成汇报——这正是 `spawn_worker_alt` 存在的理由。
+
 ## 3. 一句话自举 / 空白项目（用户只需要说「帮我做一个 xxx」）
 
 > 用户不希望懂 agentflow。你收到的常常就是一句「帮我做一个 xxx」或「在这个目录建一个 XXX」。下面这条路径由你自动带路，不要要求用户说 init / first commit / spawn_worker 之类的术语。
@@ -121,6 +141,7 @@ DSH 的 `subagent`/`subagent_fork` 工具只能带 `description`/`prompt`/`run_i
 **因此：**
 - **生成领域 Worker**（要它在 worktree 内实现/测试/提交/submit）→ 用 **`spawn_worker`**。它天生是 worker 人格 + 无编排工具。
 - **生成调研/一般子任务**（需要检索、可能要再派发、或只是普通分析）→ 用 **`subagent`** / **`subagent_fork`**（默认 Leader 人格 + 全工具）。
+- **主力模型配额不足（子代理 429 QUOTA）时** → 用 **`spawn_worker_alt`**：同一 Worker 人格与工具剥离，但 `agentOptions` 把子代理钉在备用供应商/模型上（本部署为 `opencode2/glm-5.3-flash`）。子代理**不继承会话的模型回退链**——主模型没额度时，只有这条钉了备用模型的通道能起 Worker。
 
 ### 派工记录
 用 `spawn_worker` 生成的子 Agent 同样先走 `task_prepare_start`（ticket + worktree），再 `task_transition(start)` 填 `launch.ticket` + 真实 `worker_agent_id` + `runtime.provider`/`runtime.status=started`。
