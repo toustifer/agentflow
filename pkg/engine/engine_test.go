@@ -305,7 +305,7 @@ func TestAvailableTransitions(t *testing.T) {
 		wantLen  int
 		wantTrans []string
 	}{
-		{TaskAssigned, 1, []string{"start"}},
+		{TaskAssigned, 2, []string{"start", "reassign"}},
 		{TaskExecuting, 3, []string{"submit", "reassign", "cancel"}},
 		{TaskReviewPending, 3, []string{"pass", "rework", "reassign"}},
 		{TaskReworkNeeded, 3, []string{"resume", "reassign", "cancel"}},

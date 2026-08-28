@@ -41,7 +41,7 @@ func TestReportStuckOnceReturnsAssignedTaskSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "T1", resp.TaskID)
 	require.Equal(t, "assigned", resp.State)
-	require.Equal(t, []string{"start"}, resp.AvailableTransitions)
+	require.Equal(t, []string{"start", "reassign"}, resp.AvailableTransitions)
 	require.Equal(t, []string{"task_get", "worker_prompt_get", "worker_handbook_get", "find_knowledge", "find_pitfalls"}, resp.SuggestedActions)
 	require.Equal(t, map[string]any{"total": 0, "dependency": 0, "worker": 0}, resp.BlockerSummary)
 	require.Equal(t, []string{"search_docs", "deeper_research", "escalate"}, resp.RecoveryPolicy)

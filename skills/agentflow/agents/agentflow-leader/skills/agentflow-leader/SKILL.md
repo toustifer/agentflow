@@ -143,6 +143,8 @@ DSH 的 `subagent`/`subagent_fork` 工具只能带 `description`/`prompt`/`run_i
 - **生成调研/一般子任务**（需要检索、可能要再派发、或只是普通分析）→ 用 **`subagent`** / **`subagent_fork`**（默认 Leader 人格 + 全工具）。
 - **主力模型配额不足（子代理 429 QUOTA）时** → 用 **`spawn_worker_alt`**：同一 Worker 人格与工具剥离，但 `agentOptions` 把子代理钉在备用供应商/模型上（本部署为 `opencode2/glm-5.3-flash`）。子代理**不继承会话的模型回退链**——主模型没额度时，只有这条钉了备用模型的通道能起 Worker。
 
+> **Worker 死亡后的换绑（v0.2.6+ 引擎修复）**：`task_transition(reassign)` 会**清空旧 worker 绑定**（字段与 runtime/launch 元数据），且 assigned 状态也可用。旧绑定任务死锁时顺序：`task_transition(reassign)` → `task_prepare_start`（新票）→ spawn 新 Agent → `task_transition(start)` 带新 worker_agent_id。`task_worker_sync` 是 **Worker 自报状态**的工具（要求传入 id 与当前绑定一致），不是换绑工具。
+
 ### 派工记录
 用 `spawn_worker` 生成的子 Agent 同样先走 `task_prepare_start`（ticket + worktree），再 `task_transition(start)` 填 `launch.ticket` + 真实 `worker_agent_id` + `runtime.provider`/`runtime.status=started`。
 
