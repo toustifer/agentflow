@@ -1,3 +1,4 @@
+from __future__ import annotations
 from bt_service.core.blackboard import Blackboard
 from bt_service.server.builtin import git_commit_changes_action
 from bt_service.server.git_commit_client import GitCommitChangesProviderError

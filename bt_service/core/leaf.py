@@ -1,4 +1,5 @@
 """Leaf nodes: Condition, Action, ActionWithRunning, Inverter, Retry, Wait, Log."""
+from __future__ import annotations
 
 from bt_service.core.node import Node, Haltable, Status
 

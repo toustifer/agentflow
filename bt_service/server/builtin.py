@@ -3,6 +3,7 @@
 This iteration makes `refresh_phase` real: it first tries a narrow Go phase
 provider, then falls back to prefilled `phase_data` if present.
 """
+from __future__ import annotations
 
 from bt_service.core.blackboard import Blackboard
 from bt_service.factory.registry import FactoryRegistry

@@ -6,6 +6,7 @@ Each .py file should export a NODES list:
         {"type": "action", "name": "my_action", "fn": callable},
     ]
 """
+from __future__ import annotations
 
 import importlib
 import importlib.util

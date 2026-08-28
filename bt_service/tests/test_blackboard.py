@@ -1,4 +1,5 @@
 """Tests for Blackboard."""
+from __future__ import annotations
 
 import threading
 from bt_service.core.blackboard import Blackboard

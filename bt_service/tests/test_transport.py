@@ -2,6 +2,7 @@
 
 These are lightweight contract tests focused on byte-based UTF-8 length.
 """
+from __future__ import annotations
 
 import json
 

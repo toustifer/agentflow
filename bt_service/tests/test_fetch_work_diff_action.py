@@ -1,3 +1,4 @@
+from __future__ import annotations
 from bt_service.core.blackboard import Blackboard
 from bt_service.server.builtin import fetch_work_diff_action, review_decide_action
 from bt_service.server.fetch_diff_client import FetchWorkDiffProviderError

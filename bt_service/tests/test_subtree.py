@@ -1,4 +1,5 @@
 """Tests for SubTree and Registry."""
+from __future__ import annotations
 
 from bt_service.core.node import Status
 from bt_service.core.blackboard import Blackboard

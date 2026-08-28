@@ -1,4 +1,5 @@
 """Tests for control nodes: Sequence, Fallback, ReactiveSequence, ReactiveFallback."""
+from __future__ import annotations
 
 from bt_service.core.node import Node, Status, NodeFunc
 from bt_service.core.control import Sequence, Fallback, ReactiveSequence, ReactiveFallback

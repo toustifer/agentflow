@@ -1,3 +1,4 @@
+from __future__ import annotations
 from bt_service.core.blackboard import Blackboard
 from bt_service.server.builtin import diary_write_entry_action
 from bt_service.server.diary_write_client import DiaryWriteEntryProviderError

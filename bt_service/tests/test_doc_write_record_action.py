@@ -1,3 +1,4 @@
+from __future__ import annotations
 from bt_service.core.blackboard import Blackboard
 from bt_service.server.builtin import doc_write_record_action
 from bt_service.server.doc_write_client import DocWriteRecordProviderError

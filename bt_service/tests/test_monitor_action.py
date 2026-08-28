@@ -1,3 +1,4 @@
+from __future__ import annotations
 from bt_service.core.blackboard import Blackboard
 from bt_service.server.builtin import monitor_tasks_action
 from bt_service.server.monitor_client import MonitorProviderError

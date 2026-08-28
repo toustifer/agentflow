@@ -1,4 +1,5 @@
 """Tree template loader — scans directories for .json tree files."""
+from __future__ import annotations
 
 import json
 import os

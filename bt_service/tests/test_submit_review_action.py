@@ -1,3 +1,4 @@
+from __future__ import annotations
 from bt_service.core.blackboard import Blackboard
 from bt_service.server.builtin import task_submit_for_review_action
 from bt_service.server.submit_review_client import TaskSubmitForReviewProviderError

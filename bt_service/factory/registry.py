@@ -5,7 +5,7 @@ then build a node tree from a NodeConfig dict recursively.
 """
 
 from __future__ import annotations
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from bt_service.core.node import Node, Status
 from bt_service.core.control import Sequence, Fallback, ReactiveSequence, ReactiveFallback
@@ -17,7 +17,7 @@ from bt_service.core.blackboard import Blackboard
 # Factory: (cfg dict, children list, registry) -> Node
 NodeFactory = Callable[[dict, list[Node], "FactoryRegistry"], Node]
 CondFn = Callable[[Blackboard], bool]
-ActFn = Callable[[Blackboard], tuple[bool, Exception | None]]
+ActFn = Callable[[Blackboard], tuple[bool, Optional[Exception]]]
 
 
 class FactoryRegistry:

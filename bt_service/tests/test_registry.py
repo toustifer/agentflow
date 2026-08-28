@@ -1,4 +1,5 @@
 """Tests for FactoryRegistry listing and type registration."""
+from __future__ import annotations
 
 from bt_service.factory.registry import FactoryRegistry, register_default_nodes
 
