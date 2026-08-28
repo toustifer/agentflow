@@ -48,6 +48,40 @@ class TestHandlerOutputs:
         assert result["outputs"]["actions"] == ["brainstorm", "worker_register"]
         assert result["blackboard"]["phase_name"] == "等待出形态书"
 
+    def test_tick_returns_deduped_named_traces(self):
+        srv = BTServer(trees_dir="trees")
+        result = srv.handle("tick", {
+            "tree_name": "leader-default",
+            "blackboard": {
+                "namespace_id": "ns_demo",
+                "phase_data": {
+                    "phase": "shape",
+                    "phase_name": "等待出形态书",
+                    "progress": "0%",
+                    "actions": ["brainstorm", "worker_register"],
+                    "next_tasks": [],
+                    "active_tasks": [],
+                    "stuck_tasks": [],
+                    "has_next_tasks": False,
+                    "has_active_tasks": False,
+                    "has_stuck_tasks": False,
+                },
+            },
+            "options": {"return_blackboard": False},
+        })
+        traces = result["traces"]
+        assert isinstance(traces, list) and traces
+        names = [t["name"] for t in traces]
+        # each executed node appears exactly once
+        assert len(names) == len(set(names))
+        # leaves carry their registered fn names, not <lambda>
+        assert "refresh_phase" in names
+        assert "phase_is_shape" in names
+        assert "<lambda>" not in names
+        # trace ends with the winning fallback branch of the root router
+        assert traces[-1]["name"] == "Fallback#1"
+        assert traces[-1]["status"] == result["status"]
+
     def test_refresh_phase_falls_back_to_prefilled_data_when_provider_missing(self):
         srv = BTServer(trees_dir="trees")
         result = srv.handle("tick", {

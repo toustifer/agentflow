@@ -1,7 +1,7 @@
 """Leaf nodes: Condition, Action, ActionWithRunning, Inverter, Retry, Wait, Log."""
 from __future__ import annotations
 
-from bt_service.core.node import Node, Haltable, Status
+from bt_service.core.node import Node, Haltable, Status, append_trace
 
 
 class Condition(Node, Haltable):
@@ -11,7 +11,9 @@ class Condition(Node, Haltable):
         self._fn = fn
 
     def tick(self, bb) -> Status:
-        return Status.SUCCESS if self._fn(bb) else Status.FAILURE
+        status = Status.SUCCESS if self._fn(bb) else Status.FAILURE
+        append_trace(bb, getattr(self, "_trace_name", None) or getattr(self._fn, "__name__", "condition"), "condition", status)
+        return status
 
     def halt(self) -> None:
         pass
@@ -27,15 +29,22 @@ class Action(Node, Haltable):
         self._fn = fn
         self._error = None
 
+    def _trace_name_of(self) -> str:
+        return getattr(self, "_trace_name", None) or getattr(self._fn, "__name__", "action")
+
     def tick(self, bb) -> Status:
         try:
             ok, err = self._fn(bb)
             self._error = err
             if err:
+                append_trace(bb, self._trace_name_of(), "action", Status.FAILURE)
                 return Status.FAILURE
-            return Status.SUCCESS if ok else Status.FAILURE
+            status = Status.SUCCESS if ok else Status.FAILURE
+            append_trace(bb, self._trace_name_of(), "action", status)
+            return status
         except Exception as e:
             self._error = e
+            append_trace(bb, self._trace_name_of(), "action", Status.FAILURE)
             return Status.FAILURE
 
     @property
@@ -57,14 +66,18 @@ class ActionWithRunning(Node, Haltable):
         self._error = None
 
     def tick(self, bb) -> Status:
+        name = getattr(self, "_trace_name", None) or getattr(self._fn, "__name__", "action")
         try:
             status, err = self._fn(bb)
             self._error = err
             if err:
+                append_trace(bb, name, "action", Status.FAILURE)
                 return Status.FAILURE
+            append_trace(bb, name, "action", status)
             return status
         except Exception as e:
             self._error = e
+            append_trace(bb, name, "action", Status.FAILURE)
             return Status.FAILURE
 
     @property
@@ -83,6 +96,7 @@ class Inverter(Node, Haltable):
 
     def tick(self, bb) -> Status:
         status = self._child.tick(bb)
+        append_trace(bb, "Inverter", "decorator", status)
         if status == Status.SUCCESS:
             return Status.FAILURE
         elif status == Status.FAILURE:
@@ -105,6 +119,7 @@ class Retry(Node, Haltable):
     def tick(self, bb) -> Status:
         while self._attempts < self._max_retry:
             status = self._child.tick(bb)
+            append_trace(bb, f"Retry:{self._max_retry}", "decorator", status)
             if status == Status.RUNNING:
                 return Status.RUNNING
             elif status == Status.SUCCESS:
@@ -130,10 +145,11 @@ class Wait(Node, Haltable):
 
     def tick(self, bb) -> Status:
         self._count += 1
-        if self._count >= self._max_ticks:
+        status = Status.SUCCESS if self._count >= self._max_ticks else Status.RUNNING
+        if status == Status.SUCCESS:
             self._count = 0
-            return Status.SUCCESS
-        return Status.RUNNING
+        append_trace(bb, "Wait", "wait", status)
+        return status
 
     def halt(self) -> None:
         self._count = 0
@@ -148,6 +164,7 @@ class Log(Node, Haltable):
 
     def tick(self, bb) -> Status:
         status = self._child.tick(bb)
+        append_trace(bb, "Log", "decorator", status)
         return status
 
     def halt(self) -> None:

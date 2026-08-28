@@ -103,7 +103,9 @@ def _condition_factory(cfg: dict, children: list[Node], reg: FactoryRegistry) ->
     fn = reg._cond_fns.get(fn_name)
     if fn is None:
         raise ValueError(f"unknown condition function: {fn_name!r}")
-    return Condition(fn)
+    node = Condition(fn)
+    node._trace_name = fn_name
+    return node
 
 
 def _action_factory(cfg: dict, children: list[Node], reg: FactoryRegistry) -> Node:
@@ -113,7 +115,9 @@ def _action_factory(cfg: dict, children: list[Node], reg: FactoryRegistry) -> No
     fn = reg._act_fns.get(fn_name)
     if fn is None:
         raise ValueError(f"unknown action function: {fn_name!r}")
-    return Action(fn)
+    node = Action(fn)
+    node._trace_name = fn_name
+    return node
 
 
 def _subtree_factory(cfg: dict, children: list[Node], reg: FactoryRegistry) -> Node:
