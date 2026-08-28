@@ -116,7 +116,7 @@ DSH 的 `subagent`/`subagent_fork` 工具只能带 `description`/`prompt`/`run_i
 
 所以在 Leader 预设里配了一个**专属的 `spawn_worker` 工具实例**。它对这个实例生成的每个子 Agent 施加：
 - **`persona`**：遮蔽成 Worker 人格（实现者，不 orchestrate）。
-- **`toolFilter`（deny）**：`subagent`、`subagent_fork`、`subagent_codex`、`subagent_claude_code`、`workflow`、`ralph`、`send_message`、`interrupt_agent`、`list_agents` —— 孩子物理上拿不到这些编排工具。
+- **`toolFilter`（deny）**：`subagent`、`subagent_fork`、`workflow`、`ralph`、`send_message`、`interrupt_agent`、`list_agents` —— 孩子物理上拿不到这些编排工具。只列实际注册的工具名；`disabled` 行的工具本就不存在，列进去会让工具实例启动失败。
 
 **因此：**
 - **生成领域 Worker**（要它在 worktree 内实现/测试/提交/submit）→ 用 **`spawn_worker`**。它天生是 worker 人格 + 无编排工具。
