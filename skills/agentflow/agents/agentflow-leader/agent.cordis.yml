@@ -334,8 +334,6 @@
           deny:
             - subagent
             - subagent_fork
-            - subagent_codex
-            - subagent_claude_code
             - workflow
             - ralph
             - send_message
