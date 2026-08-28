@@ -350,8 +350,12 @@
     # `spawn_worker_alt`: the same Worker channel pinned to a FALLBACK model via
     # `agentOptions` (provider+model flow into the child descriptor). Use it when
     # the primary model's quota is exhausted (429 QUOTA) — children do NOT
-    # inherit the session's fallback chain. Adjust provider/model to this
-    # deployment's settings.yaml providers; remove if unavailable.
+    # inherit the session's fallback chain.
+    # The provider/model names here MUST exist in this deployment's
+    # ~/.dsh/settings.yaml (llm-pi-ai.providers). If the names differ, rename
+    # them; if the deployment has no second provider/model at all, DELETE this
+    # whole `- id: tool-subagent-worker-alt` block — a spawn pinned to a
+    # missing provider/model fails on every use.
     - id: tool-subagent-worker-alt
       name: '@deepseek-ai/dsh-tool-subagent'
       config:
