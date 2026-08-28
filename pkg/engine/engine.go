@@ -525,6 +525,20 @@ func (e *Engine) TransitionTask(ctx context.Context, nsID, taskID string, t Task
 			task.Metadata[k] = v
 		}
 	}
+	if t == TransReassign {
+		// A reassign swaps the Worker: drop the previous agent binding and its
+		// runtime/launch state so a later start with a fresh worker_agent_id is
+		// not rejected as "already bound to another worker_agent_id".
+		task.WorkerAgentID = ""
+		task.Metadata = ensureMap(task.Metadata)
+		for _, k := range []string{
+			"worker_agent_id",
+			"runtime.provider", "runtime.status", "runtime.last_event_at",
+			"launch.ticket", "launch.ticket_state", "launch.ticket_issued_at", "launch.ticket_expires_at",
+		} {
+			delete(task.Metadata, k)
+		}
+	}
 	if t == TransStart || t == TransResume {
 		task.Metadata = ensureMap(task.Metadata)
 		task.Metadata["launch.ticket_state"] = "consumed"
@@ -829,7 +843,11 @@ func applyTransition(task *Task, t TaskTransition) (TaskState, error) {
 		}
 		return TaskReworkNeeded, nil
 	case TransReassign:
-		if task.State != TaskReworkNeeded &&
+		// Assigned is included so a Leader can force-rebind a task whose
+		// Worker died after the previous reassign (the live binding otherwise
+		// deadlocks start with a fresh worker).
+		if task.State != TaskAssigned &&
+			task.State != TaskReworkNeeded &&
 			task.State != TaskExecuting &&
 			task.State != TaskReviewPending {
 			return "", ErrInvalidTransition
@@ -864,6 +882,8 @@ func AvailableTransitions(task *Task) []AvailableTransition {
 		return []AvailableTransition{
 			{Transition: string(TransStart), Role: "leader", ToState: string(TaskExecuting),
 				Hint: "Leader dispatches the task to the assigned Worker"},
+			{Transition: string(TransReassign), Role: "leader", ToState: string(TaskAssigned),
+				Hint: "Leader reassigns to a different Worker (clears the previous agent binding)"},
 		}
 	case TaskExecuting:
 		return []AvailableTransition{
