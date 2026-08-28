@@ -1,10 +1,11 @@
 """Control flow nodes: Sequence, Fallback, ReactiveSequence, ReactiveFallback."""
 from __future__ import annotations
 
-from bt_service.core.node import Node, Haltable, Status
+from bt_service.core.node import Node, Haltable, Status, append_trace, child_label, is_control_node
 
 
 class Sequence(Node, Haltable):
+    _is_control = True
     """Ticks children in order. Remembers position across ticks.
 
     FAILURE or RUNNING → return immediately, remember position.
@@ -17,7 +18,10 @@ class Sequence(Node, Haltable):
 
     def tick(self, bb) -> Status:
         while self._index < len(self.children):
-            status = self.children[self._index].tick(bb)
+            child = self.children[self._index]
+            status = child.tick(bb)
+            if is_control_node(child):
+                append_trace(bb, child_label(child, self._index), type(child).__name__, status)
             if status == Status.RUNNING:
                 return Status.RUNNING
             elif status == Status.FAILURE:
@@ -37,6 +41,7 @@ class Sequence(Node, Haltable):
 
 
 class Fallback(Node, Haltable):
+    _is_control = True
     """Tries each child until one succeeds. Remembers position.
 
     SUCCESS or RUNNING → return immediately, remember position.
@@ -49,7 +54,10 @@ class Fallback(Node, Haltable):
 
     def tick(self, bb) -> Status:
         while self._index < len(self.children):
-            status = self.children[self._index].tick(bb)
+            child = self.children[self._index]
+            status = child.tick(bb)
+            if is_control_node(child):
+                append_trace(bb, child_label(child, self._index), type(child).__name__, status)
             if status == Status.RUNNING:
                 return Status.RUNNING
             elif status == Status.SUCCESS:
@@ -69,6 +77,7 @@ class Fallback(Node, Haltable):
 
 
 class ReactiveSequence(Node, Haltable):
+    _is_control = True
     """Ticks ALL children every tick. Resets non-RUNNING children each tick.
 
     First FAILURE → return FAILURE.
@@ -80,8 +89,10 @@ class ReactiveSequence(Node, Haltable):
 
     def tick(self, bb) -> Status:
         any_running = False
-        for child in self.children:
+        for idx, child in enumerate(self.children):
             status = child.tick(bb)
+            if is_control_node(child):
+                append_trace(bb, child_label(child, idx), type(child).__name__, status)
             if status == Status.RUNNING:
                 any_running = True
             elif status == Status.FAILURE:
@@ -95,6 +106,7 @@ class ReactiveSequence(Node, Haltable):
 
 
 class ReactiveFallback(Node, Haltable):
+    _is_control = True
     """Ticks ALL children every tick. First SUCCESS returns SUCCESS.
 
     All children FAILURE → FAILURE.
@@ -106,8 +118,10 @@ class ReactiveFallback(Node, Haltable):
     def tick(self, bb) -> Status:
         any_running = False
         all_failed = True
-        for child in self.children:
+        for idx, child in enumerate(self.children):
             status = child.tick(bb)
+            if is_control_node(child):
+                append_trace(bb, child_label(child, idx), type(child).__name__, status)
             if status == Status.RUNNING:
                 any_running = True
                 all_failed = False

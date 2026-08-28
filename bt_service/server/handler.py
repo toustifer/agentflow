@@ -124,6 +124,8 @@ class BTServer:
             raise ValueError("either tree_name or tree_json is required")
 
         bb = Blackboard.from_json_map(bb_data)
+        trace: list = []
+        bb._trace = trace
         status = node.tick(bb)
 
         outputs = self._extract_outputs(bb)
@@ -131,6 +133,7 @@ class BTServer:
             "status": status.name.lower(),
             "tree_name": tree_name or None,
             "outputs": outputs,
+            "traces": trace,
         }
         if return_blackboard:
             result["blackboard"] = bb.to_json_map()
