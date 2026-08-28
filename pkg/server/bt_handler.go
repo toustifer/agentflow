@@ -98,6 +98,7 @@ func (s *Server) handleBTTick(ctx context.Context, input map[string]any) (map[st
 		"status":     result["status"],
 		"outputs":    result["outputs"],
 		"blackboard": result["blackboard"],
+		"traces":     result["traces"],
 	}, nil
 }
 
