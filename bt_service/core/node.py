@@ -1,4 +1,5 @@
 """Node interface, Status enum, and Haltable ABC for the BehaviorTree runtime."""
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from enum import IntEnum

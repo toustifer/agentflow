@@ -1,4 +1,5 @@
 """Tests for leaf nodes: Condition, Action, Inverter, Retry, Wait."""
+from __future__ import annotations
 
 from bt_service.core.node import Status
 from bt_service.core.leaf import Condition, Action, Inverter, Retry, Wait, Log

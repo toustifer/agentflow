@@ -1,4 +1,5 @@
 """Named tree registry for SubTree lookups."""
+from __future__ import annotations
 
 from bt_service.core.node import Node, Status
 

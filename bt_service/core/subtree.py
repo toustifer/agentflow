@@ -1,4 +1,5 @@
 """SubTree — embeds another registered tree with child blackboard."""
+from __future__ import annotations
 
 from bt_service.core.node import Node, Haltable, Status
 from bt_service.core.blackboard import Blackboard

@@ -1,4 +1,5 @@
 """Shared RPC contract helpers for bt_service."""
+from __future__ import annotations
 
 JSONRPC_VERSION = "2.0"
 MAX_FRAME_BYTES = 4 * 1024 * 1024

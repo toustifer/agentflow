@@ -1,3 +1,4 @@
+from __future__ import annotations
 from bt_service.core.blackboard import Blackboard
 from bt_service.server.builtin import review_decide_action
 

@@ -1,4 +1,5 @@
 """Tests for deserialization — JSON → Node tree."""
+from __future__ import annotations
 
 import json
 from bt_service.core.node import Status

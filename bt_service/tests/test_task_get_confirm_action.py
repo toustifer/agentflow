@@ -1,3 +1,4 @@
+from __future__ import annotations
 from bt_service.core.blackboard import Blackboard
 from bt_service.server.builtin import task_get_confirm_action
 from bt_service.server.task_get_client import TaskGetConfirmProviderError

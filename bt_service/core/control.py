@@ -1,4 +1,5 @@
 """Control flow nodes: Sequence, Fallback, ReactiveSequence, ReactiveFallback."""
+from __future__ import annotations
 
 from bt_service.core.node import Node, Haltable, Status
 
