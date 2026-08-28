@@ -164,7 +164,50 @@ DSH 的子 Agent 通过 `composeFrom` 固定 join 父预设，**无按调用换 
 
 每个预设目录与 `skills/agentflow/agents/` 均带 `README.md`，含角色/边界/使用方式。
 
-## 七、版本与发布
+## 七、Hub MCP（`mcp__hub__*`）—— 试验性多人同步上下文
+
+除 agentflow 自带的两个 hub 工具外，DSH 还可挂载**独立的 Hub MCP server**，
+把 hub 平台（https://hub.stifer.xyz）的完整能力暴露给会话。两者分工不同：
+
+| 工具面 | 来源 | 职责 |
+|--------|------|------|
+| `mcp__agentflow__hub_status` / `hub_bind_team` | agentflow MCP server 内置 | 用已有 JWT 查询/绑定 namespace ↔ 团队码 |
+| `mcp__hub__*` | 独立 Hub MCP server（`hub-mcp/index.js`） | **登录**（设备授权拿 JWT）+ 云端协作操作 |
+
+### 挂载方式（`~/.dsh/profiles/web/cordis.patch.yml`）
+
+```yaml
+- insert:
+    - id: mcp-hub
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: hub
+        transport: stdio
+        command: node
+        args: [<path>/hub-mcp/index.js]
+        env:
+          HUB_API_URL: https://hub.stifer.xyz
+```
+
+### 工具清单
+
+- `hub_login`：设备授权登录（唯一合法 JWT 来源；agentflow 不做登录）
+- `hub_heartbeat` / `hub_list_workers`：Worker 在线/离线/stale 监控
+- `hub_acquire_lock` / `hub_release_lock` / `hub_renew_lock`：分布式锁（跨机器防冲突）
+- `hub_create_playbook` / `hub_search_playbooks`：**跨用户共享的经验库**（全文搜索）
+- `hub_append_event` / `hub_list_events`：团队事件流
+- `hub_sync_dag` / `hub_get_dag`：DAG 任务状态软同步到云端看板
+- `hub_add_repo`：绑定 GitHub 仓库
+
+### ⚠️ 试验性定位（如实说明）
+
+- 共享的是**沉淀产物**（经验/锁/事件/看板/心跳），**不是**实时会话上下文——
+  各自会话的进行中对话与工作现场仍在各自本地，互不可见。
+- 同团队多用户通过同一个 4 位 `business_code` 协作；绑定关系见 `HUB_SOFT_SYNC.md`。
+- JWT 有效期约 3 天；`invalid token` 时重新 `hub_login` 即可（token 存
+  `~/.agent-hub/config.json`，只存 JWT，不存团队码）。
+
+## 八、版本与发布
 
 - 分支 `deepseek/dsh-support` 与 master 并行维护；master 的引擎修复会定期合入
 - Release 命名建议 `v0.2.6-dsh` 系列，与 Claude/Codex 版 `v0.2.6` 区分
