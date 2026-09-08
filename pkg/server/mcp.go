@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -497,14 +498,23 @@ type taskHistoryResult struct {
 	payload map[string]any
 }
 
-const launchTicketTTL = 5 * time.Minute
+const defaultLaunchTicketTTL = 30 * time.Minute
+
+func getLaunchTicketTTL() time.Duration {
+	if val := os.Getenv("AGENTFLOW_TICKET_TTL"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil && d > 0 {
+			return d
+		}
+	}
+	return defaultLaunchTicketTTL
+}
 
 func issueLaunchTicket(now time.Time) string {
 	return fmt.Sprintf("lt_%d", now.UnixNano())
 }
 
 func launchTicketMetadata(ticket string, now time.Time) map[string]string {
-	expiresAt := now.Add(launchTicketTTL)
+	expiresAt := now.Add(getLaunchTicketTTL())
 	return map[string]string{
 		"launch.ticket":            ticket,
 		"launch.ticket_issued_at":  now.Format(time.RFC3339),
@@ -579,7 +589,20 @@ func (s *Server) handleTaskPrepareStart(ctx context.Context, input map[string]an
 	for k, v := range launchTicketMetadata(ticket, now) {
 		metadata[k] = v
 	}
-	task, err = s.engine.UpdateTask(ctx, namespaceID, taskID, engine.UpdateTaskRequest{Metadata: metadata})
+
+	// Self-healing re-entry: when re-preparing a task that is in assigned or rework_needed state,
+	// automatically clear any dead or stale worker_agent_id binding so that the new worker agent
+	// is not blocked by "task already bound to another worker_agent_id".
+	updateReq := engine.UpdateTaskRequest{Metadata: metadata}
+	if (task.State == engine.TaskAssigned || task.State == engine.TaskReworkNeeded) && task.WorkerAgentID != "" {
+		updateReq.ClearWorkerAgentID = true
+		delete(metadata, "worker_agent_id")
+		delete(metadata, "runtime.status")
+		delete(metadata, "runtime.provider")
+		delete(metadata, "runtime.last_event_at")
+	}
+
+	task, err = s.engine.UpdateTask(ctx, namespaceID, taskID, updateReq)
 	if err != nil {
 		return taskResult{}, err
 	}

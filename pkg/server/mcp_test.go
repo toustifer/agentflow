@@ -607,6 +607,84 @@ func TestSameDAGTasksReuseSingleWorktreePath(t *testing.T) {
 	require.Equal(t, sharedPath, prepared["metadata"].(map[string]any)["git.worktree_path"])
 }
 
+func TestTaskPrepareStartClearsOrphanWorkerBinding(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t)
+	createDagTaskForStart(t, srv, "T-rebind-orphan")
+
+	// 1. First prepare and start binds worker_agent_id = "agent-old"
+	prepared1, err := srv.Handle(context.Background(), "task_prepare_start", map[string]any{
+		"namespace_id": "ns-1",
+		"task_id":      "T-rebind-orphan",
+	})
+	require.NoError(t, err)
+	ticket1 := prepared1["launch_ticket"].(string)
+
+	_, err = srv.Handle(context.Background(), "task_transition", map[string]any{
+		"namespace_id": "ns-1",
+		"task_id":      "T-rebind-orphan",
+		"transition":   "start",
+		"actor_role":   "leader",
+		"metadata": map[string]any{
+			"launch.ticket":       ticket1,
+			"worker_agent_id":     "agent-old",
+			"runtime.provider":    "claude_code",
+			"runtime.status":      "started",
+			"runtime.launched_at": time.Now().UTC().Format(time.RFC3339),
+		},
+	})
+	require.NoError(t, err)
+
+	// Verify task is executing with worker_agent_id = "agent-old"
+	task, err := srv.engine.GetTask(context.Background(), "ns-1", "T-rebind-orphan")
+	require.NoError(t, err)
+	require.Equal(t, "agent-old", task.WorkerAgentID)
+
+	// Simulate task moving to rework_needed or assigned (e.g. after crash/review rework)
+	_, err = srv.engine.UpdateTask(context.Background(), "ns-1", "T-rebind-orphan", engine.UpdateTaskRequest{
+		State: engine.TaskReworkNeeded,
+	})
+	require.NoError(t, err)
+
+	// 2. Leader calls task_prepare_start AGAIN without manual reassign.
+	// This should automatically clear the orphan "agent-old" binding and issue fresh ticket!
+	prepared2, err := srv.Handle(context.Background(), "task_prepare_start", map[string]any{
+		"namespace_id": "ns-1",
+		"task_id":      "T-rebind-orphan",
+	})
+	require.NoError(t, err)
+	ticket2 := prepared2["launch_ticket"].(string)
+	require.NotEmpty(t, ticket2)
+	require.NotEqual(t, ticket1, ticket2)
+
+	// Verify the orphan worker_agent_id was cleared on the task
+	taskAfterPrepare, err := srv.engine.GetTask(context.Background(), "ns-1", "T-rebind-orphan")
+	require.NoError(t, err)
+	require.Empty(t, taskAfterPrepare.WorkerAgentID)
+
+	// 3. New agent "agent-new" starts the task -> MUST SUCCEED without "already bound to another worker_agent_id" error!
+	_, err = srv.Handle(context.Background(), "task_transition", map[string]any{
+		"namespace_id": "ns-1",
+		"task_id":      "T-rebind-orphan",
+		"transition":   "start",
+		"actor_role":   "leader",
+		"metadata": map[string]any{
+			"launch.ticket":       ticket2,
+			"worker_agent_id":     "agent-new",
+			"runtime.provider":    "claude_code",
+			"runtime.status":      "started",
+			"runtime.launched_at": time.Now().UTC().Format(time.RFC3339),
+		},
+	})
+	require.NoError(t, err, "New agent should bind cleanly after re-prepare!")
+
+	// Final check: task is now bound to "agent-new"
+	finalTask, err := srv.engine.GetTask(context.Background(), "ns-1", "T-rebind-orphan")
+	require.NoError(t, err)
+	require.Equal(t, "agent-new", finalTask.WorkerAgentID)
+}
+
 func TestTaskWorkerSyncUpdatesDAGLeaseHolderState(t *testing.T) {
 	t.Parallel()
 

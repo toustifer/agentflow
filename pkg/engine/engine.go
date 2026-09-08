@@ -447,9 +447,10 @@ func (e *Engine) CreateTask(ctx context.Context, req CreateTaskRequest) (*Task, 
 
 type UpdateTaskRequest struct {
 	State          TaskState
-	ReviewMetadata map[string]string
-	Metadata       map[string]string
-	WorkerAgentID  string
+	ReviewMetadata      map[string]string
+	Metadata            map[string]string
+	WorkerAgentID       string
+	ClearWorkerAgentID  bool
 }
 
 func (e *Engine) UpdateTask(ctx context.Context, nsID, taskID string, req UpdateTaskRequest) (*Task, error) {
@@ -463,7 +464,9 @@ func (e *Engine) UpdateTask(ctx context.Context, nsID, taskID string, req Update
 	if req.State != "" {
 		task.State = req.State
 	}
-	if req.WorkerAgentID != "" {
+	if req.ClearWorkerAgentID {
+		task.WorkerAgentID = ""
+	} else if req.WorkerAgentID != "" {
 		task.WorkerAgentID = req.WorkerAgentID
 	}
 	if req.ReviewMetadata != nil || req.Metadata != nil {
