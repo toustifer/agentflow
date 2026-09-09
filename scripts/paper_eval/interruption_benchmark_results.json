@@ -1,0 +1,30 @@
+[
+  {
+    "config": "AgentFlow_Full",
+    "resume_success": true,
+    "recovery_tokens": 720,
+    "resume_latency_s": 23.0,
+    "repeated_actions": 0
+  },
+  {
+    "config": "Abl_NoState",
+    "resume_success": true,
+    "recovery_tokens": 450,
+    "resume_latency_s": 21.9,
+    "repeated_actions": 0
+  },
+  {
+    "config": "Baseline_TranscriptReplay",
+    "resume_success": true,
+    "recovery_tokens": 6200,
+    "resume_latency_s": 21.4,
+    "repeated_actions": 0
+  },
+  {
+    "config": "Baseline_GitOnly",
+    "resume_success": false,
+    "recovery_tokens": 380,
+    "resume_latency_s": 21.7,
+    "repeated_actions": 0
+  }
+]
