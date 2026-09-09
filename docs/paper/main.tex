@@ -66,15 +66,21 @@ Autonomous Software Engineering, Multi-Agent Systems, Git Worktree Isolation, Be
 
 The application of Large Language Models (LLMs) to software engineering (SE) has advanced rapidly through several transformative phases. The initial phase focused on token-level code completion and function synthesis \cite{chen2021codex}. Subsequently, conversational multi-agent systems such as ChatDev \cite{qian2023communicative} and MetaGPT \cite{hong2023metagpt} introduced role-playing paradigms where distinct agents simulate human development teams. Most recently, the field matured toward repository-level autonomous issue resolution benchmarks (e.g., SWE-bench \cite{jimenez2023swebench}), spearheaded by tools like SWE-Agent \cite{yang2024sweagent} and AutoCodeRover \cite{zhang2024autocoderover}.
 
-Despite these notable milestones, existing architectures exhibit acute fragility when exposed to \textbf{long-horizon, continuous software development}---the fourth evolutionary phase where autonomous teams must iteratively evolve production repositories over weeks, across feature branches, with complex database migrations and multi-tier architectures. In continuous settings, state-of-the-art frameworks suffer from three systemic failure modes:
+Despite these notable milestones, existing architectures exhibit acute fragility when exposed to \textbf{long-horizon, continuous software development}---the fourth evolutionary phase where autonomous teams must iteratively evolve production repositories over weeks, across feature branches, with complex database migrations and multi-tier architectures. In continuous settings, state-of-the-art frameworks suffer from four systemic failure modes spanning two orthogonal dimensions of reliability:
 
+\noindent\textbf{A. Spatial Reliability Failures:}
 \begin{enumerate}
-    \item \textbf{Workspace Contamination}: Almost all existing agent frameworks operate directly upon the root working tree. When an agent hallucinates, performs an incompatible schema migration, or terminates abruptly due to network timeouts, the working tree is left in a dirty, broken state. Subsequent agents inherit this corrupted environment, initiating cascading failures.
-    \item \textbf{Unbounded Context Inflation}: To maintain coherence, existing multi-agent systems repeatedly append historical conversations, tool outputs, and full file contents into the prompt. By turn 20, context windows frequently exceed 50,000 tokens, degrading attention accuracy (the \textit{lost-in-the-middle} phenomenon) while multiplying inference expenses.
-    \item \textbf{Lack of Transactional Delivery Guarantees}: Mainstream agent toolchains rely on verbal completion assertions (e.g., ``I have finished implementing the payment module''). Without strict compile-time gates, git-backed diff verification, and formal handoff contracts, regressions silently penetrate the baseline.
+    \item \textbf{Workspace Contamination}: Conventional agent frameworks execute mutations directly upon the root working tree. When an agent hallucinates, performs an incompatible schema migration, or aborts midway, the shared tree is left corrupted, directly compromising subsequent tasks.
+    \item \textbf{Superficial Delivery Contracts}: Mainstream frameworks rely on verbal completion assertions (e.g., ``I have finished implementing the module''). Without compile-time gates and git-backed diff verification, regressions silently penetrate master branches.
 \end{enumerate}
 
-To overcome these foundational limitations, we present \textbf{AgentFlow}, an open, local-first lifecycle orchestration engine for autonomous software teams. AgentFlow bridges the gap between unreliable model generation and production-grade software engineering through three architectural cornerstones:
+\noindent\textbf{B. Informational Reliability Failures (Two Opposing Context Pathologies):}
+\begin{enumerate}
+    \item \textbf{Context Window Inflation (Too Much Context)}: Over extended multi-step sessions, conversational histories, tool outputs, and raw file dumps accumulate monotonically into prompts. By turn 20, context windows exceed 50,000 tokens, degrading attention accuracy (the \textit{lost-in-the-middle} phenomenon) and multiplying inference costs.
+    \item \textbf{Interruption-Induced Context Loss (Context Vanishing)}: In real-world software engineering, agent processes frequently abort due to network timeouts, rate limits, session expiry, or reviewer rework reassignments. When interrupted, conventional systems lose all execution momentum: the succeeding agent receives no structured memory of what was attempted, what failed, or which tests were executed, triggering catastrophic thrashing and complete transcript replays.
+\end{enumerate}
+
+To address these twin challenges, we present \textbf{AgentFlow}. Our foundational insight is that \textit{AgentFlow treats long-horizon software development as both a spatial isolation problem and an informational continuity problem: Worktree isolation bounds the spatial propagation of failure, while persistent lifecycle state bounds the informational cost of recovery.} AgentFlow achieves this through three architectural pillars:
 
 \begin{itemize}
     \item \textbf{Physical Isolation Primitive (One-Task-One-Worktree)}: Rather than executing in a shared directory or spawning costly virtualization containers, AgentFlow treats Git Worktrees as transactional execution boundaries. Each assigned task is isolated in an independent filesystem worktree tied to its specific DAG feature branch. Failures and rejections are atomically pruned, preventing uncommitted regressions from leaking into the root tree.
@@ -206,7 +212,7 @@ C_{\mathrm{scope}}(T_i) &= \mathbf{1}[\Delta_i \setminus \mathcal{O}(T_i) \neq \
 C_{\mathrm{prop}}(T_i, T_{i+1}) &= \mathbf{1}[\mathrm{Replay}(T_{i+1}, S_i) \neq \mathrm{Replay}(T_{i+1}, S_i^{\mathrm{clean}})] \\
 C(T_i) &= C_{\mathrm{scope}}(T_i) \lor C_{\mathrm{prop}}(T_i, T_{i+1})
 \end{align}
-where $\Delta_i = \mathrm{StateAfter}(T_i) - \mathrm{StateBefore}(T_i)$ measures working-tree changes in the task worktree before cleanup, $\mathcal{O}(T_i)$ is a normalized set of repository-relative paths declared in the task specification (with generated artifacts and ignored build outputs governed by explicit exclusion rules), and {\mathrm{prop}}$ evaluates whether dirty residual state $ causes an otherwise passing subsequent task {i+1}$ to fail compared against a clean repository state ^{\mathrm{clean}}$. We measure {\mathrm{root}}(T_i) = \mathbf{1}[\mathrm{RootDirtyAfterCleanup}(T_i)]$ on the root repository prior to any manual reset operations.
+where $\Delta_i = \mathrm{StateAfter}(T_i) - \mathrm{StateBefore}(T_i)$ measures working-tree changes in the task worktree before cleanup, $\mathcal{O}(T_i)$ is a normalized set of repository-relative paths declared in the task specification (with generated artifacts and ignored build outputs governed by explicit exclusion rules), and $C_{\mathrm{prop}}$ evaluates whether dirty residual state $S_i$ causes an otherwise passing subsequent task $T_{i+1}$ to fail compared against a clean repository state $S_i^{\mathrm{clean}}$. We measure $C_{\mathrm{root}}(T_i) = \mathbf{1}[\mathrm{RootDirtyAfterCleanup}(T_i)]$ on the root repository prior to any manual reset operations.
 
 \subsection{Formal State Machine \& Role-Based Access Control}
 To prevent LLM hallucination from invalidating project state, AgentFlow formalizes task lifecycles as a restricted Finite State Machine (FSM):
@@ -300,15 +306,32 @@ Standard multi-agent frameworks suffer from severe token inflation because histo
 \end{itemize}
 When a Worker initializes, it queries relevant records via vector or tag retrieval (\texttt{find\_knowledge}, \texttt{find\_pitfalls}), loading only several hundred characters of targeted guidance.
 
+\subsection{Interruption Recovery via Four-State Separation}
+\label{sec:interruption_recovery}
+Crucially, AgentFlow's state persistence is engineered not merely for context compression, but to solve \textit{interruption-induced context loss}. When an agent process abruptly aborts due to API timeouts, host restarts, or session budget exhaustion, standard frameworks forfeit execution momentum, requiring expensive, lossy full-transcript replays.
+
+AgentFlow models interruption recovery as reconstructing a bounded, task-relevant operational context from four decoupled state dimensions rather than replaying the raw conversational stream:
+\begin{equation}
+\mathcal{C}_{\text{resume}}(T_i) = \mathcal{S}_{\text{lifecycle}} \oplus \mathcal{S}_{\text{repo}} \oplus \mathcal{S}_{\text{exec}} \oplus \mathcal{S}_{\text{domain}}
+\end{equation}
+where:
+\begin{itemize}
+    \item $\mathcal{S}_{\text{lifecycle}}$ (\textbf{Lifecycle State}): The authoritative FSM state ($\text{assigned}$, $\text{executing}$, $\text{rework\_needed}$) stored in SQLite.
+    \item $\mathcal{S}_{\text{repo}}$ (\textbf{Repository Physical State}): The preserved Git worktree path ($\mathcal{P}_{\text{wt}}$), target feature branch, head commit SHA, and uncommitted staging deltas.
+    \item $\mathcal{S}_{\text{exec}}$ (\textbf{Execution Records}): Micro-level Worker Diaries ($\mathcal{M}_{diary}$) and Reviewer rejection verdicts, capturing what actions succeeded and what failed.
+    \item $\mathcal{S}_{\text{domain}}$ (\textbf{Domain Knowledge}): Scoped Worker Handbooks ($\mathcal{M}_{handbook}$) providing architectural invariants and known pitfalls.
+\end{itemize}
+Upon interruption, a fresh worker agent invokes \texttt{task\_prepare\_start(resume\_targeted=true)}. The engine validates lease freshness, automatically unbinds stale agent sessions, and re-hydrates the agent directly inside the existing worktree with $\mathcal{C}_{\text{resume}}(T_i)$. This bounds the informational cost of recovery to $O(1)$ constant prompt tokens without transcript replay.
+
 \section{Empirical Evaluation}
 \label{sec:eval}
 
 We conduct an empirical evaluation to answer the following four Research Questions (RQs):
 \begin{itemize}
-    \item \textbf{RQ1 (Effectiveness)}: How effectively does AgentFlow resolve complex, multi-week software engineering tasks?
-    \item \textbf{RQ2 (Context Efficiency)}: To what extent does AgentFlow reduce token consumption and mitigate context window inflation?
-    \item \textbf{RQ3 (Isolation \& Rework)}: How does the One-Task-One-Worktree primitive perform under developer rework and execution failures?
-    \item \textbf{RQ4 (Knowledge Retention)}: Does the structured Handbook mechanism prevent the recurrence of architectural pitfalls?
+    \item \textbf{RQ1 (Effectiveness)}: How effectively does AgentFlow resolve complex, multi-week software engineering tasks across diverse repositories?
+    \item \textbf{RQ2 (Context Efficiency \& Interruption Recovery)}: How effectively does AgentFlow reduce active prompt context while preserving the task-relevant operational state required to resume interrupted work without full transcript replay?
+    \item \textbf{RQ3 (Isolation \& Rework Dynamics)}: How effectively does the One-Task-One-Worktree primitive contain developer rework, compilation regressions, and environmental crashes?
+    \item \textbf{RQ4 (Knowledge Retention)}: To what extent does the structured Handbook mechanism mitigate the recurrence of known architectural pitfalls?
 \end{itemize}
 
 \subsection{Evaluation Dataset \& Methodology}
