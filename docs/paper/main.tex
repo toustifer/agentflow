@@ -77,10 +77,12 @@ Despite these notable milestones, existing architectures exhibit acute fragility
 To overcome these foundational limitations, we present \textbf{AgentFlow}, an open, local-first lifecycle orchestration engine for autonomous software teams. AgentFlow bridges the gap between unreliable model generation and production-grade software engineering through three architectural cornerstones:
 
 \begin{itemize}
-    \item \textbf{Physical Isolation Primitive (One-Task-One-Worktree)}: Rather than executing in a shared directory or spawning costly virtualization containers, AgentFlow treats Git Worktrees as transactional execution boundaries. Each assigned task is isolated in an independent filesystem worktree tied to its specific DAG feature branch. Failures and rejections are atomically pruned, guaranteeing zero pollution of the main branch.
+    \item \textbf{Physical Isolation Primitive (One-Task-One-Worktree)}: Rather than executing in a shared directory or spawning costly virtualization containers, AgentFlow treats Git Worktrees as transactional execution boundaries. Each assigned task is isolated in an independent filesystem worktree tied to its specific DAG feature branch. Failures and rejections are atomically pruned, preventing uncommitted regressions from leaking into the root tree.
     \item \textbf{Decoupled Dual-Engine Architecture}: We cleanly separate \textit{invariant enforcement} from \textit{reactive control}. A high-performance Go engine governs the authoritative project state machine, task topologies, and role-based access control (RBAC), while an external Python Behavior Tree (BT) sidecar schedules reactive policies across Leader, Worker, and Reviewer roles.
     \item \textbf{Off-Context Multi-Tier Memory}: AgentFlow externalizes project tracking into SQLite, replacing monolithic context dumps with on-demand retrieval. Furthermore, it introduces structured \textit{Worker Handbooks} and \textit{Diaries}, capturing domain knowledge and architectural pitfalls that persist and transfer across tasks.
 \end{itemize}
+
+Recent surveys increasingly characterize software engineering agents as systems that combine planning, tool use, memory, multi-agent coordination, and lifecycle-level interaction with repositories \cite{hou2024large, fan2023large}. However, empirical evaluation remains heavily dominated by isolated issue-resolution settings. AgentFlow targets the complementary systems setting of continuous, long-horizon repository evolution, where the correctness of one task depends not only on its patch but crucially on the integrity of the execution state inherited by subsequent tasks. Our contribution is not a stronger code-generation model, but a repository-state reliability architecture that couples task-scoped Git workspaces with verifiable lifecycle transitions and recoverable delivery semantics.
 
 We evaluate AgentFlow across a longitudinal dataset mined from its authoritative production database, comprising 19 diverse software engineering repositories (including full-stack web applications, WeChat mini-programs, algorithmic trading engines, and academic systems). Our evaluation covers 82 feature DAGs, 406 tasks, 99 domain workers, and 1,451 state transitions.
 
@@ -111,7 +113,7 @@ In a conventional framework, this sequence was catastrophic:
     \item Worse, the Leader agent failed to realize that the workspace was broken, repeatedly dispatching workers that failed at initialization, consuming over 350,000 tokens in an unrecoverable infinite failure loop.
 \end{itemize}
 
-\subsection{The AgentFlow Solution}
+\subsection{The AgentFlow Solution \& Core Claims}
 Under AgentFlow's \textit{One-Task-One-Worktree} paradigm, this failure mode is inherently neutralized:
 \begin{enumerate}
     \item The payment worker was allocated an isolated worktree at \texttt{.agentflow-worktrees/InsightTutor/wx-pay}, branched from \texttt{feature/wx-pay}.
@@ -120,12 +122,38 @@ Under AgentFlow's \textit{One-Task-One-Worktree} paradigm, this failure mode is 
     \item The root repository remained green, allowing concurrent UI tasks to proceed without impedance.
 \end{enumerate}
 
+Based on this insight, we articulate three principal claims that guide our system design and evaluation:
+\begin{itemize}
+    \item \textbf{Claim 1 (Failure Mode Distinction)}: Long-horizon agentic software engineering introduces a repository-state failure mode---\textit{cross-task workspace contamination}---that is orthogonal to and uncaptured by isolated task-level pass/fail metrics.
+    \item \textbf{Claim 2 (Mechanism Validity)}: Task-scoped Git workspaces combined with state-gated delivery transitions can effectively contain accidental cross-task repository contamination under an honest-but-fallible execution model.
+    \item \textbf{Claim 3 (Empirical Feasibility)}: In both controlled benchmarks and longitudinal deployment traces, the proposed architecture significantly curbs observed contamination and recovery overhead while introducing manageable lifecycle latency.
+\end{itemize}
+
 \begin{figure*}[t]
 \centering
 \includegraphics[width=0.98\textwidth]{../../scripts/paper_eval/fig0_system_architecture.pdf}
 \caption{System architecture of AgentFlow. The deterministic Go Invariant Engine enforces role-based state transitions and data integrity, while the reactive Python Behavior Tree sidecar manages high-level lifecycle planning. The One-Task-One-Worktree primitive guarantees physical directory sandboxing and atomic rollbacks, supported by an off-context multi-tier memory hierarchy.}
 \label{fig:architecture}
 \end{figure*}
+
+\begin{table}[t]
+\centering
+\caption{Taxonomy of System Layers and AgentFlow Mechanisms}
+\label{tab:system_matrix}
+\begin{tabularx}{\columnwidth}{lXX}
+\toprule
+\textbf{System Layer} & \textbf{Conventional Research Focus} & \textbf{AgentFlow Mechanism} \\
+\midrule
+Planning & Task decomposition, DAGs & Strict DAG \& Task dependency \\
+Execution & Shell, repo-level tools & Worktree-scoped directory \\
+Coordination & Multi-agent role playing & Leader / Worker / Reviewer \\
+Verification & Tests, self-reflection & State-gated FSM transitions \\
+Recovery & Agent retry, re-prompting & Worktree prune \& rework loop \\
+Memory & Transcripts, RAG vector store & Typed Handbooks, Diaries, Pitfalls \\
+\textbf{Repo State} & \textit{Implicit / Unisolated} & \textbf{One-Task-One-Worktree} \\
+\bottomrule
+\end{tabularx}
+\end{table}
 
 \section{The AgentFlow Architecture}
 \label{sec:architecture}
@@ -456,11 +484,13 @@ Despite its demonstrated efficacy, AgentFlow entails specific engineering trade-
 \section{Related Work}
 \label{sec:related}
 
-\textbf{Conversational Multi-Agent Software Engineering}: Early autonomous multi-agent frameworks, including ChatDev \cite{qian2023communicative}, MetaGPT \cite{hong2023metagpt}, and AgentVerse \cite{chen2023agentverse}, pioneered LLM role-playing to automate the waterfall or agile development cycle. While these architectures successfully coordinate high-level conceptual designs, they lack physical execution sandboxes and formal Git-backed delivery contracts. When applied to existing, production-scale codebases, untrusted agent mutations inevitably contaminate the repository baseline.
+\textbf{1. Repository-Level Coding Agents}: Recent benchmark breakthroughs spearheaded by SWE-bench \cite{jimenez2023swebench} and NL2Repo-Bench \cite{hou2024large} have accelerated the development of coding agents that navigate multi-file repositories and generate unified patches. Tools such as SWE-Agent \cite{yang2024sweagent}, AutoCodeRover \cite{zhang2024autocoderover}, and Agentless \cite{xia2024agentless} effectively combine syntax-aware AST parsing, iterative debugging, and test execution. However, these systems are fundamentally designed around isolated, single-issue repairs. They assume that each issue evaluation executes within an ephemeral container that is discarded immediately after grading, and thus do not address the cumulative propagation of uncommitted side effects across consecutive development tasks.
 
-\textbf{Autonomous Repository-Level Issue Resolution}: The introduction of benchmark suites such as SWE-bench \cite{jimenez2023swebench} catalyzed intense innovation in single-turn autonomous problem-solving. Frameworks including SWE-Agent \cite{yang2024sweagent}, AutoCodeRover \cite{zhang2024autocoderover}, and Agentless \cite{xia2024agentless} introduced agent-computer interfaces, syntax-guided program localization, and iterative test-driven patching. However, these tools are tailored for ephemeral, isolated bug fixes. They lack mechanisms for multi-agent role handoff, project-wide dependency planning, and continuous multi-feature lifecycles spanning weeks of development.
+\textbf{2. Multi-Agent Software Engineering}: Collaborative frameworks, including ChatDev \cite{qian2023communicative}, MetaGPT \cite{hong2023metagpt}, and AgentVerse \cite{chen2023agentverse}, demonstrated that role specialization (e.g., Product Manager, Architect, Coder, Tester) improves complex problem decomposition. Nonetheless, role coordination does not equal repository-state isolation. Even when agents operate with distinct cognitive personas, existing multi-agent systems almost universally execute file mutations within a shared checkout. A syntax crash, partial migration, or abortive timeout by one agent directly corrupts the shared environment inherited by sister agents.
 
-\textbf{Sandboxing, Sandboxing Primitives, and Memory Retention}: Recent literature emphasizes the critical necessity of execution sandboxing for autonomous agents \cite{mialon2023gaia, shinn2024reflexion, packer2023memgpt}. Tools such as MemGPT \cite{packer2023memgpt} explore hierarchical prompt memory management. AgentFlow uniquely bridges these domains by uniting OS-level Git worktree transactional boundaries with structured, domain-specific handbook repositories, resolving both workspace contamination and context window decay simultaneously.
+\textbf{3. Agent Memory and Typed Context Management}: Long-term memory architectures, notably MemGPT \cite{packer2023memgpt} and Reflexion \cite{shinn2024reflexion}, explore prompt compression, hierarchical memory paging, and self-reflective verbal feedback. However, these mechanisms focus almost exclusively on cognitive context retention rather than filesystem state. An agent remembering that a database schema changed does not guarantee that the local filesystem or test database is in a clean, buildable state. AgentFlow distinguishes itself by linking memory directly to software engineering artifacts: separating conversational transcripts from typed, scoped Worker Handbooks, Diaries, and Pitfall registries.
+
+\textbf{4. Sandboxing and Execution Environments}: While full virtualization (virtual machines, Docker, or Podman containers) provides comprehensive isolation across processes, network namespaces, and filesystems \cite{mialon2023gaia}, spawning independent containers for every granular task incurs prohibitive initialization delays (8--25s) and substantial storage overhead. AgentFlow demonstrates that for non-adversarial, repository-level software development, task-scoped Git Worktrees provide a far lighter ($<200\text{ms}$), storage-deduplicated alternative with native Git-merge semantics, establishing an optimal trade-off between isolation rigor and development agility.
 
 \section{Conclusion}
 \label{sec:conclusion}
