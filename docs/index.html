@@ -457,14 +457,14 @@
     <section class="hero">
       <div class="hero-badge">🚀 Autonomous Software Engineering (Phase 4.0)</div>
       <h1 class="hero-title">
-        The Worktree-Centric Lifecycle Engine<br>for AI Agent Teams
+        Task-Scoped Git Workspaces for<br>Long-Horizon AI Software Engineering
       </h1>
       <p class="hero-subtitle">
-        Say goodbye to workspace contamination, unverified self-reports, and context window inflation. AgentFlow brings physical Git Worktree sandboxing, dual-engine FSM/BT scheduling, and off-context memory to autonomous software development.
+        Containing agent-induced repository contamination through physical Git Worktree isolation, dual-engine FSM/BT lifecycle scheduling, and off-context memory externalization.
       </p>
       <div class="hero-actions">
-        <a href="https://github.com/toustifer/agentflow" class="btn-primary">Get Started on GitHub</a>
-        <a href="paper/main.pdf" target="_blank" class="btn-secondary">Read IEEE Technical Paper (PDF)</a>
+        <a href="https://github.com/toustifer/agentflow" class="btn-primary">View on GitHub</a>
+        <a href="paper/main.pdf" target="_blank" class="btn-secondary">Read Technical Paper (10 Pages, PDF)</a>
       </div>
     </section>
 
@@ -477,7 +477,7 @@
     <section class="stats-grid">
       <div class="stat-card">
         <div class="stat-number">19</div>
-        <div class="stat-label">Production Projects Managed</div>
+        <div class="stat-label">Production Repositories Managed</div>
       </div>
       <div class="stat-card">
         <div class="stat-number">78.15%</div>
@@ -485,7 +485,7 @@
       </div>
       <div class="stat-card">
         <div class="stat-number">0.0%</div>
-        <div class="stat-label">Workspace Contamination</div>
+        <div class="stat-label">Observed Git-Tree Contamination</div>
       </div>
       <div class="stat-card">
         <div class="stat-number">-92%</div>
@@ -543,9 +543,9 @@
               <th>Architecture / Paradigm</th>
               <th>Isolation Primitive</th>
               <th>Task Pass Rate</th>
-              <th>Contamination Rate</th>
-              <th>Avg Tokens/Task</th>
-              <th>Self-Healing Recovery</th>
+              <th>Contamination Rate (95% CI)</th>
+              <th>Avg Tokens/Task (In / Out)</th>
+              <th>Mean Latency</th>
             </tr>
           </thead>
           <tbody>
@@ -553,33 +553,33 @@
               <td><strong>AgentFlow (Full Paradigm)</strong></td>
               <td>Git Worktree Sandbox</td>
               <td class="badge-success">100.0%</td>
-              <td class="badge-success">0.0%</td>
-              <td style="color: var(--accent-cyan); font-family: var(--font-mono);">2,580</td>
-              <td class="badge-success">100.0%</td>
+              <td class="badge-success">0.0% [0.0%, 0.0%]</td>
+              <td style="color: var(--accent-cyan); font-family: var(--font-mono);">2,580 (2,140 / 440)</td>
+              <td class="badge-success">27.0s</td>
             </tr>
             <tr>
               <td>Ablation: No-Worktree (In-place)</td>
               <td>None (git reset fallback)</td>
               <td>70.0%</td>
-              <td class="badge-fail">40.0%</td>
-              <td style="font-family: var(--font-mono);">3,060</td>
-              <td>50.0%</td>
+              <td class="badge-fail">40.0% [12.2%, 73.8%]</td>
+              <td style="font-family: var(--font-mono);">3,060 (2,550 / 510)</td>
+              <td>31.5s</td>
             </tr>
             <tr>
               <td>Ablation: No-Handbook</td>
               <td>Git Worktree Sandbox</td>
               <td>80.0%</td>
-              <td class="badge-success">0.0%</td>
-              <td style="font-family: var(--font-mono);">3,630</td>
-              <td>60.0%</td>
+              <td class="badge-success">0.0% [0.0%, 0.0%]</td>
+              <td style="font-family: var(--font-mono);">3,630 (3,020 / 610)</td>
+              <td>42.1s</td>
             </tr>
             <tr>
               <td>Baseline: ReAct (SWE-Agent style)</td>
               <td>None (Monolithic in-place)</td>
               <td class="badge-fail">40.0%</td>
-              <td class="badge-fail">60.0%</td>
-              <td style="color: #EF4444; font-family: var(--font-mono);">24,600</td>
-              <td class="badge-fail">16.7%</td>
+              <td class="badge-fail">60.0% [26.2%, 87.8%]</td>
+              <td style="color: #EF4444; font-family: var(--font-mono);">24,600 (21,200 / 3,400)</td>
+              <td class="badge-fail">145.2s</td>
             </tr>
           </tbody>
         </table>

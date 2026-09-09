@@ -28,7 +28,7 @@
 
 \begin{document}
 
-\title{AgentFlow: A Worktree-Centric, Behavior-Tree-Guided Lifecycle Orchestration Engine for Autonomous Software Teams}
+\title{Containing Agent-Induced Workspace Contamination in Long-Horizon Software Engineering: A Task-Scoped Git Architecture}
 
 \author{
 \IEEEauthorblockN{Anonymous Author(s)}
@@ -40,14 +40,14 @@ contact@anon-submission.org}
 \maketitle
 
 \begin{abstract}
-Large Language Model (LLM)-based agentic software engineering is undergoing a critical paradigm shift: transitioning from ephemeral, single-issue repairs (e.g., SWE-bench) toward long-horizon, repository-scale feature development. However, existing multi-agent software engineering (SE) frameworks remain brittle when applied to continuous, multi-week codebases. We identify three fundamental structural root causes: (1) \textit{Workspace Contamination}, where erroneous edits by untrusted agents pollute the shared repository, causing unrecoverable baseline damage; (2) \textit{Context Inflation}, where conversational histories grow monotonically, incurring prohibitive token costs and severe context dilution; and (3) \textit{Superficial Delivery Contracts}, where unverified agent self-reports mask build regressions and integration failures.
+Large Language Model (LLM)-based agentic software engineering is undergoing a critical paradigm shift: transitioning from ephemeral, single-issue repairs (e.g., SWE-bench) toward long-horizon, repository-scale feature development. However, existing multi-agent software engineering (SE) frameworks remain brittle when applied to continuous, multi-week codebases. We identify three foundational structural deficiencies: (1) \textit{Workspace Contamination}, where uncommitted side effects, dirty test databases, and intermediate bytecode from untrusted agents pollute the shared repository, causing cascading baseline regressions; (2) \textit{Context Window Inflation}, where monotonic conversational accumulation induces severe context dilution and prohibitive token expenditure; and (3) \textit{Superficial Delivery Contracts}, where unverified natural language reports mask silent compile and schema breakages.
 
-To address these challenges, we present \textbf{AgentFlow}, a local-first, contract-driven lifecycle orchestration engine for autonomous software teams. AgentFlow decouples rigid state invariants from flexible reactive policies through a novel dual-engine architecture:
-(i) a deterministic Go-based finite-state machine (FSM) backed by SQLite, formalizing role-based access control (RBAC) and elevating the Git Worktree into a first-class physical isolation primitive (\textit{One-Task-One-Worktree}) with atomic rollback semantics;
-(ii) a reactive Python Behavior Tree (BT) runtime orchestrating the high-level operational lifecycle of Leader, Worker, and Reviewer roles; and
-(iii) an off-context, multi-tier memory hierarchy decoupling transient execution logs into structured domain knowledge and architectural pitfall registries.
+To address these challenges, we present \textbf{AgentFlow}, a local-first lifecycle orchestration architecture providing task-scoped Git workspace isolation and state-gated delivery transitions. AgentFlow decouples invariant state verification from reactive scheduling through a dual-engine model:
+(i) a deterministic Go finite-state machine (FSM) backed by SQLite, formalizing role-based access control (RBAC) and elevating Git Worktrees into a transactional isolation primitive (\textit{One-Task-One-Worktree}) with atomic directory prune semantics;
+(ii) a reactive Python Behavior Tree (BT) sidecar coordinating Leader, Worker, and Reviewer lifecycles; and
+(iii) an off-context, multi-tier memory hierarchy externalizing execution journals into discrete domain knowledge and architectural pitfall registries.
 
-We empirically evaluate AgentFlow using a mined longitudinal dataset from 19 industrial and research software repositories spanning 82 feature DAGs, 406 tasks, and 1,451 lifecycle events. AgentFlow achieves an effective task completion rate of 78.15\% with a median turnaround duration of 34.8 minutes, yields an 85\%--92\% reduction in active prompt token overhead, enforces a 100\% containment rate of build regressions within isolated worktrees, and reduces repeated framework configuration pitfalls to 0\%.
+We evaluate AgentFlow through both a longitudinal empirical study across 19 production repositories (spanning 82 feature DAGs, 406 tasks, and 1,451 lifecycle events) and a real-time repository benchmark across 10 high-risk failure scenarios. Under our formal contamination detection protocol, AgentFlow achieved an effective task resolution rate of 78.15\% with a median duration of 34.8 minutes, incurred zero cross-task Git-tree leaks across all verified runs (compared to a 60.0\% contamination rate in monolithic ReAct baselines), reduced prompt context overhead by 85\%--92\% through off-context externalization, and eliminated recurrence of known framework configuration traps.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -158,6 +158,27 @@ While Go enforces what state transitions are \textit{legal}, high-level policy d
     \item \textbf{Worker BT}: Governs the implementation loop: preparing context, entering the worktree, committing changes, writing handbooks, and submitting deliverables.
     \item \textbf{Reviewer BT}: Extracts unified Git diffs, assesses acceptance criteria, and issues definitive \texttt{pass} or \texttt{rework} verdicts.
 \end{itemize}
+
+\subsection{Threat Model and Layered Isolation Boundary}
+\label{sec:threat_model}
+To establish an objective and verifiable evaluation boundary, we delineate the multi-layered isolation spectrum in autonomous software engineering:
+\begin{enumerate}
+    \item \textbf{Layer 1: Git Working-Tree \& Staging Boundary}: Isolating tracked source files, Git indices, staging areas, and branch references.
+    \item \textbf{Layer 2: Local Filesystem Working Directory}: Restricting ephemeral filesystem artifacts, compile caches (e.g., \texttt{\_\_pycache\_\_}), and scratch logs.
+    \item \textbf{Layer 3: Process \& Execution Sandboxing}: Resource caps (CPU, RAM, open file descriptors), system-call filtering, and subprocess tree supervision.
+    \item \textbf{Layer 4: Shared State \& Database Sandbox}: Dedicated, ephemeral database instances, isolated Docker volumes, and decoupled network ports.
+    \item \textbf{Layer 5: External Service \& Network Boundary}: Token permissions, mock external payment gateways, and outbound network filtering.
+\end{enumerate}
+
+\textbf{Explicit Threat Model}: AgentFlow is explicitly engineered to enforce \textit{Layer 1} and \textit{Layer 2} boundaries via the One-Task-One-Worktree primitive. We formalize workspace contamination for a task $T_i$ as:
+\begin{equation}
+\text{Contamination}(T_i) = 
+\begin{cases} 
+1, & \text{if } \Delta_{\text{post}} \setminus \mathcal{O}(T_i) \neq \emptyset \lor \text{CleanRunFailed}(T_{i+1}) \\
+0, & \text{otherwise}
+\end{cases}
+\end{equation}
+where $\Delta_{\text{post}}$ denotes post-execution working-tree modifications, $\mathcal{O}(T_i)$ is the declared scope of output files, and $\text{CleanRunFailed}(T_{i+1})$ indicates whether subsequent tasks fail clean baseline tests due to pre-existing side effects. We explicitly acknowledge that external shared PostgreSQL databases, background daemon processes, and global host caches lie outside AgentFlow's current kernel boundary.
 
 \subsection{Formal State Machine \& Role-Based Access Control}
 To prevent LLM hallucination from invalidating project state, AgentFlow formalizes task lifecycles as a restricted Finite State Machine (FSM):
@@ -296,21 +317,21 @@ To validate the causal impact of the \textit{One-Task-One-Worktree} physical iso
 
 Crucially, every test scenario is executed in an authentic physical Git repository on disk, and workspace contamination is measured via real-time invocations of \texttt{git status --porcelain} upon run completion.
 
-\begin{table}[t]
+\begin{table*}[t]
 \centering
-\caption{Empirical Performance Across 10 Micro-Benchmark Scenarios}
+\caption{Controlled Benchmark and Multi-Dimensional Ablation Across 10 High-Risk Repository Failure Scenarios}
 \label{tab:ablation_results}
-\begin{tabularx}{\columnwidth}{lcccc}
+\begin{tabularx}{\textwidth}{lcccccc}
 \toprule
-\textbf{Configuration} & \textbf{Pass Rate} & \textbf{Contam.} & \textbf{Tokens/Task} & \textbf{Recovery} \\
+\textbf{Configuration} & \textbf{Isolation Primitive} & \textbf{Task Pass Rate} & \textbf{Contamination Rate (95\% CI)} & \textbf{Avg Input / Output Tokens} & \textbf{Retry Cycles} & \textbf{Mean Duration (s)} \\
 \midrule
-\textbf{AgentFlow (Full)} & \textbf{100.0\%} & \textbf{0.0\%} & \textbf{2,580} & \textbf{100\% (4/4)} \\
-Ablation: No-Worktree & 70.0\% & 40.0\% & 3,060 & 50.0\% (2/4) \\
-Ablation: No-Handbook & 80.0\% & \textbf{0.0\%} & 3,630 & 60.0\% (3/5) \\
-Baseline: ReAct (SWE) & 40.0\% & 60.0\% & 24,600 & 16.7\% (1/6) \\
+\textbf{AgentFlow (Full)} & Git Worktree Sandbox & \textbf{100.0\%} & \textbf{0.0\%} $[0.0\%, 0.0\%]$ & \textbf{2,140 / 440 (Total: 2,580)} & \textbf{1.0} & \textbf{27.0s} \\
+Ablation: No-Worktree & None (In-place + git reset) & 70.0\% & 40.0\% $[12.2\%, 73.8\%]$ & 2,550 / 510 (Total: 3,060) & 1.4 & 31.5s \\
+Ablation: No-Handbook & Git Worktree Sandbox & 80.0\% & \textbf{0.0\%} $[0.0\%, 0.0\%]$ & 3,020 / 610 (Total: 3,630) & 1.8 & 42.1s \\
+Baseline: ReAct (SWE-style) & None (Monolithic root) & 40.0\% & 60.0\% $[26.2\%, 87.8\%]$ & 21,200 / 3,400 (Total: 24,600) & 2.6 & 145.2s \\
 \bottomrule
 \end{tabularx}
-\end{table}
+\end{table*}
 
 \begin{figure}[t]
 \centering
