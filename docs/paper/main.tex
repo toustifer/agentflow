@@ -47,7 +47,7 @@ To address these challenges, we present \textbf{AgentFlow}, a local-first lifecy
 (ii) a reactive Python Behavior Tree (BT) sidecar coordinating Leader, Worker, and Reviewer lifecycles; and
 (iii) an off-context, multi-tier memory hierarchy externalizing execution journals into discrete domain knowledge and architectural pitfall registries.
 
-We evaluate AgentFlow through both a longitudinal empirical study across 19 production repositories (spanning 82 feature DAGs, 406 tasks, and 1,451 lifecycle events) and a real-time repository benchmark across 10 high-risk failure scenarios. Under our formal contamination detection protocol, AgentFlow achieved an effective task resolution rate of 78.15\% with a median duration of 34.8 minutes, incurred zero cross-task Git-tree leaks across all verified runs (compared to a 60.0\% contamination rate in monolithic ReAct baselines), reduced prompt context overhead by 85\%--92\% through off-context externalization, and eliminated recurrence of known framework configuration traps.
+We evaluate AgentFlow through both a longitudinal empirical study across 19 production repositories (spanning 82 feature DAGs, 406 tasks, and 1,451 lifecycle events) and a real-time repository benchmark across 10 high-risk failure scenarios. Under our formal contamination detection protocol, AgentFlow achieved an effective task resolution rate of 78.15\% with a median duration of 34.8 minutes, incurred zero cross-task Git-tree leaks across all verified runs (compared to a 60.0\% contamination rate in monolithic ReAct baselines), reduced prompt context overhead by 85\%--92\% through off-context externalization, and observed no recurrence for the instrumented pitfalls in the evaluated traces.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -159,26 +159,26 @@ While Go enforces what state transitions are \textit{legal}, high-level policy d
     \item \textbf{Reviewer BT}: Extracts unified Git diffs, assesses acceptance criteria, and issues definitive \texttt{pass} or \texttt{rework} verdicts.
 \end{itemize}
 
-\subsection{Threat Model and Layered Isolation Boundary}
+\subsection{Threat Model and Layered Isolation Spectrum}
 \label{sec:threat_model}
-To establish an objective and verifiable evaluation boundary, we delineate the multi-layered isolation spectrum in autonomous software engineering:
+To establish an objective, verifiable evaluation boundary, we delineate the multi-layered isolation spectrum in autonomous software engineering:
 \begin{enumerate}
-    \item \textbf{Layer 1: Git Working-Tree \& Staging Boundary}: Isolating tracked source files, Git indices, staging areas, and branch references.
-    \item \textbf{Layer 2: Local Filesystem Working Directory}: Restricting ephemeral filesystem artifacts, compile caches (e.g., \texttt{\_\_pycache\_\_}), and scratch logs.
-    \item \textbf{Layer 3: Process \& Execution Sandboxing}: Resource caps (CPU, RAM, open file descriptors), system-call filtering, and subprocess tree supervision.
+    \item \textbf{Layer 1: Git Worktree State Boundary}: Each task receives a dedicated working directory and worktree-specific index. The repository object database and repository-level metadata remain shared unless separately isolated.
+    \item \textbf{Layer 2: Task-Scoped Process Directory}: Enforcing compliant task execution within the declared worktree path at the AgentFlow tool/process interface. It does not provide an operating-system-level sandbox against an adversarial or unrestricted process.
+    \item \textbf{Layer 3: Process Sandboxing}: Operating system-level cgroups, namespaces, and syscall filtering (e.g., Landlock/seccomp).
     \item \textbf{Layer 4: Shared State \& Database Sandbox}: Dedicated, ephemeral database instances, isolated Docker volumes, and decoupled network ports.
     \item \textbf{Layer 5: External Service \& Network Boundary}: Token permissions, mock external payment gateways, and outbound network filtering.
 \end{enumerate}
 
-\textbf{Explicit Threat Model}: AgentFlow is explicitly engineered to enforce \textit{Layer 1} and \textit{Layer 2} boundaries via the One-Task-One-Worktree primitive. We formalize workspace contamination for a task $T_i$ as:
-\begin{equation}
-\text{Contamination}(T_i) = 
-\begin{cases} 
-1, & \text{if } \Delta_{\text{post}} \setminus \mathcal{O}(T_i) \neq \emptyset \lor \text{CleanRunFailed}(T_{i+1}) \\
-0, & \text{otherwise}
-\end{cases}
-\end{equation}
-where $\Delta_{\text{post}}$ denotes post-execution working-tree modifications, $\mathcal{O}(T_i)$ is the declared scope of output files, and $\text{CleanRunFailed}(T_{i+1})$ indicates whether subsequent tasks fail clean baseline tests due to pre-existing side effects. We explicitly acknowledge that external shared PostgreSQL databases, background daemon processes, and global host caches lie outside AgentFlow's current kernel boundary.
+\textbf{Threat Model}: We assume an \textit{honest-but-fallible} agent that may generate syntactically or logically incorrect code, leave uncommitted changes, terminate unexpectedly due to context limits or network timeouts, or misuse permitted tools, but does not intentionally attempt to escape its declared workspace. AgentFlow enforces task-scoped Git working-tree state and process working-directory conventions. It is not an operating-system-level sandbox and does not protect against a privileged or adversarial process that writes through absolute paths, symlinks, shared caches, external databases, or background daemons.
+
+\textbf{Formal Definition of Contamination}: We formalize workspace contamination by decomposing it into task-scope violations and cross-task regression propagation:
+\begin{align}
+C_{\mathrm{scope}}(T_i) &= \mathbf{1}[\Delta_i \setminus \mathcal{O}(T_i) \neq \emptyset] \\
+C_{\mathrm{prop}}(T_i, T_{i+1}) &= \mathbf{1}[\mathrm{Replay}(T_{i+1}, S_i) \neq \mathrm{Replay}(T_{i+1}, S_i^{\mathrm{clean}})] \\
+C(T_i) &= C_{\mathrm{scope}}(T_i) \lor C_{\mathrm{prop}}(T_i, T_{i+1})
+\end{align}
+where $\Delta_i = \mathrm{StateAfter}(T_i) - \mathrm{StateBefore}(T_i)$ measures working-tree changes in the task worktree before cleanup, $\mathcal{O}(T_i)$ is a normalized set of repository-relative paths declared in the task specification (with generated artifacts and ignored build outputs governed by explicit exclusion rules), and {\mathrm{prop}}$ evaluates whether dirty residual state $ causes an otherwise passing subsequent task {i+1}$ to fail compared against a clean repository state ^{\mathrm{clean}}$. We measure {\mathrm{root}}(T_i) = \mathbf{1}[\mathrm{RootDirtyAfterCleanup}(T_i)]$ on the root repository prior to any manual reset operations.
 
 \subsection{Formal State Machine \& Role-Based Access Control}
 To prevent LLM hallucination from invalidating project state, AgentFlow formalizes task lifecycles as a restricted Finite State Machine (FSM):
@@ -201,7 +201,7 @@ Crucially, all other transitions are rejected with authorization errors. For ins
 \begin{figure*}[t]
 \centering
 \includegraphics[width=0.98\textwidth]{worktree_isolation_concept.jpg}
-\caption{\textbf{The One-Task-One-Worktree physical isolation mechanism}: Each assigned task executes within a disposable worktree sandbox branching from its DAG feature branch. Unverified commits, compilation failures, and partial migration states are atomically pruned upon review rejection (\texttt{rework\_needed}), guaranteeing zero contamination of the root codebase.}
+\caption{\textbf{The One-Task-One-Worktree physical isolation mechanism}: Each assigned task executes within a disposable worktree sandbox branching from its DAG feature branch. Unverified commits, compilation failures, and partial migration states are atomically pruned upon review rejection (\texttt{rework\_needed}), preventing task-local uncommitted changes from leaking into the root working tree under compliant execution assumptions.}
 \label{fig:worktree_concept}
 \end{figure*}
 
@@ -323,14 +323,19 @@ Crucially, every test scenario is executed in an authentic physical Git reposito
 \label{tab:ablation_results}
 \begin{tabularx}{\textwidth}{lcccccc}
 \toprule
-\textbf{Configuration} & \textbf{Isolation Primitive} & \textbf{Task Pass Rate} & \textbf{Contamination Rate (95\% CI)} & \textbf{Avg Input / Output Tokens} & \textbf{Retry Cycles} & \textbf{Mean Duration (s)} \\
+\textbf{Configuration} & \textbf{Isolation Primitive} & \textbf{Task Pass Rate} & \textbf{Contamination Rate (95\% CI)} & \textbf{Mean Tokens per Scenario (In / Out)} & \textbf{Retry Cycles} & \textbf{Mean Latency (s)} \\
 \midrule
-\textbf{AgentFlow (Full)} & Git Worktree Sandbox & \textbf{100.0\%} & \textbf{0.0\%} $[0.0\%, 0.0\%]$ & \textbf{2,140 / 440 (Total: 2,580)} & \textbf{1.0} & \textbf{27.0s} \\
-Ablation: No-Worktree & None (In-place + git reset) & 70.0\% & 40.0\% $[12.2\%, 73.8\%]$ & 2,550 / 510 (Total: 3,060) & 1.4 & 31.5s \\
-Ablation: No-Handbook & Git Worktree Sandbox & 80.0\% & \textbf{0.0\%} $[0.0\%, 0.0\%]$ & 3,020 / 610 (Total: 3,630) & 1.8 & 42.1s \\
-Baseline: ReAct (SWE-style) & None (Monolithic root) & 40.0\% & 60.0\% $[26.2\%, 87.8\%]$ & 21,200 / 3,400 (Total: 24,600) & 2.6 & 145.2s \\
+\textbf{AgentFlow (Full)} & Git Worktree Sandbox & \textbf{100.0\%} & \textbf{0.0\%} $[0.0\%, 30.9\%]$ & \textbf{2,580} (2,140 / 440) & \textbf{1.0} & \textbf{27.0s} \\
+Ablation: No-Worktree & None (In-place + git reset) & 70.0\% & 40.0\% $[12.2\%, 73.8\%]$ & 3,060 (2,550 / 510) & 1.4 & 31.5s \\
+Ablation: No-Handbook & Git Worktree Sandbox & 80.0\% & \textbf{0.0\%} $[0.0\%, 30.9\%]$ & 3,630 (3,020 / 610) & 1.8 & 42.1s \\
+Baseline: ReAct (SWE-style) & None (Monolithic root) & 40.0\% & 60.0\% $[26.2\%, 87.8\%]$ & 24,600 (21,200 / 3,400) & 2.6 & 145.2s \\
 \bottomrule
 \end{tabularx}
+\vspace{0.1cm}
+\begin{minipage}{\textwidth}
+\footnotesize
+\textit{Note}: All rates evaluate =10$ scenario runs per configuration using identical initial commit snapshots, task specifications, model targets (Gemini 2.5/DeepSeek), and tool budgets. 95\% confidence intervals are two-sided exact Clopper--Pearson binomial intervals (e.g., /10$ yields $[0.0\%, 30.9\%]$). Contamination is measured on the repository prior to any reset or rollback operation. Token counts represent total prompt input and model completion tokens per completed scenario.
+\end{minipage}
 \end{table*}
 
 \begin{figure}[t]
@@ -344,7 +349,7 @@ As presented in Table~\ref{tab:ablation_results} and Fig.~\ref{fig:ablation_char
 \begin{enumerate}
     \item \textbf{Physical Isolation Eliminates Persistent Dirt}: In our real-time LLM testbed execution of scenario TC-01 (bcrypt boundary bug) and TC-03 (Test DB corruption), the \textit{Base-ReAct} and \textit{No-Worktree} in-place agents successfully generated candidate code but permanently polluted the root repository index, leaving behind untracked bytecode caches and uncommitted files (\texttt{git status --porcelain}: \texttt{['M auth.py', '?? \_\_pycache\_\_/']}). In multi-task pipelines, these uncommitted artifacts block future branch checkouts. In contrast, AgentFlow executed the genuine LLM code entirely inside the isolated worktree; upon merge resolution or task rollback, the root repository status was verified to be completely clean (\texttt{git status --porcelain}: $\emptyset$).
     \item \textbf{Mitigation of Cascading ReAct Crashes}: The monolithic ReAct baseline left dirty working trees in 60.0\% of runs (e.g., leaving \texttt{M test.db} and \texttt{?? react\_temp\_patch.diff}), causing cascading test failures. Moreover, its lack of an off-context state store ballooned token consumption to 24,600 tokens/task ($9.5\times$ higher than AgentFlow).
-    \item \textbf{Handbooks Prevent Repeated Traps}: Disabling handbooks (\textit{No-Handbook}) increased token consumption by 40.7\% (2,580 vs. 3,630) because agents repeatedly fell into runtime quirks (e.g., \texttt{bcrypt} 72-byte truncation) before discovering solutions via trial-and-error.
+    \item \textbf{Handbooks Associated with Lower Retries and Token Expenditure}: Disabling handbooks (\textit{No-Handbook}) increased token consumption by 40.7\% (2,580 vs. 3,630) because agents repeatedly fell into runtime quirks (e.g., \texttt{bcrypt} 72-byte truncation) before discovering solutions via trial-and-error.
 \end{enumerate}
 
 \subsection{In-Depth Case Studies from Industrial Deployments}
@@ -460,7 +465,7 @@ Despite its demonstrated efficacy, AgentFlow entails specific engineering trade-
 \section{Conclusion}
 \label{sec:conclusion}
 
-In this paper, we addressed the systemic failure modes of current multi-agent software engineering systems: workspace contamination, unbounded context inflation, and unverified delivery. We introduced \textbf{AgentFlow}, an orchestration engine characterized by a dual-engine Go FSM and Python Behavior Tree architecture, the \textit{One-Task-One-Worktree} physical isolation primitive, and an off-context multi-tier memory store. Empirical evaluation across 19 real-world projects and 1,451 events demonstrates that AgentFlow delivers a 78.15\% effective task resolution rate, reduces prompt context consumption by up to 92\%, guarantees 100\% containment of build regressions, and eliminates architectural pitfall recurrence.
+In this paper, we addressed the systemic failure modes of current multi-agent software engineering systems: workspace contamination, unbounded context inflation, and unverified delivery. We introduced \textbf{AgentFlow}, an orchestration engine characterized by a dual-engine Go FSM and Python Behavior Tree architecture, the \textit{One-Task-One-Worktree} physical isolation primitive, and an off-context multi-tier memory store. Empirical evaluation across 19 real-world projects and 1,451 events demonstrates that AgentFlow delivers a 78.15\% effective task resolution rate, reduces prompt context consumption by up to 92\%, guarantees 100\% containment of build regressions, and mitigated the recurrence of instrumented architectural pitfalls across the observed traces.
 
 \bibliographystyle{IEEEtran}
 \begin{thebibliography}{00}
