@@ -1,0 +1,11 @@
+{
+  "name": "@toustifer/agentflow",
+  "version": "0.1.0",
+  "description": "Lifecycle orchestration engine for AI agent teams on DeepSeek Harness with task-scoped Git worktrees, state-gated delivery transitions, and off-context memory.",
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./dsh-agentflow/cordis.patch.yml"
+    }
+  }
+}

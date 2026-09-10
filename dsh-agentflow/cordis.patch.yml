@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-agentflow
+      name: '@toustifer/dsh-agentflow'

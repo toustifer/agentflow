@@ -1,0 +1,271 @@
+# agentflow Setup Guide
+
+> Canonical public mirror: https://hub.stifer.xyz/agentflow-setup.md  
+> **Default install = download Release (no Go, no git clone).**  
+> Updated: 2026-08-05 · Release **v0.2.6**
+
+## 概述
+
+agentflow 本地侧是 **三件套**（缺一不可）：
+
+| 组件 | 作用 |
+|------|------|
+| **Skill** `~/.claude/skills/agentflow/` | `/agentflow`、flows、hooks（含 MCP GATE） |
+| **MCP 二进制** + Host stdio | `mcp__agentflow__*` 工具 |
+| **Sticky hooks** | `/agentflow on` 跨轮注入规则 |
+
+**本地 MCP 服务器 = Go 二进制 `agentflow stdio`（预编译下载）。**  
+不要再走 `agent-company` + Node `agentflow-mcp.mjs` 主路径（已废弃）。
+
+## 验收三层（不要混）
+
+| 层 | 检查 | 通过才算 |
+|----|------|----------|
+| 配置 | Claude/Codex 配置中都有 agentflow | 仅「写过配置」 |
+| 进程/UI | `/mcp` 与 `codex mcp list` 列出 agentflow 且 **非 failed** | 用户侧必过 |
+| **会话工具** | 模型本轮能调用 `mcp__agentflow__flow_ping` | **唯一业务验收** |
+
+`claude mcp list` Connected、`codex mcp list` enabled、`agentflow:on` statusline、Bash 调 stdio 写库 —— **都不算会话工具已加载**。
+
+MCP 未通过时：agent 必须停并让用户修 MCP，**禁止** JSON-RPC / sqlite 旁路继续 goal。
+
+## 推荐安装：一键下载（macOS / Linux）
+
+需要：`curl`、`tar`、Node 18+（hooks）。**不需要 Go / git。**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.sh | bash
+```
+
+指定版本 / 自动写入 MCP 配置：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.sh \
+  | VERSION=v0.2.6 bash -s -- --write-config --write-codex-config
+```
+
+脚本会：
+
+1. 下载 `skill.tgz` + 本机 arch 的预编译二进制（GitHub Release）  
+2. 安装到 `~/.claude/skills/agentflow/`（含 `bin/agentflow`）  
+3. 校验 `MCP GATE` 存在  
+4. `--write-config` 写入 Claude，`--write-codex-config` 通过 Codex CLI 写入同一个二进制
+5. 打印 sticky hooks 片段
+
+然后：
+
+1. 若未用写入参数：按脚本输出分别注册 Claude 与 Codex
+2. 把 sticky hooks 合并进 `~/.claude/settings.json`（**不要整文件覆盖**）  
+3. **完全退出并重启 Claude Code 和 Codex**
+4. 按下方「验证」清单过一遍  
+
+## Windows（PowerShell）
+
+```powershell
+irm https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.ps1 | iex
+# 或:
+# $script = irm 'https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.ps1'
+# & ([scriptblock]::Create($script)) -Version 'v0.2.6' -WriteConfig -WriteCodexConfig
+```
+
+装到 `%USERPROFILE%\.claude\skills\agentflow\`，二进制为 `bin\agentflow.exe`。
+
+## 手动下载（不用 install 脚本）
+
+Release：https://github.com/toustifer/agentflow/releases/tag/v0.2.6
+
+| 资产 | 用途 |
+|------|------|
+| `skill.tgz` | skill + hooks + flows（**必下**） |
+| `agentflow-darwin-arm64` | Apple Silicon |
+| `agentflow-darwin-amd64` | Intel Mac |
+| `agentflow-linux-amd64` | Linux x64 |
+| `agentflow-windows-amd64.exe` | Windows x64 |
+
+```bash
+VERSION=v0.2.6
+BASE=https://github.com/toustifer/agentflow/releases/download/$VERSION
+DEST=~/.claude/skills/agentflow
+mkdir -p "$DEST/bin"
+curl -fsSL "$BASE/skill.tgz" | tar -xz -C /tmp
+rsync -a /tmp/agentflow/ "$DEST/"
+# pick arch:
+curl -fsSL "$BASE/agentflow-darwin-arm64" -o "$DEST/bin/agentflow"
+chmod +x "$DEST/bin/agentflow"
+```
+
+`~/.claude.json`：
+
+```json
+{
+  "mcpServers": {
+    "agentflow": {
+      "command": "/Users/YOU/.claude/skills/agentflow/bin/agentflow",
+      "args": ["stdio"],
+      "type": "stdio"
+    }
+  }
+}
+```
+
+`~/.claude/settings.json` sticky（合并）：
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/YOU/.claude/skills/agentflow/hooks/mode-inject.js",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "node /Users/YOU/.claude/skills/agentflow/hooks/statusline.js",
+    "refreshInterval": 5
+  }
+}
+```
+
+## 验证（全部过才算装好）
+
+1. **完全退出并重启 Claude Code 和 Codex**
+2. Claude `/mcp` → 有 `agentflow` 且 **不是 failed**
+3. `codex mcp list` → `agentflow` 为 enabled
+4. 两边的新会话都能调用 `mcp__agentflow__flow_ping`（**唯一业务验收**）
+5. `grep -n "MCP GATE" ~/.claude/skills/agentflow/hooks/mode-lib.js` 有命中
+6. `/agentflow on`；statusline 可出现 `MCP:cfg|missing|broken`
+7. MCP 不可用时 agent **必须停**，禁止 Bash/JSON-RPC/sqlite 旁路
+
+| Symptom | Fix |
+|---------|-----|
+| No `/agentflow` | skill 未装到 `~/.claude/skills/agentflow` |
+| `/mcp` 无 agentflow / failed | 二进制路径错、缺 `args:["stdio"]`、需重启 |
+| `MCP GATE` grep 无 | 仍是旧 skill；重跑 install 或下新 `skill.tgz` |
+| 模型 Bash 调 stdio | **无效**；修 MCP，不要接受旁路 |
+
+## 升级 / 版本检查
+
+在 Claude 里：
+
+```text
+/agentflow update
+```
+
+会**同时**检查：
+
+| 组件 | 查哪里 |
+|------|--------|
+| Skill | `~/.claude/skills/agentflow/VERSION` |
+| MCP 二进制 | `agentflow version`（路径来自 `~/.claude.json` → `mcpServers.agentflow`） |
+| 最新版 | GitHub `releases/latest` |
+| 会话是否已加载新 MCP | `flow_ping` 的 `version` 字段（升级后需完全重启） |
+
+落后或 skill/MCP 版本不一致时，脚本会打印同一 `VERSION=` 的一键安装命令。
+
+CLI 等价：
+
+```bash
+node ~/.claude/skills/agentflow/hooks/version-check.js
+# 或
+node ~/.claude/skills/agentflow/hooks/mode-cli.js update
+```
+
+手动升级：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.sh \
+  | VERSION=v0.2.6 bash -s -- --write-config --write-codex-config
+```
+
+然后**完全退出并重启 Claude Code 和 Codex**，再跑一次 `/agentflow update`。
+
+## Sticky 使用
+
+```text
+/agentflow on
+/agentflow status
+/agentflow off
+```
+
+`agentflow:on` **只表示 mode 开了**，不表示 MCP 可用。
+
+## 附录：开发者从源码构建（非默认）
+
+仅当你要改引擎或无 Release 时：
+
+```bash
+git clone https://github.com/toustifer/agentflow.git && cd agentflow
+rsync -a skills/agentflow/ ~/.claude/skills/agentflow/
+mkdir -p ~/.claude/skills/agentflow/bin
+go build -o ~/.claude/skills/agentflow/bin/agentflow ./cmd/agentflow/
+# 发布者：
+# VERSION=v0.2.6 bash scripts/build-release.sh
+# gh release create v0.2.6 dist/agentflow-* dist/skill.tgz
+```
+
+## Codex CLI（同一二进制）
+
+推荐让安装器自动注册：
+
+```bash
+bash scripts/install.sh --write-config --write-codex-config
+```
+
+也可以手动注册或覆盖旧路径：
+
+```bash
+codex mcp add agentflow -- "$HOME/.claude/skills/agentflow/bin/agentflow" stdio
+codex mcp list
+```
+
+Hub：https://hub.stifer.xyz/codex-setup.md
+
+## 已废弃（勿再教）
+
+- 默认路径要求用户 `git clone` + `go build`  
+- `agent-company` + `agentflow-mcp.mjs` + npm SDK  
+- 无 `args: ["stdio"]` 的裸 command  
+- 把 `claude mcp list` Connected 当会话可用  
+- MCP 失败时 Bash JSON-RPC / sqlite 旁路  
+
+## 可选：Hub 团队 MCP + namespace 绑定
+
+```json
+"hub": { "type": "http", "url": "https://hub.stifer.xyz/mcp" }
+```
+
+**产品模型：一个 namespace ↔ 一个 Hub 团队（4 位 `business_code`，如 `z8gw`）。无整机团队绑定。**
+
+| 层 | 作用 |
+|----|------|
+| `namespace.metadata["hub.business_code"]` | 该项目绑定的团队（**唯一主真相**） |
+| `{workdir}/.mycompany/hub-client.json` | 目录侧镜像 code |
+| `~/.agent-hub/config.json` | **仅 JWT**；`business_code` 忽略/在 bind 时清掉 |
+
+解析顺序：`env` → **namespace** → workdir（**没有 home 团队**）。
+
+```text
+hub_bind_team({ "namespace_id": "insighttutor", "business_code": "z8gw" })
+hub_status({ "namespace_id": "insighttutor" })  # source=namespace
+```
+
+多项目 = 多个 namespace 各自绑定，不会抢整机默认团队。  
+详见 `docs/HUB_SOFT_SYNC.md` 与 https://hub.stifer.xyz/agent-setup.md
+
+## DSH（DeepSeek Harness）宿主
+
+同一份 skill + 二进制也可接入 DSH：技能通过 DSH 的 `skill` 工具加载（SKILL.md 已含 frontmatter），MCP 通过 `<dshHome>/profiles/<profile>/cordis.patch.yml` 的 `dsh-mcp-client` insert 补丁注册，工具名同样是 `mcp__agentflow__*`。DSH 无 hooks/statusline/sticky mode，无需本文件上述 Claude 专属步骤。
+
+```powershell
+# Windows：安装后一键同步 DSH（skill + MCP patch，幂等、带备份）
+.\scripts\install.ps1 -WriteDshConfig
+```
+
+完整指南见 `docs/DSH_INTEGRATION.md`。

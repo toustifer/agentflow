@@ -1,4 +1,44 @@
-# Python cache artifacts
+# Python artifacts
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Node / JS artifacts
+node_modules/
+*.tgz
+
+# Credentials, tokens, and personal identity
+.zhiji_*
+*.jwt
+*.token
+*.env
+*.env.*
+*cookie*
+*credential*
+.mycompany/
+.claude/
+.agent-hub/
+
+# Binary executables and releases
+*.exe
+*.exe~
+bin/
+dist/
+.release-*/
+agentflow-*-*
+
+# Intermediate build and test scratchpads
+.tmp*
+*-smoke*
+*-fixed*
+mcp-fixed-verification.json
+scripts/paper_eval/interruption_testbed/
+scripts/paper_eval/native_agent_sandbox/
+scripts/paper_eval/real_testbed/
+
+# LaTeX build intermediates
+docs/paper/*.aux
+docs/paper/*.log
+docs/paper/*.out
+docs/paper/*.toc
+docs/paper/*_temp.*
