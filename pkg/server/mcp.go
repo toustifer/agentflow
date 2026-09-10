@@ -75,6 +75,11 @@ func (s *Server) Tools() []ToolSpec {
 		{Name: "doc_list"},
 		{Name: "doc_search"},
 		{Name: "doc_delete"},
+		{Name: "goal_create"},
+		{Name: "goal_get"},
+		{Name: "goal_update"},
+		{Name: "goal_list"},
+		{Name: "goal_promote"},
 		{Name: "flow_ping"},
 	}
 	for i := range tools {
@@ -247,6 +252,29 @@ func toolInputSchema(name string) map[string]any {
 	case "doc_search":
 		add("namespace_id", "query", "scope")
 		required = []string{"namespace_id", "query"}
+	case "goal_create":
+		add("namespace_id", "title", "description", "goal_id", "context")
+		properties["priority"] = numberProp
+		addStringLists("tags")
+		properties["metadata"] = stringMapProp
+		required = []string{"namespace_id", "title"}
+	case "goal_get":
+		add("namespace_id", "goal_id")
+		required = []string{"namespace_id", "goal_id"}
+	case "goal_update":
+		add("namespace_id", "goal_id", "title", "description", "status", "context")
+		properties["priority"] = numberProp
+		addStringLists("tags")
+		properties["metadata"] = stringMapProp
+		required = []string{"namespace_id", "goal_id"}
+	case "goal_list":
+		add("namespace_id")
+		addStringLists("status", "tags")
+		properties["priority_gte"] = numberProp
+		required = []string{"namespace_id"}
+	case "goal_promote":
+		add("namespace_id", "goal_id", "dag_id", "dag_title", "execution_branch", "base_branch")
+		required = []string{"namespace_id", "goal_id"}
 	case "worker_update":
 		add("namespace_id", "worker_id", "name", "scope", "kind", "stuck_playbook", "escalation_mode", "launch_mode", "prompt_template")
 		addStringLists("skills", "task_tags", "required_reads", "recommended_mcp", "handoff_targets", "recovery_policy", "fallback_mcp")
@@ -462,6 +490,16 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 		return s.handleDocSearch(ctx, input)
 	case "doc_delete":
 		return s.handleDocDelete(ctx, input)
+	case "goal_create":
+		return s.handleGoalCreate(ctx, input)
+	case "goal_get":
+		return s.handleGoalGet(ctx, input)
+	case "goal_update":
+		return s.handleGoalUpdate(ctx, input)
+	case "goal_list":
+		return s.handleGoalList(ctx, input)
+	case "goal_promote":
+		return s.handleGoalPromote(ctx, input)
 	case "project_next_steps":
 		return s.handleProjectNextSteps(ctx, input)
 	case "flow_ping":
