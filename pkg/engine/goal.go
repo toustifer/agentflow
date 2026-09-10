@@ -77,6 +77,7 @@ type PromoteGoalRequest struct {
 	GoalID          string
 	DAGID           string
 	DAGTitle        string
+	Priority        string
 	ExecutionBranch string
 	BaseBranch      string
 }
@@ -343,6 +344,27 @@ func (e *Engine) PromoteGoal(ctx context.Context, req PromoteGoalRequest) (*Prom
 	if dagTitle == "" {
 		dagTitle = goal.Title
 	}
+
+	var dagPri DAGPriority
+	if req.Priority != "" {
+		var err error
+		dagPri, err = NormalizeDAGPriority(req.Priority)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		switch {
+		case goal.Priority >= 100:
+			dagPri = DAGPriorityP0
+		case goal.Priority >= 50:
+			dagPri = DAGPriorityP1
+		case goal.Priority <= 0:
+			dagPri = DAGPriorityP2
+		default:
+			dagPri = DAGPriorityP2
+		}
+	}
+
 	execBranch := req.ExecutionBranch
 	if execBranch == "" {
 		execBranch = fmt.Sprintf("feature/%s", dagID)
@@ -364,6 +386,7 @@ func (e *Engine) PromoteGoal(ctx context.Context, req PromoteGoalRequest) (*Prom
 		ID:              dagID,
 		NamespaceID:     req.NamespaceID,
 		Title:           dagTitle,
+		Priority:        dagPri,
 		ExecutionBranch: execBranch,
 		BaseBranch:      req.BaseBranch,
 		Metadata:        dagMeta,

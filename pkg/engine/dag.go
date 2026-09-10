@@ -208,7 +208,17 @@ func (e *Engine) ListDAGs(ctx context.Context, nsID string) ([]DAG, error) {
 	for _, dag := range e.dags[nsID] {
 		out = append(out, *cloneDAG(dag))
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	sort.Slice(out, func(i, j int) bool {
+		wI := DAGPriorityWeight(out[i].Priority)
+		wJ := DAGPriorityWeight(out[j].Priority)
+		if wI != wJ {
+			return wI > wJ
+		}
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out, nil
 }
 
@@ -226,6 +236,13 @@ func (e *Engine) UpdateDAG(ctx context.Context, nsID, dagID string, req UpdateDA
 
 	if req.Title != "" {
 		dag.Title = req.Title
+	}
+	if req.Priority != nil {
+		priority, err := NormalizeDAGPriority(*req.Priority)
+		if err != nil {
+			return nil, err
+		}
+		dag.Priority = priority
 	}
 	if req.ExecutionBranch != "" {
 		dag.ExecutionBranch = req.ExecutionBranch

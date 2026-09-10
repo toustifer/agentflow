@@ -70,3 +70,53 @@ func TestDAGPriorityPersistenceAndReopen(t *testing.T) {
 	require.Equal(t, DAGPriorityP0, d1Reopened.Priority)
 }
 
+func TestListDAGsPriorityOrdering(t *testing.T) {
+	eng, err := NewEngine(NewEngineConfig{})
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	_, err = eng.CreateNamespace(ctx, CreateNamespaceRequest{ID: "ns-order", Name: "Order NS"})
+	require.NoError(t, err)
+
+	_, err = eng.CreateDAG(ctx, CreateDAGRequest{
+		NamespaceID:     "ns-order",
+		ID:              "dag-p2",
+		Title:           "P2 Task",
+		Priority:        "P2",
+		ExecutionBranch: "feat/p2",
+	})
+	require.NoError(t, err)
+
+	_, err = eng.CreateDAG(ctx, CreateDAGRequest{
+		NamespaceID:     "ns-order",
+		ID:              "dag-p0",
+		Title:           "P0 Task",
+		Priority:        "P0",
+		ExecutionBranch: "feat/p0",
+	})
+	require.NoError(t, err)
+
+	_, err = eng.CreateDAG(ctx, CreateDAGRequest{
+		NamespaceID:     "ns-order",
+		ID:              "dag-p1",
+		Title:           "P1 Task",
+		Priority:        "P1",
+		ExecutionBranch: "feat/p1",
+	})
+	require.NoError(t, err)
+
+	dags, err := eng.ListDAGs(ctx, "ns-order")
+	require.NoError(t, err)
+	require.Len(t, dags, 3)
+	require.Equal(t, "dag-p0", dags[0].ID)
+	require.Equal(t, "dag-p1", dags[1].ID)
+	require.Equal(t, "dag-p2", dags[2].ID)
+
+	// Update dag-p2 to P0
+	p0 := "P0"
+	upd, err := eng.UpdateDAG(ctx, "ns-order", "dag-p2", UpdateDAGRequest{Priority: &p0})
+	require.NoError(t, err)
+	require.Equal(t, DAGPriorityP0, upd.Priority)
+}
+
+
