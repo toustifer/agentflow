@@ -11,9 +11,13 @@ import (
 
 func insertDAG(db *sql.DB, dag *DAG) error {
 	meta := mustMarshalJSON(dag.Metadata)
+	pri := string(dag.Priority)
+	if pri == "" {
+		pri = string(DAGPriorityP2)
+	}
 	_, err := db.Exec(
-		`INSERT INTO dags (id, namespace_id, title, branch, execution_branch, base_branch, metadata, worktree_path, worktree_status, head_sha, active_task_id, lease_holder_task_id, lease_holder_worker_id, lease_holder_agent_id, lease_acquired_at, runtime_updated_at, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		dag.ID, dag.NamespaceID, dag.Title, dag.ExecutionBranch, dag.ExecutionBranch, dag.BaseBranch, meta, dag.WorktreePath, dag.WorktreeStatus, dag.HeadSHA, dag.ActiveTaskID, dag.LeaseHolderTaskID, dag.LeaseHolderWorkerID, dag.LeaseHolderAgentID, dag.LeaseAcquiredAt, dag.RuntimeUpdatedAt, string(dag.Status),
+		`INSERT INTO dags (id, namespace_id, title, branch, execution_branch, base_branch, metadata, worktree_path, worktree_status, head_sha, active_task_id, lease_holder_task_id, lease_holder_worker_id, lease_holder_agent_id, lease_acquired_at, runtime_updated_at, status, priority, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		dag.ID, dag.NamespaceID, dag.Title, dag.ExecutionBranch, dag.ExecutionBranch, dag.BaseBranch, meta, dag.WorktreePath, dag.WorktreeStatus, dag.HeadSHA, dag.ActiveTaskID, dag.LeaseHolderTaskID, dag.LeaseHolderWorkerID, dag.LeaseHolderAgentID, dag.LeaseAcquiredAt, dag.RuntimeUpdatedAt, string(dag.Status), pri,
 		dag.CreatedAt.Format(time.RFC3339Nano), dag.UpdatedAt.Format(time.RFC3339Nano),
 	)
 	return err
@@ -21,9 +25,13 @@ func insertDAG(db *sql.DB, dag *DAG) error {
 
 func updateDAG(db *sql.DB, dag *DAG) error {
 	meta := mustMarshalJSON(dag.Metadata)
+	pri := string(dag.Priority)
+	if pri == "" {
+		pri = string(DAGPriorityP2)
+	}
 	_, err := db.Exec(
-		`UPDATE dags SET title=?, branch=?, execution_branch=?, base_branch=?, metadata=?, worktree_path=?, worktree_status=?, head_sha=?, active_task_id=?, lease_holder_task_id=?, lease_holder_worker_id=?, lease_holder_agent_id=?, lease_acquired_at=?, runtime_updated_at=?, status=?, updated_at=? WHERE namespace_id=? AND id=?`,
-		dag.Title, dag.ExecutionBranch, dag.ExecutionBranch, dag.BaseBranch, meta, dag.WorktreePath, dag.WorktreeStatus, dag.HeadSHA, dag.ActiveTaskID, dag.LeaseHolderTaskID, dag.LeaseHolderWorkerID, dag.LeaseHolderAgentID, dag.LeaseAcquiredAt, dag.RuntimeUpdatedAt, string(dag.Status),
+		`UPDATE dags SET title=?, branch=?, execution_branch=?, base_branch=?, metadata=?, worktree_path=?, worktree_status=?, head_sha=?, active_task_id=?, lease_holder_task_id=?, lease_holder_worker_id=?, lease_holder_agent_id=?, lease_acquired_at=?, runtime_updated_at=?, status=?, priority=?, updated_at=? WHERE namespace_id=? AND id=?`,
+		dag.Title, dag.ExecutionBranch, dag.ExecutionBranch, dag.BaseBranch, meta, dag.WorktreePath, dag.WorktreeStatus, dag.HeadSHA, dag.ActiveTaskID, dag.LeaseHolderTaskID, dag.LeaseHolderWorkerID, dag.LeaseHolderAgentID, dag.LeaseAcquiredAt, dag.RuntimeUpdatedAt, string(dag.Status), pri,
 		dag.UpdatedAt.Format(time.RFC3339Nano),
 		dag.NamespaceID, dag.ID,
 	)
@@ -31,7 +39,7 @@ func updateDAG(db *sql.DB, dag *DAG) error {
 }
 
 func loadDAGs(db *sql.DB) (map[string]map[string]*DAG, error) {
-	rows, err := db.Query(`SELECT id, namespace_id, title, branch, execution_branch, base_branch, metadata, worktree_path, worktree_status, head_sha, active_task_id, lease_holder_task_id, lease_holder_worker_id, lease_holder_agent_id, lease_acquired_at, runtime_updated_at, status, created_at, updated_at FROM dags`)
+	rows, err := db.Query(`SELECT id, namespace_id, title, branch, execution_branch, base_branch, metadata, worktree_path, worktree_status, head_sha, active_task_id, lease_holder_task_id, lease_holder_worker_id, lease_holder_agent_id, lease_acquired_at, runtime_updated_at, status, priority, created_at, updated_at FROM dags`)
 	if err != nil {
 		return nil, err
 	}
@@ -40,13 +48,16 @@ func loadDAGs(db *sql.DB) (map[string]map[string]*DAG, error) {
 	out := make(map[string]map[string]*DAG)
 	for rows.Next() {
 		var (
-			id, nsID, title, branch, executionBranch, baseBranch, metaStr, worktreePath, worktreeStatus, headSHA, activeTaskID, leaseHolderTaskID, leaseHolderWorkerID, leaseHolderAgentID, leaseAcquiredAt, runtimeUpdatedAt, statusStr, createdAtStr, updatedAtStr string
+			id, nsID, title, branch, executionBranch, baseBranch, metaStr, worktreePath, worktreeStatus, headSHA, activeTaskID, leaseHolderTaskID, leaseHolderWorkerID, leaseHolderAgentID, leaseAcquiredAt, runtimeUpdatedAt, statusStr, priorityStr, createdAtStr, updatedAtStr string
 		)
-		if err := rows.Scan(&id, &nsID, &title, &branch, &executionBranch, &baseBranch, &metaStr, &worktreePath, &worktreeStatus, &headSHA, &activeTaskID, &leaseHolderTaskID, &leaseHolderWorkerID, &leaseHolderAgentID, &leaseAcquiredAt, &runtimeUpdatedAt, &statusStr, &createdAtStr, &updatedAtStr); err != nil {
+		if err := rows.Scan(&id, &nsID, &title, &branch, &executionBranch, &baseBranch, &metaStr, &worktreePath, &worktreeStatus, &headSHA, &activeTaskID, &leaseHolderTaskID, &leaseHolderWorkerID, &leaseHolderAgentID, &leaseAcquiredAt, &runtimeUpdatedAt, &statusStr, &priorityStr, &createdAtStr, &updatedAtStr); err != nil {
 			return nil, err
 		}
 		if executionBranch == "" {
 			executionBranch = branch
+		}
+		if priorityStr == "" {
+			priorityStr = string(DAGPriorityP2)
 		}
 		createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
 		updatedAt, _ := time.Parse(time.RFC3339Nano, updatedAtStr)
@@ -54,6 +65,7 @@ func loadDAGs(db *sql.DB) (map[string]map[string]*DAG, error) {
 			ID:                  id,
 			NamespaceID:         nsID,
 			Title:               title,
+			Priority:            DAGPriority(priorityStr),
 			ExecutionBranch:     executionBranch,
 			BaseBranch:          baseBranch,
 			Metadata:            mustUnmarshalStringMap(metaStr),

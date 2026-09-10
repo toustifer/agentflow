@@ -65,6 +65,7 @@ type DAG struct {
 	ID                  string            `json:"id"`
 	NamespaceID         string            `json:"namespace_id"`
 	Title               string            `json:"title"`
+	Priority            DAGPriority       `json:"priority,omitempty"`
 	ExecutionBranch     string            `json:"execution_branch"`
 	BaseBranch          string            `json:"base_branch,omitempty"`
 	Metadata            map[string]string `json:"metadata,omitempty"`
@@ -86,6 +87,7 @@ type CreateDAGRequest struct {
 	NamespaceID     string
 	ID              string
 	Title           string
+	Priority        string
 	ExecutionBranch string
 	BaseBranch      string
 	Metadata        map[string]string
@@ -93,6 +95,7 @@ type CreateDAGRequest struct {
 
 type UpdateDAGRequest struct {
 	Title           string
+	Priority        *string
 	ExecutionBranch string
 	BaseBranch      string
 	Metadata        map[string]string
@@ -150,11 +153,17 @@ func (e *Engine) CreateDAG(ctx context.Context, req CreateDAGRequest) (*DAG, err
 		return nil, errors.New("dag already exists")
 	}
 
+	priority, err := NormalizeDAGPriority(req.Priority)
+	if err != nil {
+		return nil, err
+	}
+
 	now := time.Now().UTC()
 	dag := &DAG{
 		ID:              req.ID,
 		NamespaceID:     req.NamespaceID,
 		Title:           req.Title,
+		Priority:        priority,
 		ExecutionBranch: req.ExecutionBranch,
 		BaseBranch:      req.BaseBranch,
 		Metadata:        cloneStringMap(req.Metadata),

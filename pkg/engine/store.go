@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS dags (
 	lease_acquired_at     TEXT NOT NULL DEFAULT '',
 	runtime_updated_at    TEXT NOT NULL DEFAULT '',
 	status                TEXT NOT NULL DEFAULT 'planning',
+	priority              TEXT NOT NULL DEFAULT 'P2',
 	created_at            TEXT NOT NULL,
 	updated_at            TEXT NOT NULL,
 	PRIMARY KEY (namespace_id, id),
@@ -265,6 +266,7 @@ func migrateDAGsTable(db *sql.DB) error {
 		"lease_holder_agent_id TEXT NOT NULL DEFAULT ''",
 		"lease_acquired_at TEXT NOT NULL DEFAULT ''",
 		"runtime_updated_at TEXT NOT NULL DEFAULT ''",
+		"priority TEXT NOT NULL DEFAULT 'P2'",
 	}
 	for _, c := range cols {
 		colName := strings.SplitN(c, " ", 2)[0]
