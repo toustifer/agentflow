@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/toustifer/agentflow/pkg/engine"
 )
 
 func TestGoalMCPHandlersLifecycle(t *testing.T) {
@@ -98,4 +99,68 @@ func TestProjectInspectIncludesBacklogSummary(t *testing.T) {
 	backlog := res["backlog"].([]any)
 	require.Len(t, backlog, 2)
 }
+
+func TestProjectNextStepsRecommendsBacklogPromotionWhenDone(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := context.Background()
+
+	_, err := srv.engine.RegisterWorker(ctx, engine.RegisterWorkerRequest{
+		NamespaceID:    "ns-1",
+		ID:             "worker-1",
+		Name:           "Worker 1",
+		PromptTemplate: "Do work",
+	})
+	require.NoError(t, err)
+
+	_, err = srv.engine.CreateDAG(ctx, engine.CreateDAGRequest{
+		NamespaceID:     "ns-1",
+		ID:              "dag-1",
+		Title:           "DAG 1",
+		ExecutionBranch: "feat/dag-1",
+	})
+	require.NoError(t, err)
+
+	_, err = srv.engine.CreateTask(ctx, engine.CreateTaskRequest{
+		NamespaceID:    "ns-1",
+		ID:             "T1",
+		DAGID:          "dag-1",
+		Title:          "Task 1",
+		AssignedWorker: "worker-1",
+	})
+	require.NoError(t, err)
+
+	// Transition task to done
+	_, err = srv.engine.TransitionTask(ctx, "ns-1", "T1", engine.TransStart, nil)
+	require.NoError(t, err)
+	_, err = srv.engine.TransitionTask(ctx, "ns-1", "T1", engine.TransSubmit, nil)
+	require.NoError(t, err)
+	_, err = srv.engine.TransitionTask(ctx, "ns-1", "T1", engine.TransPass, nil)
+	require.NoError(t, err)
+
+	// Create pending goal in backlog
+	_, err = srv.Handle(ctx, "goal_create", map[string]any{
+		"namespace_id": "ns-1",
+		"title":        "Next Big Feature",
+		"priority":     float64(50),
+	})
+	require.NoError(t, err)
+
+	// Check project_next_steps
+	res, err := srv.Handle(ctx, "project_next_steps", map[string]any{
+		"namespace_id": "ns-1",
+		"dag_id":       "dag-1",
+	})
+	require.NoError(t, err)
+
+	actions := res["actions"].([]string)
+	hasGoalPromote := false
+	for _, a := range actions {
+		if a == "goal_promote" {
+			hasGoalPromote = true
+			break
+		}
+	}
+	require.True(t, hasGoalPromote, "expected goal_promote in actions: %v", actions)
+}
+
 

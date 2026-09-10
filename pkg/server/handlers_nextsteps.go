@@ -122,6 +122,27 @@ func (s *Server) handleProjectNextSteps(ctx context.Context, input map[string]an
 	} else if len(dags) == 0 {
 		phase = "plan"
 		phaseName = "等待拆解 DAG"
+		backlogGoals, _ := s.engine.ListGoals(ctx, engine.GoalFilter{
+			NamespaceID: nsID,
+			Statuses:    []engine.GoalStatus{engine.GoalPending, engine.GoalDeferred},
+		})
+		nextSteps := []string{"拆解首个 DAG（dag_create）"}
+		actions := []string{"dag_create"}
+		if len(backlogGoals) > 0 {
+			nextSteps = append([]string{
+				fmt.Sprintf("Backlog 储备池中有 %d 个待办目标（推荐优先晋升 %s: %q）", len(backlogGoals), backlogGoals[0].ID, backlogGoals[0].Title),
+				fmt.Sprintf("调用 goal_promote(namespace_id=%q, goal_id=%q) 一键物化为执行 DAG", nsID, backlogGoals[0].ID),
+			}, nextSteps...)
+			actions = append([]string{"goal_promote", "goal_list"}, actions...)
+		}
+		return map[string]any{
+			"phase":      phase,
+			"phase_name": phaseName,
+			"progress":   "0%",
+			"completed":  completed,
+			"next_steps": nextSteps,
+			"actions":    actions,
+		}, nil
 	} else {
 		// 有 DAG，检查 task 完成情况
 		if totalTasks > 0 {
@@ -136,6 +157,21 @@ func (s *Server) handleProjectNextSteps(ctx context.Context, input map[string]an
 				if dagTitle != "" {
 					completed = append(completed, fmt.Sprintf("DAG %q 全部完成", dagTitle))
 				}
+				nextSteps := []string{"项目已完成，可添加新功能（/agentflow goal + 目标）", "查看项目文档（doc_list）"}
+				actions := []string{"goal", "doc_list"}
+
+				backlogGoals, _ := s.engine.ListGoals(ctx, engine.GoalFilter{
+					NamespaceID: nsID,
+					Statuses:    []engine.GoalStatus{engine.GoalPending, engine.GoalDeferred},
+				})
+				if len(backlogGoals) > 0 {
+					nextSteps = append([]string{
+						fmt.Sprintf("当前 DAG 已结案，Backlog 储备池中有 %d 个待办目标（推荐优先晋升 %s: %q）", len(backlogGoals), backlogGoals[0].ID, backlogGoals[0].Title),
+						fmt.Sprintf("调用 goal_promote(namespace_id=%q, goal_id=%q) 一键物化为新执行 DAG，或查看储备清单（goal_list）", nsID, backlogGoals[0].ID),
+					}, nextSteps...)
+					actions = append([]string{"goal_promote", "goal_list"}, actions...)
+				}
+
 				result := map[string]any{
 					"phase":           phase,
 					"phase_name":      phaseName,
@@ -143,8 +179,8 @@ func (s *Server) handleProjectNextSteps(ctx context.Context, input map[string]an
 					"completed":       completed,
 					"completed_tasks": doneTasks,
 					"total_tasks":     totalTasks,
-					"next_steps":      []string{"项目已完成，可添加新功能（/agentflow goal + 目标）", "查看项目文档（doc_list）"},
-					"actions":         []string{"goal", "doc_list"},
+					"next_steps":      nextSteps,
+					"actions":         actions,
 					"dag":             dagToSummaryMap(activeDAG),
 					"resume_targeted": targetDAGID != "",
 					"focus_source":    focusSource,
