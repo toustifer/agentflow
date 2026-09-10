@@ -36,9 +36,8 @@ scripts/paper_eval/interruption_testbed/
 scripts/paper_eval/native_agent_sandbox/
 scripts/paper_eval/real_testbed/
 
-# LaTeX build intermediates
-docs/paper/*.aux
-docs/paper/*.log
-docs/paper/*.out
-docs/paper/*.toc
-docs/paper/*_temp.*
+# LaTeX build intermediates and private research papers
+docs/paper/
+docs/surveys/
+docs/reader.html
+scripts/paper_eval/

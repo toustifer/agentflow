@@ -442,7 +442,7 @@
       <li><a href="#features">Architecture</a></li>
       <li><a href="#isolation">Worktree Isolation</a></li>
       <li><a href="#benchmark">Benchmarks</a></li>
-      <li><a href="#paper">Research Paper</a></li>
+      <li><a href="#install">Installation</a></li>
     </ul>
     <a href="https://github.com/toustifer/agentflow" target="_blank" class="btn-github">
       <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
@@ -464,13 +464,13 @@
       </p>
       <div class="hero-actions">
         <a href="https://github.com/toustifer/agentflow" class="btn-primary">View on GitHub</a>
-        <a href="paper/main.pdf" target="_blank" class="btn-secondary">Read Technical Paper (10 Pages, PDF)</a>
+        <a href="#install" class="btn-secondary">Install Plugin</a>
       </div>
     </section>
 
     <!-- Teaser Concept Image -->
     <div class="teaser-wrapper">
-      <img src="paper/agentflow_overview_concept.jpg" alt="AgentFlow Autonomous Multi-Agent Collaborative System Overview">
+      <img src="assets/agentflow_overview_concept.jpg" alt="AgentFlow Autonomous Multi-Agent Collaborative System Overview">
     </div>
 
     <!-- Stats Bar (Grounded in 19 projects) -->
@@ -525,7 +525,7 @@
         <h2 class="section-title">Atomic Rollbacks & Zero-Bleed Delivery</h2>
       </div>
       <div class="teaser-wrapper">
-        <img src="paper/worktree_isolation_concept.jpg" alt="One-Task-One-Worktree Physical Isolation Primitive">
+        <img src="assets/worktree_isolation_concept.jpg" alt="One-Task-One-Worktree Physical Isolation Primitive">
       </div>
     </section>
 
@@ -586,14 +586,19 @@
       </div>
     </section>
 
-    <!-- Research Paper Callout -->
-    <section id="paper" class="paper-callout">
-      <div class="section-tag" style="color: #93C5FD;">Academic Publication</div>
-      <h2>Read the Complete IEEE Technical Paper</h2>
+    <!-- Install Callout -->
+    <section id="install" class="paper-callout">
+      <div class="section-tag" style="color: #93C5FD;">Get Started</div>
+      <h2>Install via DeepSeek Harness</h2>
       <p>
-        Explore our formal state machine definitions, the One-Task-One-Worktree scheduling algorithm, longitudinal empirical statistics across 1,451 events, and in-depth industrial case studies.
+        Add the official agentflow plugin to your DSH web or headless profile with one command.
       </p>
-      <a href="paper/main.pdf" target="_blank" class="btn-primary" style="display: inline-block;">Download Full Paper (10 Pages, PDF)</a>
+      <div style="background: rgba(0,0,0,0.5); padding: 1rem 1.5rem; border-radius: 8px; font-family: var(--font-mono); color: #34D399; display: inline-block; margin-bottom: 1.5rem; border: 1px solid rgba(255,255,255,0.1);">
+        dsh plugin --profile web add @toustifer/dsh-agentflow
+      </div>
+      <div>
+        <a href="https://github.com/toustifer/agentflow" target="_blank" class="btn-primary" style="display: inline-block;">View Repository Documentation</a>
+      </div>
     </section>
 
   </main>
