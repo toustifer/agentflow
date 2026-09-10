@@ -1521,6 +1521,21 @@ func (s *Server) handleProjectInspect(ctx context.Context, input map[string]any)
 		}
 	}
 
+	backlogGoals, _ := s.engine.ListGoals(ctx, engine.GoalFilter{
+		NamespaceID: nsID,
+		Statuses:    []engine.GoalStatus{engine.GoalPending, engine.GoalDeferred},
+	})
+	backlogItems := make([]any, 0, len(backlogGoals))
+	for _, bg := range backlogGoals {
+		backlogItems = append(backlogItems, map[string]any{
+			"id":       bg.ID,
+			"title":    bg.Title,
+			"status":   string(bg.Status),
+			"priority": bg.Priority,
+			"tags":     bg.Tags,
+		})
+	}
+
 	response := map[string]any{
 		"focus":   focus,
 		"project": project,
@@ -1534,8 +1549,10 @@ func (s *Server) handleProjectInspect(ctx context.Context, input map[string]any)
 			"done_count":    doneCount,
 			"worker_busy":   busyWorkers,
 			"worker_total":  len(workers),
+			"backlog_count": len(backlogGoals),
 		},
 		"dags":       dagItems,
+		"backlog":    backlogItems,
 		"blockers":   blockerItems,
 		"workers":    workerItems,
 		"next_tasks": nextTaskItems,

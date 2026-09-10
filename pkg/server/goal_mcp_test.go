@@ -61,3 +61,41 @@ func TestGoalMCPHandlersLifecycle(t *testing.T) {
 	createdDAG := promoteRes["dag"].(map[string]any)
 	require.Equal(t, "dag-G-1", createdDAG["id"])
 }
+
+func TestProjectInspectIncludesBacklogSummary(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := context.Background()
+
+	// Create 2 goals: 1 pending, 1 deferred
+	_, err := srv.Handle(ctx, "goal_create", map[string]any{
+		"namespace_id": "ns-1",
+		"title":        "Pending Goal",
+		"priority":     float64(5),
+	})
+	require.NoError(t, err)
+
+	g2, err := srv.Handle(ctx, "goal_create", map[string]any{
+		"namespace_id": "ns-1",
+		"title":        "Deferred Goal",
+		"priority":     float64(1),
+	})
+	require.NoError(t, err)
+
+	_, err = srv.Handle(ctx, "goal_update", map[string]any{
+		"namespace_id": "ns-1",
+		"goal_id":      g2["goal"].(map[string]any)["id"],
+		"status":       "deferred",
+	})
+	require.NoError(t, err)
+
+	// Inspect
+	res, err := srv.Handle(ctx, "project_inspect", map[string]any{"namespace_id": "ns-1"})
+	require.NoError(t, err)
+
+	summary := res["summary"].(map[string]any)
+	require.Equal(t, 2, summary["backlog_count"])
+
+	backlog := res["backlog"].([]any)
+	require.Len(t, backlog, 2)
+}
+
