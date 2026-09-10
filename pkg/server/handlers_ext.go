@@ -1375,13 +1375,26 @@ func (s *Server) handleProjectInspect(ctx context.Context, input map[string]any)
 	if err != nil {
 		return nil, err
 	}
+	dags, err := s.engine.ListDAGs(ctx, nsID)
+	if err != nil {
+		return nil, err
+	}
 	nextStepsInput := map[string]any{"namespace_id": nsID}
 	if dagID != "" {
 		nextStepsInput["dag_id"] = dagID
 	}
 	steps, err := s.handleProjectNextSteps(ctx, nextStepsInput)
 	if err != nil {
-		return nil, err
+		if _, ok := err.(*MultiDAGFocusError); ok {
+			rec := pickResumeDAG(dags, "")
+			if rec != nil {
+				nextStepsInput["dag_id"] = rec.ID
+				steps, err = s.handleProjectNextSteps(ctx, nextStepsInput)
+			}
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 	report, err := s.engine.ProjectReport(ctx, nsID)
 	if err != nil {
@@ -1396,10 +1409,6 @@ func (s *Server) handleProjectInspect(ctx context.Context, input map[string]any)
 		return nil, err
 	}
 	workers, err := s.engine.ListWorkers(ctx, nsID)
-	if err != nil {
-		return nil, err
-	}
-	dags, err := s.engine.ListDAGs(ctx, nsID)
 	if err != nil {
 		return nil, err
 	}
@@ -1509,6 +1518,11 @@ func (s *Server) handleProjectInspect(ctx context.Context, input map[string]any)
 	sort.Slice(dagItems, func(i, j int) bool {
 		left := dagItems[i].(map[string]any)["dag"].(map[string]any)
 		right := dagItems[j].(map[string]any)["dag"].(map[string]any)
+		priLeft := engine.DAGPriorityWeight(engine.DAGPriority(fmt.Sprint(left["priority"])))
+		priRight := engine.DAGPriorityWeight(engine.DAGPriority(fmt.Sprint(right["priority"])))
+		if priLeft != priRight {
+			return priLeft > priRight
+		}
 		return fmt.Sprint(left["id"]) < fmt.Sprint(right["id"])
 	})
 

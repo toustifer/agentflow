@@ -131,9 +131,14 @@ func listPrimaryOpenDAGs(dags []engine.DAG) []engine.DAG {
 }
 
 func dagCandidateSummary(dag engine.DAG) map[string]any {
+	pri := string(dag.Priority)
+	if pri == "" {
+		pri = string(engine.DAGPriorityP2)
+	}
 	return map[string]any{
 		"dag_id":           dag.ID,
 		"title":            dag.Title,
+		"priority":         pri,
 		"status":           string(dag.Status),
 		"execution_branch": dag.ExecutionBranch,
 	}
@@ -161,6 +166,7 @@ func resolveDAGFocus(dags []engine.DAG, targetDAGID string) (*engine.DAG, string
 	case 1:
 		return &primary[0], focusSourceSingleAuto, nil
 	default:
+		orderResumeCandidates(primary)
 		cands := make([]map[string]any, 0, len(primary))
 		for _, d := range primary {
 			cands = append(cands, dagCandidateSummary(d))
@@ -173,6 +179,11 @@ func orderResumeCandidates(dags []engine.DAG) {
 	sort.Slice(dags, func(i, j int) bool {
 		left := dags[i]
 		right := dags[j]
+		priLeft := engine.DAGPriorityWeight(left.Priority)
+		priRight := engine.DAGPriorityWeight(right.Priority)
+		if priLeft != priRight {
+			return priLeft > priRight
+		}
 		if left.Status != right.Status {
 			if left.Status == engine.DAGInProgress {
 				return true
