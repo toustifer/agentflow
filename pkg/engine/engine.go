@@ -30,6 +30,7 @@ type Engine struct {
 	leaderDiaries    map[string]map[string]*LeaderDiary
 	projectDocs      map[string][]ProjectDoc
 	nextProjectDocID map[string]int64
+	goals            map[string]map[string]*Goal
 	db               *sql.DB // non-nil when SQLite backend is active
 }
 
@@ -152,6 +153,7 @@ func NewEngine(cfg NewEngineConfig) (*Engine, error) {
 		leaderDiaries:    make(map[string]map[string]*LeaderDiary),
 		projectDocs:      make(map[string][]ProjectDoc),
 		nextProjectDocID: make(map[string]int64),
+		goals:            make(map[string]map[string]*Goal),
 	}
 
 	if cfg.DBPath != "" {

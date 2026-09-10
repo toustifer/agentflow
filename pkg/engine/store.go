@@ -144,7 +144,25 @@ CREATE TABLE IF NOT EXISTS project_docs (
 	created_at   TEXT NOT NULL,
 	updated_at   TEXT NOT NULL,
 	FOREIGN KEY (namespace_id) REFERENCES namespaces(id)
-);`
+);
+
+CREATE TABLE IF NOT EXISTS goals (
+	id           TEXT NOT NULL,
+	namespace_id TEXT NOT NULL,
+	title        TEXT NOT NULL,
+	description  TEXT NOT NULL DEFAULT '',
+	status       TEXT NOT NULL DEFAULT 'pending',
+	priority     INTEGER NOT NULL DEFAULT 0,
+	tags         TEXT NOT NULL DEFAULT '[]',
+	context      TEXT NOT NULL DEFAULT '',
+	dag_id       TEXT NOT NULL DEFAULT '',
+	metadata     TEXT NOT NULL DEFAULT '{}',
+	created_at   TEXT NOT NULL,
+	updated_at   TEXT NOT NULL,
+	PRIMARY KEY (namespace_id, id),
+	FOREIGN KEY (namespace_id) REFERENCES namespaces(id)
+);
+CREATE INDEX IF NOT EXISTS idx_goals_ns_status ON goals(namespace_id, status);`
 
 // openSQLite opens (or creates) a SQLite database at dbPath and ensures the
 // schema tables exist.  The caller must call db.Close() when finished.
@@ -507,7 +525,7 @@ func mustUnmarshalStringSlice(s string) []string {
 // ---------------------------------------------------------------------------
 
 func deleteAllForNamespace(db *sql.DB, nsID string) error {
-	tables := []string{"leader_diaries", "worker_diaries", "worker_handbooks", "workers", "events", "tasks", "dags"}
+	tables := []string{"goals", "leader_diaries", "worker_diaries", "worker_handbooks", "workers", "events", "tasks", "dags"}
 	for _, table := range tables {
 		if _, err := db.Exec("DELETE FROM "+table+" WHERE namespace_id = ?", nsID); err != nil {
 			return fmt.Errorf("delete %s: %w", table, err)
