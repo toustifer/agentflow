@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 )
@@ -131,4 +132,71 @@ func TestGoalCRUDAndAutoID(t *testing.T) {
 }
 
 func ptrInt(v int) *int { return &v }
+
+func TestGoalPromotion(t *testing.T) {
+	eng, err := NewEngine(NewEngineConfig{})
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+	ctx := context.Background()
+	_, err = eng.CreateNamespace(ctx, CreateNamespaceRequest{ID: "ns-promote", Name: "Namespace Promote"})
+	if err != nil {
+		t.Fatalf("create ns failed: %v", err)
+	}
+
+	g, err := eng.CreateGoal(ctx, CreateGoalRequest{
+		NamespaceID: "ns-promote",
+		Title:       "Feature Auth Token",
+		Description: "Refactor auth tokens",
+		Priority:    10,
+	})
+	if err != nil {
+		t.Fatalf("create goal failed: %v", err)
+	}
+
+	// Promote goal
+	res, err := eng.PromoteGoal(ctx, PromoteGoalRequest{
+		NamespaceID: "ns-promote",
+		GoalID:      g.ID,
+	})
+	if err != nil {
+		t.Fatalf("PromoteGoal failed: %v", err)
+	}
+
+	if res.Goal.Status != GoalPromoted {
+		t.Fatalf("expected goal status promoted, got %s", res.Goal.Status)
+	}
+	if res.DAG == nil {
+		t.Fatalf("expected created DAG to be non-nil")
+	}
+	if res.DAG.ID != "dag-"+g.ID {
+		t.Fatalf("expected DAG ID dag-%s, got %s", g.ID, res.DAG.ID)
+	}
+	if res.DAG.Title != g.Title {
+		t.Fatalf("expected DAG title %s, got %s", g.Title, res.DAG.Title)
+	}
+	if res.DAG.Metadata["source_goal_id"] != g.ID {
+		t.Fatalf("expected DAG metadata source_goal_id = %s, got %s", g.ID, res.DAG.Metadata["source_goal_id"])
+	}
+
+	// Verify repeat promotion fails
+	_, err = eng.PromoteGoal(ctx, PromoteGoalRequest{
+		NamespaceID: "ns-promote",
+		GoalID:      g.ID,
+	})
+	if !errors.Is(err, ErrGoalAlreadyPromoted) {
+		t.Fatalf("expected ErrGoalAlreadyPromoted, got %v", err)
+	}
+
+	// Verify updating status of promoted goal fails
+	_, err = eng.UpdateGoal(ctx, UpdateGoalRequest{
+		NamespaceID: "ns-promote",
+		ID:          g.ID,
+		Status:      GoalPending,
+	})
+	if err == nil {
+		t.Fatalf("expected error updating status of promoted goal, got nil")
+	}
+}
+
 

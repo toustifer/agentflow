@@ -72,6 +72,20 @@ type GoalFilter struct {
 	PriorityGTE *int
 }
 
+type PromoteGoalRequest struct {
+	NamespaceID     string
+	GoalID          string
+	DAGID           string
+	DAGTitle        string
+	ExecutionBranch string
+	BaseBranch      string
+}
+
+type PromoteGoalResult struct {
+	Goal Goal `json:"goal"`
+	DAG  *DAG `json:"dag"`
+}
+
 func (e *Engine) nextGoalIDLocked(nsID string) string {
 	maxSeq := 0
 	if goals, ok := e.goals[nsID]; ok {
@@ -289,3 +303,95 @@ func (e *Engine) ListGoals(ctx context.Context, filter GoalFilter) ([]Goal, erro
 
 	return out, nil
 }
+
+func (e *Engine) PromoteGoal(ctx context.Context, req PromoteGoalRequest) (*PromoteGoalResult, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if _, ok := e.namespaces[req.NamespaceID]; !ok {
+		return nil, ErrNamespaceNotFound
+	}
+	goal, ok := e.goals[req.NamespaceID][req.GoalID]
+	if !ok {
+		return nil, ErrGoalNotFound
+	}
+	if goal.Status == GoalPromoted {
+		return nil, ErrGoalAlreadyPromoted
+	}
+	if goal.Status != GoalPending && goal.Status != GoalDeferred {
+		return nil, fmt.Errorf("cannot promote goal in status %s", goal.Status)
+	}
+
+	dagID := req.DAGID
+	if dagID == "" {
+		dagID = fmt.Sprintf("dag-%s", goal.ID)
+	}
+	// If dagID already exists in this namespace and dagID was auto-derived, resolve collision
+	if req.DAGID == "" && e.dags[req.NamespaceID] != nil {
+		baseID := dagID
+		suffix := 1
+		for {
+			if _, exists := e.dags[req.NamespaceID][dagID]; !exists {
+				break
+			}
+			suffix++
+			dagID = fmt.Sprintf("%s-%d", baseID, suffix)
+		}
+	}
+
+	dagTitle := req.DAGTitle
+	if dagTitle == "" {
+		dagTitle = goal.Title
+	}
+	execBranch := req.ExecutionBranch
+	if execBranch == "" {
+		execBranch = fmt.Sprintf("feature/%s", dagID)
+	}
+
+	dagMeta := map[string]string{
+		"source_goal_id": goal.ID,
+	}
+
+	if e.dags[req.NamespaceID] == nil {
+		e.dags[req.NamespaceID] = make(map[string]*DAG)
+	}
+	if _, exists := e.dags[req.NamespaceID][dagID]; exists {
+		return nil, fmt.Errorf("dag %s already exists", dagID)
+	}
+
+	now := time.Now().UTC()
+	dag := &DAG{
+		ID:              dagID,
+		NamespaceID:     req.NamespaceID,
+		Title:           dagTitle,
+		ExecutionBranch: execBranch,
+		BaseBranch:      req.BaseBranch,
+		Metadata:        dagMeta,
+		Status:          DAGPlanning,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+
+	if e.db != nil {
+		if err := insertDAG(e.db, dag); err != nil {
+			return nil, fmt.Errorf("persist dag: %w", err)
+		}
+	}
+	e.dags[req.NamespaceID][dagID] = dag
+
+	goal.Status = GoalPromoted
+	goal.DAGID = dag.ID
+	goal.UpdatedAt = now
+
+	if e.db != nil {
+		if err := updateGoalRecord(e.db, goal); err != nil {
+			return nil, fmt.Errorf("persist promoted goal: %w", err)
+		}
+	}
+
+	return &PromoteGoalResult{
+		Goal: *cloneGoal(goal),
+		DAG:  cloneDAG(dag),
+	}, nil
+}
+
