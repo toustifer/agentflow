@@ -480,15 +480,15 @@ When a worker initializes or resumes, it retrieves only task-relevant tuples, yi
 \begin{equation}
 \text{Reduction} = 1 - \frac{\mathcal{P}_{\text{AgentFlow}}}{\mathcal{P}_{\text{Baseline}}}
 \end{equation}
-AgentFlow achieves a measured \textbf{85.2\%--92.1\% reduction} in active per-turn prompt overhead.
+AgentFlow achieves an estimated \textbf{85.2\%--92.1\% context-budget reduction} in active per-turn prompt overhead relative to the observed baseline transcript span. This substantially reduces exposure to context overflow and limits the injection of unrelated historical debris into each decision step.
 
 \subsubsection{Controlled Interruption Recovery Benchmark}
-To empirically test whether persisted operational context ($\mathcal{C}_{\text{resume}}$) genuinely enables task resumption without conversational transcripts, we deployed an automated crash-injection testbed. We interrupted an ongoing implementation task midway (simulating host aborts after partial edits) and measured four recovery configurations facing the same interrupted repository snapshot:
+To empirically test whether persisted operational context ($\mathcal{C}_{\text{resume}}$) genuinely enables task resumption without conversational transcripts, we deployed an automated crash-injection testbed. We interrupted an ongoing implementation task midway (simulating abrupt agent aborts after partial edits) and evaluated four recovery configurations:
 \begin{enumerate}
-    \item \textbf{AgentFlow (Full)}: Re-hydrated with four-state operational context ($\mathcal{C}_{\text{resume}}$).
-    \item \textbf{Ablation: No-State}: Re-hydrated in preserved worktree, but without FSM state or Worker Diary records.
-    \item \textbf{Baseline: Transcript Replay}: Replayed raw historical conversation logs ($>6,000$ tokens).
-    \item \textbf{Baseline: Git-Only Cold Start}: Fresh agent placed in the root repository without execution logs or initial test errors.
+    \item \textbf{AgentFlow (Full)}: Re-hydrated within the preserved worktree using the full four-state operational context ($\mathcal{C}_{\text{resume}}$).
+    \item \textbf{Ablation: Git-Only Warm Start}: Re-hydrated within the preserved worktree with physical Git code state, but without FSM lifecycle state, Worker Diaries, or Handbook context.
+    \item \textbf{Baseline: Transcript Replay}: Re-hydrated within the preserved worktree accompanied by full historical conversational logs ($>6,000$ tokens).
+    \item \textbf{Baseline: Root Cold Start}: A fresh agent initiated in the root repository without the task worktree, execution logs, or diagnostic failure traces.
 \end{enumerate}
 
 \begin{table}[t]
@@ -499,18 +499,24 @@ To empirically test whether persisted operational context ($\mathcal{C}_{\text{r
 \toprule
 \textbf{Configuration} & \textbf{Resume Success} & \textbf{Recovery Tokens} & \textbf{Resume Latency} & \textbf{Repeated Actions} \\
 \midrule
-\textbf{AgentFlow (Full)} & \textbf{100.0\% (Pass)} & \textbf{720} & \textbf{23.0s} & \textbf{0} \\
-Ablation: No-State & 100.0\% (Pass) & 450 & 21.9s & 0 \\
-Baseline: Transcript Replay & 100.0\% (Pass) & 6,200 & 21.4s & 0 \\
-Baseline: Git-Only Cold Start & 0.0\% (Fail) & 380 & 21.7s & 0 \\
+\textbf{AgentFlow (Full)} & \textbf{1/1 (100\%)} & \textbf{720} & \textbf{28.0s} & \textbf{0} \\
+Ablation: Git-Only Warm & 1/1 (100\%) & 450 & 25.6s & 0 \\
+Baseline: Transcript Replay & 1/1 (100\%) & 6,200 & 24.2s & 0 \\
+Baseline: Root Cold Start & 0/1 (0\%) & 380 & 28.0s & N/A \\
 \bottomrule
 \end{tabularx}
+\vspace{0.1cm}
+\begin{minipage}{\columnwidth}
+\footnotesize
+\textit{Note}: Evaluated under an injected mid-implementation abort scenario using identical Gemini 2.5 models and tool budgets. Repeated actions reflect destructive or redundant rollbacks of prior completed work; failed runs are marked N/A.
+\end{minipage}
 \end{table}
 
-As detailed in Table~\ref{tab:interruption_recovery_results}, the empirical evaluation confirms:
+As detailed in Table~\ref{tab:interruption_recovery_results}, the empirical evaluation reveals:
 \begin{itemize}
-    \item \textbf{Cold-Start Fails without Diagnostic Continuity}: In the \textit{Git-Only} baseline, the incoming agent failed completely because without execution records or failure contexts, it was unaware of prior partial migrations and unpassed assertions.
-    \item \textbf{Decoupled Context vs. Transcript Replay}: While \textit{Transcript Replay} succeeded, it incurred \textbf{6,200 recovery prompt tokens} ($8.6\times$ higher than AgentFlow's 720 tokens). AgentFlow achieved identical 100\% pass resumption while keeping context expenditure strictly bounded by the retrieval package.
+    \item \textbf{Physical Workspace Preservation is the Baseline Prerequisite}: The \textit{Root Cold Start} baseline failed completely (0/1), demonstrating that without spatial worktree preservation or failure contexts, an incoming agent cannot decipher un-merged partial migrations from root trunk files. Conversely, both AgentFlow and \textit{Git-Only Warm Start} succeeded because preserving the physical worktree preserved execution momentum.
+    \item \textbf{Replacing Unbounded Transcript Replay}: While \textit{Transcript Replay} succeeded, it demanded \textbf{6,200 prompt tokens} ($8.6\times$ higher than AgentFlow's 720 tokens). AgentFlow achieved identical resumption success while bounding context expenditure to a concise retrieval package.
+    \item \textbf{Nuanced Role of Four-State Context}: In this single-module trial, \textit{Git-Only Warm Start} also passed with 450 tokens because the partial implementation in \texttt{auth.py} was sufficiently transparent for the model to deduce the missing function. AgentFlow's 720 tokens provide richer operational context (FSM lease validity, diary handoff, and architectural invariants). The benchmark demonstrates that the structured recovery package matches the success of lighter representations while eliminating transcript replay overhead; it does not by itself establish that all four state dimensions are individually necessary for every simple task.
 \end{itemize}
 
 \subsection{RQ3: Worktree Isolation \& Rework Dynamics}
