@@ -138,14 +138,14 @@ func toolInputSchema(name string) map[string]any {
 		add("namespace_id", "focus", "dag_id", "task_id")
 		required = []string{"namespace_id"}
 	case "dag_create":
-		add("namespace_id", "dag_id", "title", "branch", "execution_branch", "base_branch")
+		add("namespace_id", "dag_id", "title", "priority", "branch", "execution_branch", "base_branch")
 		properties["metadata"] = stringMapProp
 		required = []string{"namespace_id", "dag_id", "title"}
 	case "dag_get", "dag_report", "dag_flowchart":
 		add("namespace_id", "dag_id", "with")
 		required = []string{"namespace_id", "dag_id"}
 	case "dag_update":
-		add("namespace_id", "dag_id", "title", "branch", "execution_branch", "base_branch")
+		add("namespace_id", "dag_id", "title", "priority", "branch", "execution_branch", "base_branch")
 		properties["metadata"] = stringMapProp
 		required = []string{"namespace_id", "dag_id"}
 	case "worker_register":
@@ -273,7 +273,7 @@ func toolInputSchema(name string) map[string]any {
 		properties["priority_gte"] = numberProp
 		required = []string{"namespace_id"}
 	case "goal_promote":
-		add("namespace_id", "goal_id", "dag_id", "dag_title", "execution_branch", "base_branch")
+		add("namespace_id", "goal_id", "dag_id", "dag_title", "priority", "execution_branch", "base_branch")
 		required = []string{"namespace_id", "goal_id"}
 	case "worker_update":
 		add("namespace_id", "worker_id", "name", "scope", "kind", "stuck_playbook", "escalation_mode", "launch_mode", "prompt_template")

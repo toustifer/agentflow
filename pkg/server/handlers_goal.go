@@ -208,6 +208,7 @@ func (s *Server) handleGoalPromote(ctx context.Context, input map[string]any) (m
 	}
 	dagID, _ := optionalString(input, "dag_id")
 	dagTitle, _ := optionalString(input, "dag_title")
+	priority, _ := optionalString(input, "priority")
 	execBranch, _ := optionalString(input, "execution_branch")
 	baseBranch, _ := optionalString(input, "base_branch")
 
@@ -216,6 +217,7 @@ func (s *Server) handleGoalPromote(ctx context.Context, input map[string]any) (m
 		GoalID:          goalID,
 		DAGID:           dagID,
 		DAGTitle:        dagTitle,
+		Priority:        priority,
 		ExecutionBranch: execBranch,
 		BaseBranch:      baseBranch,
 	})

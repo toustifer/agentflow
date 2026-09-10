@@ -285,6 +285,7 @@ func (s *Server) handleDAGCreate(ctx context.Context, input map[string]any) (map
 	if err != nil {
 		return nil, err
 	}
+	priority, _ := optionalString(input, "priority")
 	branch, _ := optionalString(input, "branch")
 	executionBranch, _ := optionalString(input, "execution_branch")
 	baseBranch, _ := optionalString(input, "base_branch")
@@ -304,6 +305,7 @@ func (s *Server) handleDAGCreate(ctx context.Context, input map[string]any) (map
 		NamespaceID:     nsID,
 		ID:              dagID,
 		Title:           title,
+		Priority:        priority,
 		ExecutionBranch: executionBranch,
 		BaseBranch:      resolvedBase,
 		Metadata:        metadata,
@@ -389,8 +391,14 @@ func (s *Server) handleDAGUpdate(ctx context.Context, input map[string]any) (map
 		return nil, err
 	}
 
+	var priPtr *string
+	if v, ok := input["priority"].(string); ok && v != "" {
+		priPtr = &v
+	}
+
 	dag, err := s.engine.UpdateDAG(ctx, nsID, dagID, engine.UpdateDAGRequest{
 		Title:           title,
+		Priority:        priPtr,
 		ExecutionBranch: executionBranch,
 		BaseBranch:      resolvedBase,
 		Metadata:        metadata,
@@ -1210,10 +1218,15 @@ func (s *Server) handleProjectBlockers(ctx context.Context, input map[string]any
 
 func dagToMap(dag *engine.DAG) map[string]any {
 	hint := dagResumeHintFromMetadata(dag.Metadata)
+	pri := string(dag.Priority)
+	if pri == "" {
+		pri = string(engine.DAGPriorityP2)
+	}
 	return map[string]any{
 		"id":               dag.ID,
 		"namespace_id":     dag.NamespaceID,
 		"title":            dag.Title,
+		"priority":         pri,
 		"branch":           dag.ExecutionBranch,
 		"execution_branch": dag.ExecutionBranch,
 		"base_branch":      dag.BaseBranch,
