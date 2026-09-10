@@ -199,4 +199,75 @@ func TestGoalPromotion(t *testing.T) {
 	}
 }
 
+func TestGoalPersistenceAndReopen(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "goals_persist.db")
+
+	eng1, err := NewEngine(NewEngineConfig{DBPath: dbPath})
+	if err != nil {
+		t.Fatalf("failed to create eng1: %v", err)
+	}
+	ctx := context.Background()
+	_, err = eng1.CreateNamespace(ctx, CreateNamespaceRequest{ID: "ns-p", Name: "Namespace P"})
+	if err != nil {
+		t.Fatalf("create ns failed: %v", err)
+	}
+
+	g1, err := eng1.CreateGoal(ctx, CreateGoalRequest{
+		NamespaceID: "ns-p",
+		Title:       "Persisted Goal 1",
+		Priority:    5,
+		Tags:        []string{"infra"},
+		Context:     "Issue #123",
+	})
+	if err != nil {
+		t.Fatalf("create goal failed: %v", err)
+	}
+
+	_, err = eng1.PromoteGoal(ctx, PromoteGoalRequest{
+		NamespaceID: "ns-p",
+		GoalID:      g1.ID,
+	})
+	if err != nil {
+		t.Fatalf("promote goal failed: %v", err)
+	}
+
+	g2, err := eng1.CreateGoal(ctx, CreateGoalRequest{
+		NamespaceID: "ns-p",
+		Title:       "Persisted Goal 2",
+		Priority:    10,
+	})
+	if err != nil {
+		t.Fatalf("create goal 2 failed: %v", err)
+	}
+
+	if err := eng1.Close(); err != nil {
+		t.Fatalf("failed to close eng1: %v", err)
+	}
+
+	// Reopen engine from dbPath
+	eng2, err := NewEngine(NewEngineConfig{DBPath: dbPath})
+	if err != nil {
+		t.Fatalf("failed to reopen eng2: %v", err)
+	}
+	defer eng2.Close()
+
+	pG1, err := eng2.GetGoal(ctx, "ns-p", g1.ID)
+	if err != nil {
+		t.Fatalf("failed to get pG1: %v", err)
+	}
+	if pG1.Status != GoalPromoted || pG1.DAGID != "dag-"+g1.ID {
+		t.Fatalf("unexpected pG1 after reopen: %+v", pG1)
+	}
+
+	pG2, err := eng2.GetGoal(ctx, "ns-p", g2.ID)
+	if err != nil {
+		t.Fatalf("failed to get pG2: %v", err)
+	}
+	if pG2.Status != GoalPending || pG2.Priority != 10 {
+		t.Fatalf("unexpected pG2 after reopen: %+v", pG2)
+	}
+}
+
+
 

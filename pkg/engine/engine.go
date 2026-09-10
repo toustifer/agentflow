@@ -229,6 +229,13 @@ func NewEngine(cfg NewEngineConfig) (*Engine, error) {
 		for nsID, docs := range docMap {
 			e.nextProjectDocID[nsID] = nextProjectDocID(docs) - 1
 		}
+
+		goalMap, err := loadGoals(db)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("load goals: %w", err)
+		}
+		e.goals = goalMap
 	}
 
 	return e, nil
