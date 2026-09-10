@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -20,6 +21,45 @@ const (
 	DAGDone       DAGStatus = "done"
 	DAGCancelled  DAGStatus = "cancelled"
 )
+
+type DAGPriority string
+
+const (
+	DAGPriorityP0 DAGPriority = "P0"
+	DAGPriorityP1 DAGPriority = "P1"
+	DAGPriorityP2 DAGPriority = "P2"
+	DAGPriorityP3 DAGPriority = "P3"
+)
+
+func NormalizeDAGPriority(p string) (DAGPriority, error) {
+	switch strings.ToUpper(strings.TrimSpace(p)) {
+	case "", "P2":
+		return DAGPriorityP2, nil
+	case "P0":
+		return DAGPriorityP0, nil
+	case "P1":
+		return DAGPriorityP1, nil
+	case "P3":
+		return DAGPriorityP3, nil
+	default:
+		return "", fmt.Errorf("invalid dag priority %q: must be one of P0, P1, P2, P3", p)
+	}
+}
+
+func DAGPriorityWeight(p DAGPriority) int {
+	switch p {
+	case DAGPriorityP0:
+		return 100
+	case DAGPriorityP1:
+		return 50
+	case DAGPriorityP2:
+		return 20
+	case DAGPriorityP3:
+		return 0
+	default:
+		return 20
+	}
+}
 
 type DAG struct {
 	ID                  string            `json:"id"`
