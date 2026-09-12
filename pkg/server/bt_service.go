@@ -167,9 +167,9 @@ func (b *BTBridge) Start(owner *Server) error {
 	cmd := exec.Command(pythonPath, serviceArgs...)
 
 	root := findBTDir()
+	env := os.Environ()
 	if root != "" {
 		cmd.Dir = root
-		env := os.Environ()
 		sep := string(os.PathListSeparator)
 		pyPathVal := root
 		foundKey := false
@@ -187,40 +187,40 @@ func (b *BTBridge) Start(owner *Server) error {
 		if !foundKey {
 			env = append(env, "PYTHONPATH="+pyPathVal)
 		}
-		env = append(env,
-			"AGENTFLOW_BT_PHASE_URL="+provider.url,
-			"AGENTFLOW_BT_PHASE_TOKEN="+provider.token,
-			"AGENTFLOW_BT_DISPATCH_URL="+dispatchProvider.url,
-			"AGENTFLOW_BT_DISPATCH_TOKEN="+dispatchProvider.token,
-			"AGENTFLOW_BT_MONITOR_URL="+monitorProvider.url,
-			"AGENTFLOW_BT_MONITOR_TOKEN="+monitorProvider.token,
-			"AGENTFLOW_BT_STUCK_URL="+stuckProvider.url,
-			"AGENTFLOW_BT_STUCK_TOKEN="+stuckProvider.token,
-			"AGENTFLOW_BT_DONE_URL="+doneProvider.url,
-			"AGENTFLOW_BT_DONE_TOKEN="+doneProvider.token,
-			"AGENTFLOW_BT_TASK_GET_URL="+taskGetProvider.url,
-			"AGENTFLOW_BT_TASK_GET_TOKEN="+taskGetProvider.token,
-			"AGENTFLOW_BT_ENTER_WORKTREE_URL="+enterWorktreeProvider.url,
-			"AGENTFLOW_BT_ENTER_WORKTREE_TOKEN="+enterWorktreeProvider.token,
-			"AGENTFLOW_BT_IMPLEMENT_CODE_URL="+implementProvider.url,
-			"AGENTFLOW_BT_IMPLEMENT_CODE_TOKEN="+implementProvider.token,
-			"AGENTFLOW_BT_GIT_COMMIT_URL="+gitCommitProvider.url,
-			"AGENTFLOW_BT_GIT_COMMIT_TOKEN="+gitCommitProvider.token,
-			"AGENTFLOW_BT_DOC_WRITE_URL="+docWriteProvider.url,
-			"AGENTFLOW_BT_DOC_WRITE_TOKEN="+docWriteProvider.token,
-			"AGENTFLOW_BT_DIARY_WRITE_URL="+diaryWriteProvider.url,
-			"AGENTFLOW_BT_DIARY_WRITE_TOKEN="+diaryWriteProvider.token,
-			"AGENTFLOW_BT_SUBMIT_REVIEW_URL="+submitReviewProvider.url,
-			"AGENTFLOW_BT_SUBMIT_REVIEW_TOKEN="+submitReviewProvider.token,
-			"AGENTFLOW_BT_FETCH_DIFF_URL="+fetchDiffProvider.url,
-			"AGENTFLOW_BT_FETCH_DIFF_TOKEN="+fetchDiffProvider.token,
-			"AGENTFLOW_BT_REVIEW_PASS_URL="+reviewPassProvider.url,
-			"AGENTFLOW_BT_REVIEW_PASS_TOKEN="+reviewPassProvider.token,
-			"AGENTFLOW_BT_REVIEW_REWORK_URL="+reviewReworkProvider.url,
-			"AGENTFLOW_BT_REVIEW_REWORK_TOKEN="+reviewReworkProvider.token,
-		)
-		cmd.Env = env
 	}
+	env = append(env,
+		"AGENTFLOW_BT_PHASE_URL="+provider.url,
+		"AGENTFLOW_BT_PHASE_TOKEN="+provider.token,
+		"AGENTFLOW_BT_DISPATCH_URL="+dispatchProvider.url,
+		"AGENTFLOW_BT_DISPATCH_TOKEN="+dispatchProvider.token,
+		"AGENTFLOW_BT_MONITOR_URL="+monitorProvider.url,
+		"AGENTFLOW_BT_MONITOR_TOKEN="+monitorProvider.token,
+		"AGENTFLOW_BT_STUCK_URL="+stuckProvider.url,
+		"AGENTFLOW_BT_STUCK_TOKEN="+stuckProvider.token,
+		"AGENTFLOW_BT_DONE_URL="+doneProvider.url,
+		"AGENTFLOW_BT_DONE_TOKEN="+doneProvider.token,
+		"AGENTFLOW_BT_TASK_GET_URL="+taskGetProvider.url,
+		"AGENTFLOW_BT_TASK_GET_TOKEN="+taskGetProvider.token,
+		"AGENTFLOW_BT_ENTER_WORKTREE_URL="+enterWorktreeProvider.url,
+		"AGENTFLOW_BT_ENTER_WORKTREE_TOKEN="+enterWorktreeProvider.token,
+		"AGENTFLOW_BT_IMPLEMENT_CODE_URL="+implementProvider.url,
+		"AGENTFLOW_BT_IMPLEMENT_CODE_TOKEN="+implementProvider.token,
+		"AGENTFLOW_BT_GIT_COMMIT_URL="+gitCommitProvider.url,
+		"AGENTFLOW_BT_GIT_COMMIT_TOKEN="+gitCommitProvider.token,
+		"AGENTFLOW_BT_DOC_WRITE_URL="+docWriteProvider.url,
+		"AGENTFLOW_BT_DOC_WRITE_TOKEN="+docWriteProvider.token,
+		"AGENTFLOW_BT_DIARY_WRITE_URL="+diaryWriteProvider.url,
+		"AGENTFLOW_BT_DIARY_WRITE_TOKEN="+diaryWriteProvider.token,
+		"AGENTFLOW_BT_SUBMIT_REVIEW_URL="+submitReviewProvider.url,
+		"AGENTFLOW_BT_SUBMIT_REVIEW_TOKEN="+submitReviewProvider.token,
+		"AGENTFLOW_BT_FETCH_DIFF_URL="+fetchDiffProvider.url,
+		"AGENTFLOW_BT_FETCH_DIFF_TOKEN="+fetchDiffProvider.token,
+		"AGENTFLOW_BT_REVIEW_PASS_URL="+reviewPassProvider.url,
+		"AGENTFLOW_BT_REVIEW_PASS_TOKEN="+reviewPassProvider.token,
+		"AGENTFLOW_BT_REVIEW_REWORK_URL="+reviewReworkProvider.url,
+		"AGENTFLOW_BT_REVIEW_REWORK_TOKEN="+reviewReworkProvider.token,
+	)
+	cmd.Env = env
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -283,7 +283,7 @@ func (b *BTBridge) Start(owner *Server) error {
 		}
 	case <-time.After(btBridgeStartupTimeout):
 		b.stopLocked()
-		return fmt.Errorf("bt_service startup timeout after %s; stderr=%q", btBridgeStartupTimeout, stderrBuf.String())
+		return fmt.Errorf("bt_service startup timeout after %s; root=%q python=%q stderr=%q", btBridgeStartupTimeout, root, pythonPath, stderrBuf.String())
 	}
 
 	return nil
@@ -431,7 +431,15 @@ func (b *BTBridge) stopLocked() {
 
 func findBTDir() string {
 	if d := os.Getenv("AGENTFLOW_BT_DIR"); d != "" {
-		return d
+		if info, err := os.Stat(d); err == nil && info.IsDir() {
+			if _, err := os.Stat(filepath.Join(d, "bt_service")); err == nil {
+				return d
+			}
+			if filepath.Base(d) == "bt_service" {
+				return filepath.Dir(d)
+			}
+			return d
+		}
 	}
 	if exe, err := os.Executable(); err == nil {
 		candidates := []string{
@@ -451,6 +459,16 @@ func findBTDir() string {
 	if _, err := os.Stat("bt_service"); err == nil {
 		if cwd, err := os.Getwd(); err == nil {
 			return cwd
+		}
+	}
+	if _, err := os.Stat(filepath.Join("..", "bt_service")); err == nil {
+		if cwd, err := os.Getwd(); err == nil {
+			return filepath.Dir(cwd)
+		}
+	}
+	if _, err := os.Stat(filepath.Join("..", "..", "bt_service")); err == nil {
+		if cwd, err := os.Getwd(); err == nil {
+			return filepath.Dir(filepath.Dir(cwd))
 		}
 	}
 	return ""
