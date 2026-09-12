@@ -9,12 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	btBridgeStartupTimeout = 5 * time.Second
+	btBridgeStartupTimeout = 10 * time.Second
 	btBridgeStopTimeout    = 2 * time.Second
 	btBridgeMaxFrameBytes  = 4 * 1024 * 1024
 )
@@ -171,16 +172,22 @@ func (b *BTBridge) Start(owner *Server) error {
 		env := os.Environ()
 		sep := string(os.PathListSeparator)
 		pyPathVal := root
-		for _, kv := range env {
-			if len(kv) > 11 && kv[:11] == "PYTHONPATH=" {
-				if existing := kv[11:]; existing != "" {
+		foundKey := false
+		for i, kv := range env {
+			if len(kv) >= 11 && strings.EqualFold(kv[:11], "PYTHONPATH=") {
+				existing := kv[11:]
+				if existing != "" {
 					pyPathVal = root + sep + existing
 				}
+				env[i] = "PYTHONPATH=" + pyPathVal
+				foundKey = true
 				break
 			}
 		}
+		if !foundKey {
+			env = append(env, "PYTHONPATH="+pyPathVal)
+		}
 		env = append(env,
-			"PYTHONPATH="+pyPathVal,
 			"AGENTFLOW_BT_PHASE_URL="+provider.url,
 			"AGENTFLOW_BT_PHASE_TOKEN="+provider.token,
 			"AGENTFLOW_BT_DISPATCH_URL="+dispatchProvider.url,
