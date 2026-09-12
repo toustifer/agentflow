@@ -1,11 +1,11 @@
 # Download-first install for Windows (no Go, no git clone).
 # Usage (PowerShell):
 #   irm https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.ps1 | iex
-#   $env:VERSION='v0.2.6'; .\install.ps1
+#   $env:VERSION='v0.2.7'; .\install.ps1
 #   .\install.ps1 -WriteConfig -WriteCodexConfig
 
 param(
-  [string]$Version = $(if ($env:VERSION) { $env:VERSION } else { "v0.2.6" }),
+  [string]$Version = $(if ($env:VERSION) { $env:VERSION } else { "v0.2.7" }),
   [string]$Repo = "toustifer/agentflow",
   [string]$Dest = $(Join-Path $env:USERPROFILE ".claude\skills\agentflow"),
   [switch]$WriteConfig,
@@ -57,6 +57,14 @@ try {
   $modeLib = Join-Path $Dest "hooks\mode-lib.js"
   if (-not (Select-String -Path $modeLib -Pattern "MCP GATE" -Quiet)) {
     throw "installed skill missing MCP GATE"
+  }
+
+  if (-not (Test-Path (Join-Path $Dest "bt_service")) -or -not (Test-Path (Join-Path $Dest "trees"))) {
+    Write-Warning "installed skill missing bt_service/ or trees/"
+  }
+
+  if (-not (Get-Command python -ErrorAction SilentlyContinue) -and -not (Get-Command py -ErrorAction SilentlyContinue)) {
+    Write-Warning "Python 3.8+ is required for the agentflow behavior tree service (bt_service)."
   }
 
   $absInject = Join-Path $Dest "hooks\mode-inject.js"

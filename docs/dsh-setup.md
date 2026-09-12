@@ -1,7 +1,7 @@
 # agentflow on DeepSeek Harness (DSH) — Setup Guide
 
-> Branch: `deepseek/dsh-support` · Base: master (`v0.2.6` Claude/Codex setup)
-> Updated: 2026-08-14
+> Branch: `deepseek/dsh-support` · Base: master (`v0.2.7` Claude/Codex setup)
+> Updated: 2026-09-12
 >
 > 本分支把 agentflow 的宿主支持从 Claude Code / Codex 扩展到
 > **DeepSeek Harness (DSH, `@deepseek-ai/dsh`)**。同一个 Go 二进制、同一套
@@ -25,15 +25,19 @@ DSH 的 skill 系统见 `@deepseek-ai/dsh-skill-filesystem`：只认
 
 | 组件 | DSH 位置 | 说明 |
 |------|----------|------|
-| Skill | `~/.dsh/skills/agentflow/` | 本仓库 `skills/agentflow/` 内容 + frontmatter 包装 |
+| Skill | `~/.dsh/skills/agentflow/` | 本仓库 `skills/agentflow/` 内容 + frontmatter 包装（含 `bt_service` 与 `trees`） |
 | MCP | `~/.dsh/profiles/web/cordis.patch.yml` | `dsh-mcp-client` 插件实例，stdio 启动 `agentflow stdio` |
 | CLI（替代 hooks） | `hooks/mode-cli.js` 等 | DSH 无每轮注入；mode/status 走 `node hooks/mode-cli.js` |
+
+环境要求：Node 18+、Python 3.8+（执行 `python -m bt_service` 行为树引擎，纯标准库无第三方 pip 依赖）。
 
 ## 三、安装步骤
 
 ### 1. 安装 Skill
 
 ```bash
+# 若从源码仓库安装，先确保同步最新 bt_service 与 trees
+bash scripts/sync-skill.sh
 mkdir -p ~/.dsh/skills/agentflow
 rsync -a skills/agentflow/ ~/.dsh/skills/agentflow/
 ```
@@ -210,5 +214,5 @@ DSH 的子 Agent 通过 `composeFrom` 固定 join 父预设，**无按调用换 
 ## 八、版本与发布
 
 - 分支 `deepseek/dsh-support` 与 master 并行维护；master 的引擎修复会定期合入
-- Release 命名建议 `v0.2.6-dsh` 系列，与 Claude/Codex 版 `v0.2.6` 区分
+- Release 命名建议 `v0.2.7-dsh` 系列，与 Claude/Codex 版 `v0.2.7` 区分
 - 构建与打包沿用 `scripts/build-release.sh`（同一 Go 二进制，无宿主差异）

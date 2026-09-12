@@ -2,13 +2,13 @@
 # Download-first install of agentflow skill + MCP binary (no Go, no git clone).
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.sh | bash
-#   VERSION=v0.2.6 bash install.sh
+#   VERSION=v0.2.7 bash install.sh
 #   bash install.sh --write-config   # also merge ~/.claude.json mcp entry (backup first)
 #   bash install.sh --write-config --write-codex-config
 set -euo pipefail
 
 REPO="${REPO:-toustifer/agentflow}"
-VERSION="${VERSION:-v0.2.6}"
+VERSION="${VERSION:-v0.2.7}"
 BASE="${BASE:-https://github.com/${REPO}/releases/download/${VERSION}}"
 DEST="${DEST:-$HOME/.claude/skills/agentflow}"
 WRITE_CONFIG=0
@@ -94,6 +94,14 @@ chmod +x "$DEST/bin/$LOCAL_BIN_NAME"
 if ! grep -q "MCP GATE" "$DEST/hooks/mode-lib.js"; then
   echo "ERROR: installed skill missing MCP GATE" >&2
   exit 1
+fi
+
+if [[ ! -d "$DEST/bt_service" || ! -d "$DEST/trees" ]]; then
+  echo "WARNING: installed skill missing bt_service/ or trees/" >&2
+fi
+
+if ! command -v python3 >/dev/null 2>&1 && ! command -v python >/dev/null 2>&1; then
+  echo "WARNING: Python 3.8+ is required for the agentflow behavior tree service (bt_service)." >&2
 fi
 
 ABS_BIN="$DEST/bin/$LOCAL_BIN_NAME"

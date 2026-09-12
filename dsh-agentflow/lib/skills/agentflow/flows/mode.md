@@ -2,8 +2,6 @@
 
 让 `/agentflow` 在会话里“保持开启”，接近 goal 插件的 always-on 体验。
 
-> **DSH 宿主：本 flow 整体不适用。** DSH 没有 `UserPromptSubmit` hook / statusline，也没有输入框前缀机制；其会话天然持久，模型每次通过 `skill` 工具加载 `agentflow` 技能即重新获得完整规则与 MCP 门禁。DSH 下直接忽略 `on` / `off` / `status` 命令，进入业务 flow 前照常执行「会话工具列表含 `mcp__agentflow__*` + `flow_ping` 成功」的门禁即可。以下内容仅对 Claude Code 有效。
-
 ## 重要限制
 
 Claude Code **不能**在输入框 UI 上挂住 `agentflow` 文本前缀/chip。

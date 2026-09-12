@@ -23,10 +23,63 @@ if command -v rsync >/dev/null 2>&1; then
     --exclude '*.exe' \
     --exclude 'node_modules/' \
     --exclude '__pycache__/' \
+    --exclude '*.pyc' \
     "$SRC/" "$STAGE/agentflow/"
 else
   cp -R "$SRC/." "$STAGE/agentflow/"
   rm -rf "$STAGE/agentflow/bin" 2>/dev/null || true
+fi
+
+# Ensure bt_service is fresh from root
+if [[ -d "$ROOT/bt_service" ]]; then
+  mkdir -p "$STAGE/agentflow/bt_service"
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --delete \
+      --exclude '__pycache__/' \
+      --exclude '*.pyc' \
+      --exclude 'tests/' \
+      "$ROOT/bt_service/" "$STAGE/agentflow/bt_service/"
+  else
+    rm -rf "$STAGE/agentflow/bt_service"
+    cp -R "$ROOT/bt_service" "$STAGE/agentflow/"
+    rm -rf "$STAGE/agentflow/bt_service/tests" "$STAGE/agentflow/bt_service/__pycache__" 2>/dev/null || true
+    find "$STAGE/agentflow/bt_service" -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
+    find "$STAGE/agentflow/bt_service" -name '*.pyc' -delete 2>/dev/null || true
+  fi
+fi
+
+# Ensure trees is fresh from root
+if [[ -d "$ROOT/trees" ]]; then
+  mkdir -p "$STAGE/agentflow/trees"
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --delete \
+      --exclude '__pycache__/' \
+      --exclude '*.pyc' \
+      "$ROOT/trees/" "$STAGE/agentflow/trees/"
+  else
+    rm -rf "$STAGE/agentflow/trees"
+    cp -R "$ROOT/trees" "$STAGE/agentflow/"
+    find "$STAGE/agentflow/trees" -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
+    find "$STAGE/agentflow/trees" -name '*.pyc' -delete 2>/dev/null || true
+  fi
+fi
+
+if [[ -f "$ROOT/requirements.txt" ]]; then
+  cp "$ROOT/requirements.txt" "$STAGE/agentflow/requirements.txt"
+fi
+
+# Sanity: verify required BT engine and tree assets
+if [[ ! -d "$STAGE/agentflow/bt_service" ]]; then
+  echo "ERROR: skill package missing bt_service/ — refuse pack" >&2
+  exit 1
+fi
+if [[ ! -d "$STAGE/agentflow/trees" ]]; then
+  echo "ERROR: skill package missing trees/ — refuse pack" >&2
+  exit 1
+fi
+if [[ ! -f "$STAGE/agentflow/requirements.txt" ]]; then
+  echo "ERROR: skill package missing requirements.txt — refuse pack" >&2
+  exit 1
 fi
 
 # Sanity: MCP GATE must be present for releases after v0.2.1

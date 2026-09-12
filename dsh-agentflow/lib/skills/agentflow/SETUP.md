@@ -2,7 +2,7 @@
 
 > Canonical public mirror: https://hub.stifer.xyz/agentflow-setup.md  
 > **Default install = download Release (no Go, no git clone).**  
-> Updated: 2026-08-05 · Release **v0.2.6**
+> Updated: 2026-09-12 · Release **v0.2.7**
 
 ## 概述
 
@@ -31,7 +31,7 @@ MCP 未通过时：agent 必须停并让用户修 MCP，**禁止** JSON-RPC / sq
 
 ## 推荐安装：一键下载（macOS / Linux）
 
-需要：`curl`、`tar`、Node 18+（hooks）。**不需要 Go / git。**
+需要：`curl`、`tar`、Node 18+（hooks）、Python 3.8+（行为树 sidecar，纯标准库无 pip 依赖）。**不需要 Go / git。**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.sh | bash
@@ -41,7 +41,7 @@ curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.sh \
-  | VERSION=v0.2.6 bash -s -- --write-config --write-codex-config
+  | VERSION=v0.2.7 bash -s -- --write-config --write-codex-config
 ```
 
 脚本会：
@@ -65,14 +65,14 @@ curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/
 irm https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.ps1 | iex
 # 或:
 # $script = irm 'https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.ps1'
-# & ([scriptblock]::Create($script)) -Version 'v0.2.6' -WriteConfig -WriteCodexConfig
+# & ([scriptblock]::Create($script)) -Version 'v0.2.7' -WriteConfig -WriteCodexConfig
 ```
 
-装到 `%USERPROFILE%\.claude\skills\agentflow\`，二进制为 `bin\agentflow.exe`。
+装到 `%USERPROFILE%\.claude\skills\agentflow\`，二进制为 `bin\agentflow.exe`。环境要求：PowerShell、Node 18+、Python 3.8+（纯标准库无 pip 依赖）。
 
 ## 手动下载（不用 install 脚本）
 
-Release：https://github.com/toustifer/agentflow/releases/tag/v0.2.6
+Release：https://github.com/toustifer/agentflow/releases/tag/v0.2.7
 
 | 资产 | 用途 |
 |------|------|
@@ -83,7 +83,7 @@ Release：https://github.com/toustifer/agentflow/releases/tag/v0.2.6
 | `agentflow-windows-amd64.exe` | Windows x64 |
 
 ```bash
-VERSION=v0.2.6
+VERSION=v0.2.7
 BASE=https://github.com/toustifer/agentflow/releases/download/$VERSION
 DEST=~/.claude/skills/agentflow
 mkdir -p "$DEST/bin"
@@ -181,7 +181,7 @@ node ~/.claude/skills/agentflow/hooks/mode-cli.js update
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.sh \
-  | VERSION=v0.2.6 bash -s -- --write-config --write-codex-config
+  | VERSION=v0.2.7 bash -s -- --write-config --write-codex-config
 ```
 
 然后**完全退出并重启 Claude Code 和 Codex**，再跑一次 `/agentflow update`。
@@ -202,12 +202,13 @@ curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/
 
 ```bash
 git clone https://github.com/toustifer/agentflow.git && cd agentflow
+bash scripts/sync-skill.sh
 rsync -a skills/agentflow/ ~/.claude/skills/agentflow/
 mkdir -p ~/.claude/skills/agentflow/bin
 go build -o ~/.claude/skills/agentflow/bin/agentflow ./cmd/agentflow/
 # 发布者：
-# VERSION=v0.2.6 bash scripts/build-release.sh
-# gh release create v0.2.6 dist/agentflow-* dist/skill.tgz
+# VERSION=v0.2.7 bash scripts/build-release.sh
+# gh release create v0.2.7 dist/agentflow-* dist/skill.tgz
 ```
 
 ## Codex CLI（同一二进制）
@@ -226,6 +227,34 @@ codex mcp list
 ```
 
 Hub：https://hub.stifer.xyz/codex-setup.md
+
+## DeepSeek Harness (DSH)（独立维护分支）
+
+DSH 是 DeepSeek 的宿主，与 Claude/Codex 的差异在 **Skill 装载格式**（必须 frontmatter）与 **MCP 注册方式**（`cordis.patch.yml` + `@deepseek-ai/dsh-mcp-client`），同一 Go 二进制。完整安装与验证见 **`docs/dsh-setup.md`**（分支 `deepseek/dsh-support`）。
+
+要点：
+
+```bash
+# Skill → ~/.dsh/skills/agentflow/（SKILL.md 顶部加 name+description frontmatter）
+mkdir -p ~/.dsh/skills/agentflow
+rsync -a skills/agentflow/ ~/.dsh/skills/agentflow/
+```
+
+```yaml
+# ~/.dsh/profiles/web/cordis.patch.yml
+- insert:
+    - id: mcp-agentflow
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: agentflow
+        transport: stdio
+        command: /Users/YOU/.dsh/skills/agentflow/bin/agentflow
+        args: ['stdio']
+```
+
+验收：会话里有 `mcp__agentflow__flow_ping` 且能调通（DSH 无 `/mcp` UI，
+以会话工具存在为准）。**无 UserPromptSubmit hooks**——sticky mode 退化为
+CLI 脚本，不靠每轮注入。
 
 ## 已废弃（勿再教）
 
@@ -258,14 +287,3 @@ hub_status({ "namespace_id": "insighttutor" })  # source=namespace
 
 多项目 = 多个 namespace 各自绑定，不会抢整机默认团队。  
 详见 `docs/HUB_SOFT_SYNC.md` 与 https://hub.stifer.xyz/agent-setup.md
-
-## DSH（DeepSeek Harness）宿主
-
-同一份 skill + 二进制也可接入 DSH：技能通过 DSH 的 `skill` 工具加载（SKILL.md 已含 frontmatter），MCP 通过 `<dshHome>/profiles/<profile>/cordis.patch.yml` 的 `dsh-mcp-client` insert 补丁注册，工具名同样是 `mcp__agentflow__*`。DSH 无 hooks/statusline/sticky mode，无需本文件上述 Claude 专属步骤。
-
-```powershell
-# Windows：安装后一键同步 DSH（skill + MCP patch，幂等、带备份）
-.\scripts\install.ps1 -WriteDshConfig
-```
-
-完整指南见 `docs/DSH_INTEGRATION.md`。

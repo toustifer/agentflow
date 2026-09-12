@@ -1,12 +1,6 @@
----
-name: agentflow
-description: 项目编排引擎调度器：以 project_init -> DAG/task -> leader/worker/reviewer -> review 交接的项目状态机组织开发工作，覆盖初始化、拆解、派工、推进、恢复、进度查看、阻塞汇报与项目记忆。当用户要求按项目工作流组织或推进开发任务，或提到 agentflow、project_init、leader_tick、task_create、dag_create、mcp__agentflow 时使用。
-whenToUse: 用户请求以 agentflow 生命周期工作流组织或推进开发任务，且本会话存在 mcp__agentflow__* 工具（或需要先进入 setup 修复 MCP）时。
----
-
 # /agentflow
 
-项目编排引擎调度器。Claude Code 宿主下 `/agentflow` 是唯一公开入口；DSH（DeepSeek Harness）宿主下通过 `skill` 工具加载本技能（`<skill_content name="agentflow">`）。
+项目编排引擎调度器。`/agentflow` 是唯一公开入口。
 
 `setup` / `init` / `intake` / `goal` / `resume` / `inspect` / `shape` / `mode` / `update` 现在都作为本 bundle 内部 flow 持有：
 
@@ -37,21 +31,7 @@ agentflow/
 
 ## 总原则
 
-先确认宿主与 `agentflow` MCP 是否可用，再决定进入哪个业务 flow。
-
-## 宿主适配（Claude Code / DSH）
-
-本 bundle 同时支持 **Claude Code** 与 **DSH（DeepSeek Harness）** 两个宿主，业务 flow、MCP 门禁与路由规则完全一致。
-
-| 能力 | Claude Code | DSH |
-|------|-------------|-----|
-| 入口 | `/agentflow` 斜杠命令 | 模型通过 `skill` 工具按需加载本技能 |
-| MCP 注册 | `~/.claude.json` 的 `mcpServers` | `<dshHome>/profiles/<profile>/cordis.patch.yml` 挂 `@deepseek-ai/dsh-mcp-client`（见 `docs/DSH_INTEGRATION.md`） |
-| 会话保持 | sticky mode（`UserPromptSubmit` hook + statusline） | 无需：DSH 会话天然持久，每次加载本技能即重新注入完整规则 |
-| MCP 状态检查 | `/mcp` 面板 | 无面板：检查本会话工具列表是否含 `mcp__agentflow__*` |
-| 工具命名 | `mcp__agentflow__*` | 相同（`mcp__<serverName>__<rawName>`） |
-
-判断宿主：出现 `/agentflow` 命令 → Claude Code；通过 `skill` 工具收到 `<skill_content name="agentflow">` → DSH。DSH 宿主下本技能的所有 flow 引用（`flows/*.md`、`references/*.md`）均相对技能基目录解析（DSH 会在 `<skill_resources>` 中给出基目录）。
+先确认 `agentflow` MCP 是否可用，再决定进入哪个业务 flow。
 
 ## MCP 硬门禁（禁止旁路）
 
@@ -59,17 +39,17 @@ agentflow/
 
 | 层 | 含义 | 能否当验收 |
 |----|------|------------|
-| 配置 | `~/.claude.json`（Claude）/ `cordis.patch.yml`（DSH）里有 `agentflow` | 否（只说明写过配置） |
-| 进程 | `claude mcp list` → Connected（DSH 无此命令） | **否**（不等于本会话工具已注入） |
+| 配置 | `~/.claude.json` / 项目 mcp 里有 `agentflow` | 否（只说明写过配置） |
+| 进程 | `claude mcp list` → Connected | **否**（不等于本会话工具已注入） |
 | **会话工具** | 当前模型工具列表里有 `mcp__agentflow__*` | **是** |
-| UI | Claude：`/mcp` 列出 agentflow 且非 failed；DSH：无面板，以会话工具列表为准 | 用户侧必查（Claude） |
+| UI | `/mcp` 列出 agentflow 且非 failed | 用户侧必查 |
 
-**MCP 不可用时（无 `mcp__agentflow__*`、调用失败、Claude `/mcp` 无 agentflow 或 failed）：**
+**MCP 不可用时（无 `mcp__agentflow__*`、调用失败、`/mcp` 无 agentflow 或 failed）：**
 
 1. **立刻停止** goal / resume / prepare / start / submit / 写产品代码。
 2. **禁止**用 Bash/shell 跑 `agentflow`、`agentflow stdio`、手写 JSON-RPC `tools/call`、直接 sqlite 改 agentflow DB，当作 MCP 替代。
 3. **禁止**谎报 lifecycle 成功或「已在用 agentflow」。
-4. **明确告诉用户**先修好 MCP：Claude 宿主 → 打开 `/mcp` 修好 `agentflow`（必要时一并修 `hub`）→ 重启 Claude Code；DSH 宿主 → 修正 `cordis.patch.yml` 的 `mcp-agentflow` 条目（见 `docs/DSH_INTEGRATION.md`）→ 重启 DSH 或新开会话。最终确认本会话能调用 `mcp__agentflow__flow_ping`。
+4. **明确告诉用户**先修好 MCP：打开 `/mcp` → 修好 `agentflow`（必要时一并修 `hub`）→ 重启 Claude Code → 确认本会话能调用 `mcp__agentflow__flow_ping`。
 5. 只进入 `flows/setup.md` 做安装/修复指导，修好前不回到业务 flow。
 
 sticky 注入（`hooks/mode-inject.js`）每轮重复上述门禁；statusline 在配置缺失时显示 `MCP:missing` / `MCP:broken`。
@@ -102,8 +82,6 @@ task_transition(start)                # launch.ticket + real worker_agent_id
 完整派工协议见 `flows/goal.md` 的 Execute 段。
 
 ## Sticky Mode（会话保持）
-
-**仅适用于 Claude Code。** DSH 宿主没有 `UserPromptSubmit` hook / statusline 机制，也不需要 sticky mode：DSH 会话天然持久，模型每次通过 `skill` 工具加载本技能都会重新获得完整规则，MCP 门禁检查照常执行即可。
 
 Claude Code **不能**在输入框里挂住 `agentflow` 文本前缀。  
 等价能力是 sticky mode：
@@ -151,8 +129,6 @@ statusline     -> 可选显示 agentflow:on
 /agentflow [无]                -> 默认读取 flows/resume.md
 其他                             -> 全部当作 goal，先读取 flows/intake.md，再读取 flows/goal.md
 ```
-
-DSH 宿主没有斜杠命令：模型加载本技能后，把用户请求意图直接映射到上表（`on` / `off` / `status` / `update` 四个命令在 DSH 下不可用——mode 无意义，版本检查改为手动执行 `agentflow version-json` 或读取 `VERSION` 文件；其余按意图路由到 init / goal / resume / inspect / setup）。
 
 ## 路由规则
 
@@ -219,6 +195,5 @@ DSH 宿主没有斜杠命令：模型加载本技能后，把用户请求意图�
 
 - `references/using-superpowers-adapter.md` 是 shape 阶段的参考材料
 - `flows/*.md` 是本 bundle 的主实现定义，不是附属说明文档
-- `SETUP.md` 是 Claude Code / Codex 宿主的安装说明来源，不是业务 flow 文档
-- `docs/DSH_INTEGRATION.md` 是 DSH 宿主的安装/注册/验证指南（skill 安装 + MCP 注册 + 与 Claude 的差异）
-- `hooks/*` 是 Claude Code sticky mode 的运行时脚本（DSH 不使用）；skill 本身不会每轮自动重注入，Claude 侧必须靠 `UserPromptSubmit` hook，DSH 侧靠每次 `skill` 工具加载
+- `SETUP.md` 是 setup flow 的安装说明来源，不是业务 flow 文档
+- `hooks/*` 是 sticky mode 的运行时脚本；skill 本身不会每轮自动重注入，必须靠 `UserPromptSubmit` hook

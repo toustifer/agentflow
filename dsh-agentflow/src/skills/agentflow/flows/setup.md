@@ -15,17 +15,6 @@ setup flow 的目标不是直接做产品，而是：
 - 指导用户安装或修复 agentflow MCP
 - 在确认 MCP 恢复可用后，把控制权交回 `/agentflow` 主流程
 
-## 宿主分流
-
-| 检查项 | Claude Code | DSH |
-|--------|-------------|-----|
-| MCP 注册位置 | `~/.claude.json` → `mcpServers.agentflow` | `<dshHome>/profiles/<profile>/cordis.patch.yml` 的 `mcp-agentflow` insert 条目 |
-| MCP 状态 UI | `/mcp` 面板 | 无面板；看会话工具列表 |
-| 重启方式 | 完全退出并重启 Claude Code | 重启 DSH 进程或新开会话（插件在启动时激活） |
-| 安装指南 | `SETUP.md` | `docs/DSH_INTEGRATION.md` |
-
-DSH 宿主下的验证标准不变：**本会话工具列表必须出现 `mcp__agentflow__*`，且 `flow_ping` 调用成功**。若 DSH 侧 MCP 缺失，按 `docs/DSH_INTEGRATION.md` 修，不要把本 flow 里 Claude 专属的路径（`~/.claude.json`、`/mcp`、`agent-company/bin`）当成 DSH 的修复目标。
-
 ## 硬停止（进入本 flow 后立刻遵守）
 
 进入 setup 即表示 **MCP 门禁未通过**。在 `mcp__agentflow__flow_ping` 成功之前：
@@ -40,7 +29,7 @@ DSH 宿主下的验证标准不变：**本会话工具列表必须出现 `mcp__a
 
 **允许：** 诊断、读 `SETUP.md`、给用户可复制的安装/配置命令、在用户确认后改可逆配置、请用户打开 `/mcp` 并重启。
 
-对用户的首屏话术（照抄或等价；Claude 宿主版）：
+对用户的首屏话术（照抄或等价）：
 
 ```text
 agentflow MCP 在本会话不可用，请先修好 MCP，不要继续旁路推进。
@@ -51,8 +40,6 @@ agentflow MCP 在本会话不可用，请先修好 MCP，不要继续旁路推�
 `agentflow:on` 只表示 mode 开了，不表示 MCP 好了。
 ```
 
-**DSH 宿主版**：把 1)–3) 替换为——1) 检查 `<dshHome>/profiles/<profile>/cordis.patch.yml` 是否有 `mcp-agentflow` 条目且 `command` 指向支持 `stdio` 子命令的 agentflow 二进制；2) 按 `docs/DSH_INTEGRATION.md` 修复；3) 重启 DSH 或新开会话。4) 不变：本会话必须能直接调用 `mcp__agentflow__flow_ping`。
-
 ## 诊断顺序
 
 ### Step 1. 先判断是不是“完全没有 agentflow MCP”
@@ -61,14 +48,10 @@ agentflow MCP 在本会话不可用，请先修好 MCP，不要继续旁路推�
 - 看不到 `mcp__agentflow__*` 工具
 - `/mcp` 中没有 `agentflow`
 
-优先检查（Claude）：
+优先检查：
 - `~/.claude.json` 里是否配置了 `agentflow` MCP server
 - `agent-company/bin/agentflow-mcp.mjs` 是否存在
 - agentflow 二进制是否存在于预期位置
-
-优先检查（DSH）：
-- `<dshHome>/profiles/<profile>/cordis.patch.yml` 是否含 `mcp-agentflow` insert 条目
-- 该条目 `config.command` 指向的二进制是否存在、是否支持 `stdio` 子命令（旧构建会把任何参数当 HTTP 启动，见 `docs/DSH_INTEGRATION.md`）
 
 ### Step 2. 如果 MCP 存在，再测健康
 
@@ -84,13 +67,11 @@ mcp__agentflow__flow_ping
 
 ### Step 3. 检查本地关键文件
 
-优先检查这些路径（Claude）：
+优先检查这些路径：
 - `agent-company/bin/agentflow-mcp.mjs`
 - `agent-company/bin/agentflow.exe`（Windows）
 - `agent-company/bin/agentflow`（macOS/Linux）
 - `~/.claude.json`
-
-DSH 宿主：以 `cordis.patch.yml` 中 `mcp-agentflow.config.command` 指定的二进制为准（典型位置如 `<skill>/bin/agentflow` 或仓库 `bin/` 下）。
 
 ### Step 4. 检查运行前置条件
 
@@ -108,7 +89,6 @@ DSH 宿主：以 `cordis.patch.yml` 中 `mcp-agentflow.config.command` 指定的
 - 安装/修复 `agentflow-mcp.mjs`
 - 更新 `~/.claude.json`
 - 重启 Claude Code 或重新加载 MCP
-- **DSH 宿主**：修正 `cordis.patch.yml` 的 `mcp-agentflow` 条目（`command`/`args: ["stdio"]`）、把 skill 同步到 DSH 技能根目录（`~/.agents/skills/agentflow` 或项目 `.agents/skills`）、重启 DSH 或新开会话。详见 `docs/DSH_INTEGRATION.md`。
 
 ## 安装信息来源
 

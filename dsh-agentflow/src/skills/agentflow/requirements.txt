@@ -1,0 +1,6 @@
+# agentflow Python runtime requirements
+# bt_service runs on Python standard library modules (Python >= 3.8).
+# No external pip dependencies are required for runtime.
+#
+# Development and unit tests:
+# pytest>=7.0.0
