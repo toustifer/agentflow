@@ -7,3 +7,4 @@ export * from './types';
 export * from './cycle';
 export * from './cpm';
 export * from './diff';
+export * from './simulation';

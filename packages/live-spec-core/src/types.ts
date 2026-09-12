@@ -6,8 +6,10 @@ export type TaskState =
   | 'pending'
   | 'ready'
   | 'executing'
+  | 'running'
   | 'submitted'
   | 'passed'
+  | 'pass'
   | 'rework'
   | 'blocked'
   | 'cancelled';
@@ -124,3 +126,33 @@ export type UpstreamEvent =
   | { type: 'REQUEST_FULLSCREEN'; payload: { fullscreen: boolean } };
 
 export type BridgeEvent = DownstreamEvent | UpstreamEvent;
+
+// Simulation Types
+export interface SimulatedTaskState {
+  id: string;
+  title: string;
+  state: TaskState;
+  progress: number;
+  duration: number;
+  depends_on: string[];
+  priority: number;
+  estimated_hours?: number;
+  assigned_worker?: string;
+  failureReason?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface SimulationSnapshot {
+  clock: number;
+  activeRunningCount: number;
+  isComplete: boolean;
+  tasks: Record<string, SimulatedTaskState>;
+  concurrency: number;
+}
+
+export interface SimulationOptions {
+  concurrency?: number;
+  defaultDuration?: number;
+  autoRetry?: boolean;
+}
+
