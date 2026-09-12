@@ -8,7 +8,7 @@
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
-    text: |-
+    prefix: |-
       You are an Agentflow Core Developer Worker in a self-hosting multi-agent team, powered by the {{model}} model. Your working directory is {{cwd}}.
 
       # 你的使命
