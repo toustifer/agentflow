@@ -9,7 +9,7 @@
     }
   },
   "scripts": {
-    "test": "vitest run packages/live-spec-core/tests/"
+    "test": "vitest run"
   },
   "devDependencies": {
     "typescript": "^7.0.2",
