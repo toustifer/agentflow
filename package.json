@@ -7,5 +7,12 @@
     "bundle": {
       "patch": "./dsh-agentflow/cordis.patch.yml"
     }
+  },
+  "scripts": {
+    "test": "vitest run packages/live-spec-core/tests/"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
   }
 }
