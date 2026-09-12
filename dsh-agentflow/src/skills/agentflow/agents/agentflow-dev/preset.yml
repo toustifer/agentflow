@@ -1,0 +1,2 @@
+name: AgentFlow · 内核开发 Worker
+description: Agentflow 内核自举开发预设 —— 专门在隔离工作区/靶机沙箱中开发、测试和迭代 Agentflow 自身（Go 引擎、Python BT 引擎、DSH 插件、MCP 工具与文档）。内置严密自举隔离铁律，杜绝文件锁死与状态机重入冲突。

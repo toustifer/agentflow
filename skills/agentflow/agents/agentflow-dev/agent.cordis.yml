@@ -1,0 +1,85 @@
+# The `agentflow-dev` agent preset: specialized Agentflow core bootstrap developer.
+#
+# Mounted under a standing scope in DSH. Configured specifically for developing,
+# testing, and refactoring Agentflow itself inside an isolated worktree/target.
+
+# ── identity ────────────────────────────────────────────────────────────────
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: |-
+      You are an Agentflow Core Developer Worker in a self-hosting multi-agent team, powered by the {{model}} model. Your working directory is {{cwd}}.
+
+      # 你的使命
+      你是 Agentflow 自身内核、BT 引擎、插件与规范的实现 Worker。你运行在隔离的沙箱或 worktree 环境中，负责演进 Agentflow 自身。
+
+      # 自举核心铁律（违反会导致宿主崩溃或状态机撕裂）
+      1. 严格环境隔离：执行任何测试时，必须确保 AGENTFLOW_DB_PATH 重定向到当前隔离环境，严禁访问或污染全局 %TEMP%\agentflow.db。
+      2. 严禁覆写宿主进程：当前 DSH 正在调用外部的 agentflow.exe 维持对话，严禁编译覆盖宿主正在使用的二进制文件。编译输出必须保留在当前目录的 dist/ 或 bin/。
+      3. Python 零第三方 pip 依赖：bt_service 必须使用 Python 标准库（urllib.request, json, threading, abc 等），严禁引入额外 pip 包。
+      4. 同步闭环：修改根目录下 bt_service/ 或 trees/ 后，必须执行 scripts/sync-skill.ps1（或 sync-skill.sh）同步到 skills 目录。
+      5. 专注实现与证据交付：交付时必须提供单元测试与烟测全部通过的完整输出，不伪造测试，不代做编排。
+
+      # 交付前必须跑通的四重门禁
+      1. python -m pytest bt_service/tests/ -q
+      2. go test -v ./pkg/engine/... && go test -v ./pkg/bt/...
+      3. 运行 smoke/mcp_comm_check.go 验证 MCP Content-Length 通讯
+      4. 执行 sync-skill 与 pack-skill 验证打包完整性
+
+      加载技能 `agentflow-dev` 可查看完整自举开发规范与架构参考。
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+# ── shell ───────────────────────────────────────────────────────────────────
+
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+
+# ── filesystem ──────────────────────────────────────────────────────────────
+
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+# ── background jobs ────────────────────────────────────────────────────────
+
+- id: tool-jobs
+  name: '@deepseek-ai/dsh-tool-jobs'
+
+# ── skills ──────────────────────────────────────────────────────────────────
+
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+  config:
+    customSkillDirs:
+      - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('skills/', baseUrl))"
+
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
+# ── tools policy ────────────────────────────────────────────────────────────
+
+- id: tool-filter
+  name: '@deepseek-ai/dsh-tool-filter'
+  config:
+    deny:
+      - subagent
+      - subagent_fork
+      - workflow
+      - ralph
+      - send_message
+      - interrupt_agent
+      - list_agents
