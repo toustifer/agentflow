@@ -1,0 +1,364 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import type {
+  LiveSpecDoc,
+  SpecDiffResult,
+  HostToCanvasMessage,
+  CanvasToHostMessage,
+  LiveSpecHostCardProps,
+  ThemeMode,
+} from './types';
+
+export interface DshClientContext {
+  slots: {
+    inject: (name: string, callback: () => (() => void) | void) => () => void;
+    register: (
+      descriptor: { name: string; key: string; [key: string]: unknown },
+      component: unknown
+    ) => () => void;
+  };
+  sidebarRightTabs?: {
+    register: (definition: Record<string, unknown>) => () => void;
+  };
+  effect?: (callback: () => void | (() => void), name?: string) => void;
+  [key: string]: unknown;
+}
+
+export const LIVE_SPEC_TAB_KEY = 'live-spec';
+export const DEFAULT_CANVAS_URL = '/agentflow/canvas/index.html';
+
+/**
+ * Live-Spec Tab Title Component registered in DSH right sidebar.
+ */
+export function LiveSpecPaneTitle(): React.ReactElement {
+  return React.createElement(
+    'div',
+    {
+      style: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '6px',
+        fontSize: '13px',
+        fontWeight: 500,
+        userSelect: 'none',
+      },
+      title: 'Agentflow Live-Spec Interactive Canvas',
+    },
+    React.createElement(
+      'svg',
+      {
+        width: 14,
+        height: 14,
+        viewBox: '0 0 24 24',
+        fill: 'none',
+        stroke: 'currentColor',
+        strokeWidth: 2,
+        strokeLinecap: 'round',
+        strokeLinejoin: 'round',
+      },
+      React.createElement('circle', { cx: 6, cy: 6, r: 3 }),
+      React.createElement('circle', { cx: 6, cy: 18, r: 3 }),
+      React.createElement('circle', { cx: 18, cy: 12, r: 3 }),
+      React.createElement('path', { d: 'M9 6h4a2 2 0 0 1 2 2v4m0 0a2 2 0 0 1-2 2H9' })
+    ),
+    React.createElement('span', null, 'Live Spec')
+  );
+}
+
+/**
+ * Host Card Container with Embedded Iframe and Fullscreen Modal Toggle
+ */
+export function LiveSpecHostCard({
+  canvasUrl = DEFAULT_CANVAS_URL,
+  initialSpec = null,
+  readOnly = false,
+  theme = 'dark',
+  onApply,
+  onFeedbackIntent,
+  className,
+}: LiveSpecHostCardProps): React.ReactElement {
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [currentSpec, setCurrentSpec] = useState<LiveSpecDoc | null>(initialSpec);
+  const [isReady, setIsReady] = useState(false);
+  const [lastNotification, setLastNotification] = useState<string | null>(null);
+
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  // Sync initialSpec when prop changes
+  useEffect(() => {
+    if (initialSpec) {
+      setCurrentSpec(initialSpec);
+      if (isReady && iframeRef.current?.contentWindow) {
+        const msg: HostToCanvasMessage = {
+          type: 'SPEC_MOUNT',
+          payload: { spec: initialSpec, readOnly },
+        };
+        iframeRef.current.contentWindow.postMessage(msg, '*');
+      }
+    }
+  }, [initialSpec, isReady, readOnly]);
+
+  // Post message to iframe safely
+  const postToCanvas = useCallback((message: HostToCanvasMessage) => {
+    if (iframeRef.current?.contentWindow) {
+      iframeRef.current.contentWindow.postMessage(message, '*');
+    }
+  }, []);
+
+  // Listen to messages from child iframe
+  useEffect(() => {
+    const handleWindowMessage = (event: MessageEvent) => {
+      const data = event.data as CanvasToHostMessage | undefined;
+      if (!data || typeof data !== 'object' || !data.type) return;
+
+      switch (data.type) {
+        case 'CANVAS_READY': {
+          setIsReady(true);
+          // Mount initial spec if available
+          if (currentSpec) {
+            postToCanvas({
+              type: 'SPEC_MOUNT',
+              payload: { spec: currentSpec, readOnly },
+            });
+          }
+          // Send theme
+          postToCanvas({
+            type: 'THEME_CHANGE',
+            payload: { theme },
+          });
+          break;
+        }
+
+        case 'SPEC_APPLY': {
+          const { spec, diff } = data.payload;
+          setCurrentSpec(spec);
+          setLastNotification(`Spec applied: ${diff?.summary || `${spec.tasks.length} tasks`}`);
+          onApply?.({ spec, diff });
+          break;
+        }
+
+        case 'SPEC_FEEDBACK_INTENT': {
+          const { diff, spec, prompt } = data.payload;
+          setLastNotification('Feedback sent to AI conversation');
+          onFeedbackIntent?.({ diff, spec, prompt });
+          break;
+        }
+
+        case 'REQUEST_FULLSCREEN': {
+          setIsFullscreen(Boolean(data.payload.fullscreen));
+          break;
+        }
+      }
+    };
+
+    window.addEventListener('message', handleWindowMessage);
+    return () => {
+      window.removeEventListener('message', handleWindowMessage);
+    };
+  }, [currentSpec, onApply, onFeedbackIntent, postToCanvas, readOnly, theme]);
+
+  const toggleFullscreen = useCallback(() => {
+    setIsFullscreen((prev) => !prev);
+  }, []);
+
+  const containerStyle: React.CSSProperties = isFullscreen
+    ? {
+        position: 'fixed',
+        inset: 0,
+        zIndex: 99999,
+        backgroundColor: theme === 'light' ? '#f8fafc' : '#0f172a',
+        display: 'flex',
+        flexDirection: 'column',
+        width: '100vw',
+        height: '100vh',
+        overflow: 'hidden',
+      }
+    : {
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+        width: '100%',
+        height: '100%',
+        minHeight: '480px',
+        backgroundColor: theme === 'light' ? '#ffffff' : '#090d16',
+        borderRadius: '6px',
+        overflow: 'hidden',
+      };
+
+  const headerStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '8px 12px',
+    backgroundColor: theme === 'light' ? '#f1f5f9' : '#1e293b',
+    borderBottom: theme === 'light' ? '1px solid #e2e8f0' : '1px solid #334155',
+    color: theme === 'light' ? '#0f172a' : '#f8fafc',
+    fontSize: '12px',
+    lineHeight: 1.4,
+  };
+
+  const buttonStyle: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+    padding: '4px 8px',
+    fontSize: '12px',
+    fontWeight: 500,
+    borderRadius: '4px',
+    border: theme === 'light' ? '1px solid #cbd5e1' : '1px solid #475569',
+    backgroundColor: theme === 'light' ? '#ffffff' : '#334155',
+    color: theme === 'light' ? '#1e293b' : '#f8fafc',
+    cursor: 'pointer',
+    transition: 'background-color 0.15s ease',
+  };
+
+  return React.createElement(
+    'div',
+    {
+      className,
+      style: containerStyle,
+      'data-testid': 'live-spec-host-container',
+    },
+    // Header
+    React.createElement(
+      'div',
+      { style: headerStyle },
+      React.createElement(
+        'div',
+        { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+        React.createElement(
+          'span',
+          { style: { fontWeight: 600 } },
+          currentSpec?.title || 'Agentflow Live-Spec Canvas'
+        ),
+        currentSpec?.dag_id
+          ? React.createElement(
+              'span',
+              {
+                style: {
+                  fontSize: '11px',
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  backgroundColor: theme === 'light' ? '#e2e8f0' : '#334155',
+                  color: theme === 'light' ? '#475569' : '#94a3b8',
+                },
+              },
+              currentSpec.dag_id
+            )
+          : null,
+        lastNotification
+          ? React.createElement(
+              'span',
+              {
+                style: {
+                  fontSize: '11px',
+                  color: '#10b981',
+                  marginLeft: '8px',
+                },
+              },
+              `✓ ${lastNotification}`
+            )
+          : null
+      ),
+      React.createElement(
+        'div',
+        { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+        React.createElement(
+          'button',
+          {
+            type: 'button',
+            onClick: toggleFullscreen,
+            style: buttonStyle,
+            title: isFullscreen ? '收起全屏 (Esc)' : '展开全屏模式',
+            'data-testid': 'fullscreen-toggle-btn',
+          },
+          isFullscreen ? '⤡ 收起' : '⤢ 展开'
+        )
+      )
+    ),
+    // Embedded Iframe
+    React.createElement('iframe', {
+      ref: iframeRef,
+      src: canvasUrl,
+      title: 'Agentflow Live Spec Canvas',
+      allow: 'clipboard-write; fullscreen',
+      style: {
+        flex: 1,
+        width: '100%',
+        height: '100%',
+        border: 'none',
+        backgroundColor: 'transparent',
+      },
+    })
+  );
+}
+
+/**
+ * Live-Spec Pane Body Component registered to DSH slot: sidebar.right.pane.tab
+ */
+export function LiveSpecPaneBody(props: any): React.ReactElement {
+  return React.createElement(LiveSpecHostCard, {
+    canvasUrl: props?.canvasUrl || DEFAULT_CANVAS_URL,
+    initialSpec: props?.spec || null,
+    readOnly: props?.readOnly ?? false,
+    theme: props?.theme || 'dark',
+    onApply: props?.onApply,
+    onFeedbackIntent: props?.onFeedbackIntent,
+  });
+}
+
+export const name = 'dsh-interactive-spec';
+export const inject = ['slots'];
+
+/**
+ * Client plugin entry point for DeepSeek Harness (Cordis runner).
+ */
+export function apply(ctx: DshClientContext): void {
+  const registerSlots = () => {
+    // Register the tab definition with sidebarRightTabs if service is available
+    if (ctx.sidebarRightTabs && typeof ctx.sidebarRightTabs.register === 'function') {
+      ctx.sidebarRightTabs.register({
+        id: LIVE_SPEC_TAB_KEY,
+        kind: LIVE_SPEC_TAB_KEY,
+        title: () => 'Live Spec',
+        guide: {
+          order: 15,
+          title: 'Live Spec Canvas',
+          description: 'Interactive DAG canvas with real-time simulation and CPM analysis',
+        },
+      });
+    }
+
+    // Register sidebar.right.pane.tab.title
+    const unregisterTitle = ctx.slots.inject('sidebar.right.pane.tab.title', () =>
+      ctx.slots.register(
+        {
+          name: 'sidebar.right.pane.tab.title',
+          key: LIVE_SPEC_TAB_KEY,
+        },
+        LiveSpecPaneTitle
+      )
+    );
+
+    // Register sidebar.right.pane.tab
+    const unregisterBody = ctx.slots.inject('sidebar.right.pane.tab', () =>
+      ctx.slots.register(
+        {
+          name: 'sidebar.right.pane.tab',
+          key: LIVE_SPEC_TAB_KEY,
+        },
+        LiveSpecPaneBody
+      )
+    );
+
+    return () => {
+      unregisterTitle?.();
+      unregisterBody?.();
+    };
+  };
+
+  if (typeof ctx.effect === 'function') {
+    ctx.effect(registerSlots, 'dsh-interactive-spec: sidebar slots');
+  } else {
+    registerSlots();
+  }
+}
