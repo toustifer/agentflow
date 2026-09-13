@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -12,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -242,154 +240,28 @@ func toolNames(tools []lwserver.ToolSpec) []string {
 	return names
 }
 
-type rpcRequest struct {
-	JSONRPC string         `json:"jsonrpc"`
-	Method  string         `json:"method"`
-	Params  map[string]any `json:"params"`
-	ID      any            `json:"id"`
+type rpcRequest = lwserver.RPCRequest
+type rpcResponse = lwserver.RPCResponse
+type rpcError = lwserver.RPCError
+
+func formatToolResult(v any) string {
+	return lwserver.FormatToolResult(v)
 }
 
-type rpcResponse struct {
-	JSONRPC string    `json:"jsonrpc"`
-	Result  any       `json:"result,omitempty"`
-	Error   *rpcError `json:"error,omitempty"`
-	ID      any       `json:"id"`
-}
-
-type rpcError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
-// serveMCP runs the MCP server loop over the standard MCP stdio framing
-// (Content-Length headers + JSON body), which is what official SDK clients
-// (@modelcontextprotocol/sdk — used by Claude Code and DeepSeek Harness) speak.
-// The previous newline-delimited implementation crashed on "Content-Length"
-// headers with "invalid character 'C' looking for beginning of value", which
-// made the server unusable from any standard MCP client.
-//
-// initialize, tools/list, and tools/call follow the MCP protocol. All other
-// methods (direct tool names like "namespace_create" etc.) are dispatched
-// through Server.Handle for the file-mode bridge.
+// serveMCP runs the MCP server loop over stdio with auto-detect adaptive framing
+// (supporting both Content-Length headers and Newline-delimited JSON).
 func serveMCP(ctx context.Context, in io.Reader, out io.Writer, srv *lwserver.Server) error {
-	reader := bufio.NewReader(in)
-
-	for {
-		body, err := readMCPMessage(reader)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			return err
-		}
-
-		var req rpcRequest
-		if err := json.Unmarshal(body, &req); err != nil {
-			return err
-		}
-
-		if req.ID == nil {
-			continue
-		}
-
-		resp := rpcResponse{JSONRPC: "2.0", ID: req.ID}
-		switch req.Method {
-		case "initialize":
-			resp.Result = map[string]any{
-				"protocolVersion": "2024-11-05",
-				"capabilities":    map[string]any{"tools": map[string]any{}},
-				"serverInfo":      map[string]any{"name": "agentflow", "version": "0.1.0"},
-			}
-		case "tools/list":
-			resp.Result = map[string]any{"tools": srv.Tools()}
-		case "tools/call":
-			name, _ := req.Params["name"].(string)
-			args, _ := req.Params["arguments"].(map[string]any)
-			data, callErr := srv.Handle(ctx, name, args)
-			if callErr != nil {
-				resp.Error = &rpcError{Code: -32603, Message: callErr.Error()}
-			} else {
-				resp.Result = map[string]any{"content": []any{map[string]any{"type": "text", "text": formatToolResult(data)}}}
-			}
-		default:
-			// Direct method dispatch for file-mode bridge.
-			data, callErr := srv.Handle(ctx, req.Method, req.Params)
-			if callErr != nil {
-				resp.Error = &rpcError{Code: -32603, Message: callErr.Error()}
-			} else {
-				resp.Result = map[string]any{"content": []any{map[string]any{"type": "text", "text": formatToolResult(data)}}}
-			}
-		}
-
-		payload, err := json.Marshal(resp)
-		if err != nil {
-			return err
-		}
-		if err := writeMCPMessage(out, payload); err != nil {
-			return err
-		}
-	}
+	return lwserver.ServeMCP(ctx, in, out, srv)
 }
 
-// readMCPMessage reads one standard MCP stdio frame: header lines terminated
-// by an empty line (Content-Length required, other headers ignored) followed
-// by exactly Content-Length bytes of JSON body. Blank lines between frames
-// (stray whitespace some naive pipelines append) are skipped rather than
-// misread as an empty header block.
+// readMCPMessage reads one MCP frame, delegating to the auto-detecting reader in lwserver.
 func readMCPMessage(reader *bufio.Reader) ([]byte, error) {
-	for {
-		contentLength := -1
-		for {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				// A clean EOF before any header means the client closed the
-				// stream between messages: normal shutdown.
-				if errors.Is(err, io.EOF) && contentLength == -1 && line == "" {
-					return nil, io.EOF
-				}
-				return nil, err
-			}
-			line = strings.TrimRight(line, "\r\n")
-			if line == "" {
-				break
-			}
-			key, value, found := strings.Cut(line, ":")
-			if !found {
-				return nil, fmt.Errorf("invalid MCP header line %q", line)
-			}
-			if strings.EqualFold(strings.TrimSpace(key), "content-length") {
-				n, err := strconv.Atoi(strings.TrimSpace(value))
-				if err != nil || n < 0 {
-					return nil, fmt.Errorf("invalid Content-Length header %q", line)
-				}
-				contentLength = n
-			}
-		}
-		if contentLength < 0 {
-			// Blank line before any header: stray whitespace between frames.
-			continue
-		}
-		body := make([]byte, contentLength)
-		if _, err := io.ReadFull(reader, body); err != nil {
-			return nil, err
-		}
-		return body, nil
-	}
+	body, _, err := lwserver.ReadMCPMessage(reader)
+	return body, err
 }
 
 // writeMCPMessage writes one standard MCP stdio frame around payload.
 func writeMCPMessage(out io.Writer, payload []byte) error {
-	if _, err := fmt.Fprintf(out, "Content-Length: %d\r\n\r\n", len(payload)); err != nil {
-		return err
-	}
-	_, err := out.Write(payload)
-	return err
+	return lwserver.WriteMCPMessage(out, payload, lwserver.FramingContentLength)
 }
 
-func formatToolResult(v any) string {
-	payload, err := json.Marshal(v)
-	if err != nil {
-		return fmt.Sprint(v)
-	}
-	return string(payload)
-}

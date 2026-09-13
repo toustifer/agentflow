@@ -167,3 +167,64 @@ func TestServeMCPToleratesTrailingWhitespace(t *testing.T) {
 
 	require.Equal(t, 2, strings.Count(output.String(), "Content-Length:"))
 }
+
+// TestServeMCPNewlineDelimitedFraming tests that newline-delimited JSON (NDJSON)
+// requests (e.g. from DSH or Claude Code) receive pure single-line JSON responses
+// without Content-Length headers.
+func TestServeMCPNewlineDelimitedFraming(t *testing.T) {
+	srv := newTestServer(t)
+
+	input := bytes.NewBufferString("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n")
+	var output bytes.Buffer
+	require.NoError(t, serveMCP(context.Background(), input, &output, srv))
+
+	outStr := output.String()
+	require.NotContains(t, outStr, "Content-Length:")
+	require.True(t, strings.HasSuffix(outStr, "\n"))
+
+	trimmed := strings.TrimRight(outStr, "\r\n")
+	require.NotContains(t, trimmed, "\n")
+
+	var response struct {
+		JSONRPC string `json:"jsonrpc"`
+		ID      int    `json:"id"`
+		Result  struct {
+			ProtocolVersion string `json:"protocolVersion"`
+			ServerInfo      struct {
+				Name string `json:"name"`
+			} `json:"serverInfo"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(trimmed), &response))
+	require.Equal(t, "2.0", response.JSONRPC)
+	require.Equal(t, 1, response.ID)
+	require.Equal(t, "agentflow", response.Result.ServerInfo.Name)
+}
+
+// TestServeMCPAdaptiveFraming verifies adaptive responses when a client sends
+// mixed framing across subsequent requests.
+func TestServeMCPAdaptiveFraming(t *testing.T) {
+	srv := newTestServer(t)
+
+	input := bytes.NewBufferString(
+		"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n" +
+			framedRequest(`{"jsonrpc":"2.0","id":2,"method":"initialize","params":{}}`) +
+			"{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"initialize\",\"params\":{}}\n",
+	)
+	var output bytes.Buffer
+	require.NoError(t, serveMCP(context.Background(), input, &output, srv))
+
+	outStr := output.String()
+	// Should have exactly 1 Content-Length header (from req 2).
+	require.Equal(t, 1, strings.Count(outStr, "Content-Length:"))
+
+	// First response must be newline JSON.
+	firstNL := strings.Index(outStr, "\n")
+	require.Positive(t, firstNL)
+	var resp1 struct {
+		ID int `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(outStr[:firstNL]), &resp1))
+	require.Equal(t, 1, resp1.ID)
+}
+
