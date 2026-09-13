@@ -1,0 +1,22 @@
+{
+  "name": "@agentflow/live-spec-core",
+  "version": "0.1.0",
+  "description": "Core algorithms for Agentflow Live-Spec: CPM critical path, cycle detection, diff calculation and contract types",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "keywords": [
+    "agentflow",
+    "dag",
+    "cpm",
+    "cycle-detection",
+    "spec-diff"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  }
+}
