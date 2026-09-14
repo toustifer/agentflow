@@ -9,6 +9,8 @@ export default defineConfig({
     alias: {
       '@agentflow/live-spec-core': path.resolve(__dirname, 'packages/live-spec-core/src'),
       '@agentflow/dsh-interactive-spec': path.resolve(__dirname, 'packages/dsh-interactive-spec/src'),
+      'react': path.resolve(__dirname, 'node_modules/.pnpm/react@18.3.1/node_modules/react'),
+      'react-dom': path.resolve(__dirname, 'node_modules/.pnpm/react-dom@18.3.1_react@18.3.1/node_modules/react-dom'),
     },
   },
   test: {
