@@ -95,7 +95,7 @@ func (s *Server) gitCommitChangesOnce(ctx context.Context, namespaceID, taskID, 
 	diff := ""
 	if runtime.BaseBranch != "" && runtime.Branch != "" {
 		if value, err := runGit(ctx, runtime.WorktreePath, "diff", runtime.BaseBranch+"..."+runtime.Branch); err == nil {
-			diff = value
+			diff = truncateReviewDiff(value, runtime.BaseBranch, runtime.Branch)
 		}
 	}
 

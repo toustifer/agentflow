@@ -6,9 +6,30 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/toustifer/agentflow/pkg/engine"
 )
+
+// MaxReviewDiffBytes limits git diff stored in task review metadata (100KB).
+const MaxReviewDiffBytes = 100 * 1024
+
+func truncateReviewDiff(diff, base, branch string) string {
+	if len(diff) <= MaxReviewDiffBytes {
+		return diff
+	}
+	limit := MaxReviewDiffBytes
+	for limit > 0 && !utf8.RuneStart(diff[limit]) {
+		limit--
+	}
+	notice := fmt.Sprintf(
+		"\n\n... [git diff truncated: total %d bytes; exceeds 100KB limit. Review the complete diff via 'git diff %s...%s' in worktree]\n",
+		len(diff),
+		base,
+		branch,
+	)
+	return diff[:limit] + notice
+}
 
 type ToolSpec struct {
 	Name        string         `json:"name"`
@@ -998,7 +1019,7 @@ func (s *Server) handleTaskTransition(ctx context.Context, input map[string]any)
 				}
 				if base != "" {
 					if diff, err := runGit(ctx, wtPath, "diff", base+"..."+branch); err == nil {
-						metadata["review.diff"] = diff
+						metadata["review.diff"] = truncateReviewDiff(diff, base, branch)
 					}
 				}
 			}

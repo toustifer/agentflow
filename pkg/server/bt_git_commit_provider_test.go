@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -43,6 +44,48 @@ func TestGitCommitChangesOnceReturnsReviewMetadata(t *testing.T) {
 	task, err := eng.GetTask(context.Background(), "ns-1", "T1")
 	require.NoError(t, err)
 	require.Equal(t, resp.Review["commit"], task.Metadata["review.commit"])
+}
+
+func TestGitCommitChangesOnceTruncatesLargeDiff(t *testing.T) {
+	t.Parallel()
+
+	repoPath := initTestGitRepo(t)
+	eng, err := engine.NewEngine(engine.NewEngineConfig{})
+	require.NoError(t, err)
+	defer eng.Close()
+
+	srv, err := New(eng, Config{})
+	require.NoError(t, err)
+
+	_, err = eng.CreateNamespace(context.Background(), engine.CreateNamespaceRequest{ID: "ns-1", Name: "test", Metadata: map[string]string{"workdir": repoPath}})
+	require.NoError(t, err)
+	_, err = eng.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{NamespaceID: "ns-1", ID: "worker-a", Name: "Worker A", PromptTemplate: "Task {task_id}"})
+	require.NoError(t, err)
+	_, err = eng.CreateDAG(context.Background(), engine.CreateDAGRequest{NamespaceID: "ns-1", ID: "dag-1", Title: "DAG 1", ExecutionBranch: "feat/test"})
+	require.NoError(t, err)
+	_, err = eng.CreateTask(context.Background(), engine.CreateTaskRequest{NamespaceID: "ns-1", ID: "T1", Title: "task 1", AssignedWorker: "worker-a", DAGID: "dag-1"})
+	require.NoError(t, err)
+	_, err = srv.enterWorktreeOnce(context.Background(), "ns-1", "T1", "worker-a")
+	require.NoError(t, err)
+
+	task, err := eng.GetTask(context.Background(), "ns-1", "T1")
+	require.NoError(t, err)
+	wtPath := task.Metadata["git.worktree_path"]
+	largeContent := bytes.Repeat([]byte("0123456789abcdef0123456789abcdef\n"), 7500) // ~255KB
+	require.NoError(t, os.WriteFile(filepath.Join(wtPath, "large.txt"), largeContent, 0o644))
+	runGitTest(t, wtPath, "add", "large.txt")
+	runGitTest(t, wtPath, "commit", "-m", "add large file")
+
+	resp, err := srv.gitCommitChangesOnce(context.Background(), "ns-1", "T1", "worker-a")
+	require.NoError(t, err)
+	diffVal, ok := resp.Review["diff"].(string)
+	require.True(t, ok)
+	require.True(t, len(diffVal) < 110*1024, "diff length %d should be safely truncated near 100KB", len(diffVal))
+	require.Contains(t, diffVal, "[git diff truncated: total ")
+
+	task, err = eng.GetTask(context.Background(), "ns-1", "T1")
+	require.NoError(t, err)
+	require.Equal(t, diffVal, task.Metadata["review.diff"])
 }
 
 func TestGitCommitChangesOnceRejectsDirtyWorktree(t *testing.T) {

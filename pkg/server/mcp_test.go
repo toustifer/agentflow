@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -1550,6 +1551,52 @@ func TestSubmitCapturesReviewCommitAndDiff(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, task.Metadata["review.commit"])
 	require.Contains(t, task.Metadata["review.diff"], "note.txt")
+}
+
+func TestSubmitTruncatesLargeReviewDiff(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t)
+	createDagTaskForStart(t, srv, "T-large-diff")
+	_, err := srv.Handle(context.Background(), "task_transition", map[string]any{
+		"namespace_id": "ns-1", "task_id": "T-large-diff",
+		"transition": "start", "actor_role": "leader",
+	})
+	require.NoError(t, err)
+
+	wtPath := srv.findLatestWorktreePath(t, "ns-1", "T-large-diff")
+	// Generate ~250KB of content to exceed 100KB diff threshold
+	largeContent := bytes.Repeat([]byte("0123456789abcdef0123456789abcdef\n"), 7500) // ~255KB
+	require.NoError(t, os.WriteFile(filepath.Join(wtPath, "large.txt"), largeContent, 0o644))
+	runGitTest(t, wtPath, "add", "large.txt")
+	runGitTest(t, wtPath, "commit", "-m", "task=T-large-diff: add large file")
+	if _, err := srv.engine.GetWorker(context.Background(), "ns-1", "worker-b"); err != nil {
+		_, err = srv.engine.RegisterWorker(context.Background(), engine.RegisterWorkerRequest{
+			NamespaceID: "ns-1", ID: "worker-b", Name: "Builder",
+		})
+		require.NoError(t, err)
+	}
+	_, err = srv.Handle(context.Background(), "worker_diary_write", map[string]any{
+		"namespace_id": "ns-1", "worker_id": "worker-b",
+		"date":    time.Now().UTC().Format("2006-01-02"),
+		"content": "drafted large diff", "task_id": "T-large-diff",
+	})
+	require.NoError(t, err)
+
+	result, err := srv.Handle(context.Background(), "task_transition", map[string]any{
+		"namespace_id": "ns-1", "task_id": "T-large-diff",
+		"transition": "submit", "actor_role": "worker",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "review_pending", result["state"])
+
+	task, err := srv.engine.GetTask(context.Background(), "ns-1", "T-large-diff")
+	require.NoError(t, err)
+	diff := task.Metadata["review.diff"]
+	require.NotEmpty(t, diff)
+	require.True(t, len(diff) < 110*1024, "diff length %d should be safely truncated near 100KB", len(diff))
+	require.Contains(t, diff, "[git diff truncated: total ")
+	require.Contains(t, diff, "exceeds 100KB limit. Review the complete diff via 'git diff ")
 }
 
 func TestTaskTransitionSubmitRejectsDirtyWorktree(t *testing.T) {
