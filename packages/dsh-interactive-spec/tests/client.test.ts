@@ -1,3 +1,5 @@
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, it, expect, vi } from 'vitest';
 import {
   apply,
@@ -9,7 +11,12 @@ import {
   LiveSpecHostCard,
   type DshClientContext,
 } from '../src/client';
-import type { LiveSpecDoc, SpecDiffResult } from '../src/types';
+import type {
+  LiveSpecDoc,
+  SpecDiffResult,
+  DownstreamEvent,
+  SpecSessionContext,
+} from '../src/types';
 
 describe('DSH client plugin registration', () => {
   it('declares every Cordis context service used by the plugin', () => {
@@ -152,5 +159,170 @@ describe('LiveSpecHostCard component and message protocol', () => {
 
     expect(feedbackEvent.data.type).toBe('SPEC_FEEDBACK_INTENT');
     expect(feedbackEvent.data.payload.prompt).toBe('Please verify task 1');
+  });
+
+  describe('Session Scope & cwd extraction via useSessions', () => {
+    it('extracts sessionId and resolves cwd from useSessions selector in LiveSpecPaneBody', () => {
+      const mockSessions = {
+        byId: {
+          'session-alpha': {
+            id: 'session-alpha',
+            title: '知迹伴学优化',
+            cwd: 'D:\\myprogram\\experience\\siruoning\\Ai_medbox',
+          },
+          'session-beta': {
+            id: 'session-beta',
+            title: 'InsightTutor Dev',
+            cwd: 'D:\\myprogram\\InsightTutor',
+          },
+        },
+      };
+
+      const useSessions = vi.fn((selector: (state: any) => any) => selector(mockSessions));
+
+      const element = LiveSpecPaneBody({
+        sessionId: 'session-alpha',
+        useSessions,
+      });
+
+      // Verify useSessions was called with a selector function
+      expect(useSessions).toHaveBeenCalled();
+      expect(typeof useSessions.mock.calls[0][0]).toBe('function');
+
+      // Verify props passed down to LiveSpecHostCard
+      expect(element.props.initialMeta).toBeDefined();
+      expect(element.props.initialMeta.sessionId).toBe('session-alpha');
+      expect(element.props.initialMeta.cwd).toBe('D:\\myprogram\\experience\\siruoning\\Ai_medbox');
+
+      expect(element.props.sessionContext).toEqual({
+        sessionId: 'session-alpha',
+        cwd: 'D:\\myprogram\\experience\\siruoning\\Ai_medbox',
+      });
+    });
+
+    it('falls back to props.cwd or props.initialMeta.cwd when useSessions is not available', () => {
+      const elementDirect = LiveSpecPaneBody({
+        sessionId: 'session-fallback',
+        cwd: 'D:\\myprogram\\experience\\custom-project',
+      });
+
+      expect(elementDirect.props.initialMeta).toEqual({
+        sessionId: 'session-fallback',
+        cwd: 'D:\\myprogram\\experience\\custom-project',
+      });
+
+      const elementMeta = LiveSpecPaneBody({
+        initialMeta: {
+          sessionId: 'session-meta',
+          cwd: 'D:\\myprogram\\experience\\meta-project',
+        },
+      });
+
+      expect(elementMeta.props.initialMeta.sessionId).toBe('session-meta');
+      expect(elementMeta.props.initialMeta.cwd).toBe('D:\\myprogram\\experience\\meta-project');
+    });
+  });
+
+  describe('Empty state placeholder and session context rendering', () => {
+    it('renders empty state placeholder with current workspace cwd when no valid DAG is present', () => {
+      const targetCwd = 'D:\\myprogram\\experience\\siruoning\\Ai_medbox';
+      const html = renderToStaticMarkup(
+        React.createElement(LiveSpecHostCard, {
+          initialMeta: {
+            sessionId: 'session-123',
+            cwd: targetCwd,
+          },
+        })
+      );
+
+      // Verify empty state placeholder exists
+      expect(html).toContain('data-testid="live-spec-empty-state"');
+      expect(html).toContain('暂无活动 DAG 编排');
+      expect(html).toContain(`当前工作区: ${targetCwd}`);
+
+      // Verify iframe is hidden (display:none) so no default/stale bootstrap sample is shown
+      expect(html).toContain('display:none');
+    });
+
+    it('renders iframe in display:block when a valid DAG with tasks is provided', () => {
+      const sampleDoc: LiveSpecDoc = {
+        version: '1.0.0',
+        title: 'Active Project DAG',
+        dag_id: 'dag-active-run',
+        tasks: [
+          { id: 't1', title: 'Task 1', state: 'running' },
+          { id: 't2', title: 'Task 2', state: 'pending', depends_on: ['t1'] },
+        ],
+      };
+
+      const targetCwd = 'D:\\myprogram\\InsightTutor';
+      const html = renderToStaticMarkup(
+        React.createElement(LiveSpecHostCard, {
+          initialSpec: sampleDoc,
+          initialMeta: {
+            sessionId: 'session-456',
+            cwd: targetCwd,
+          },
+        })
+      );
+
+      // Empty state placeholder should NOT be rendered
+      expect(html).not.toContain('data-testid="live-spec-empty-state"');
+      expect(html).toContain('Active Project DAG');
+      expect(html).toContain('dag-active-run');
+
+      // Iframe should be visible with display:block
+      expect(html).toContain('display:block');
+    });
+  });
+
+  describe('DownstreamEvent sessionContext communication contract', () => {
+    it('formats DownstreamEvent SPEC_MOUNT with sessionContext payload', () => {
+      const sampleDoc: LiveSpecDoc = {
+        version: '1.0.0',
+        title: 'Mounted Spec',
+        tasks: [{ id: 't1', title: 'Initialize' }],
+      };
+
+      const sessionContext: SpecSessionContext = {
+        sessionId: 'session-live',
+        cwd: 'D:\\myprogram\\InsightTutor',
+      };
+
+      const mountEvent: DownstreamEvent = {
+        type: 'SPEC_MOUNT',
+        payload: {
+          spec: sampleDoc,
+          readOnly: false,
+          sessionContext,
+        },
+      };
+
+      expect(mountEvent.type).toBe('SPEC_MOUNT');
+      expect(mountEvent.payload.sessionContext).toEqual({
+        sessionId: 'session-live',
+        cwd: 'D:\\myprogram\\InsightTutor',
+      });
+      expect(mountEvent.payload.spec?.title).toBe('Mounted Spec');
+    });
+
+    it('formats DownstreamEvent SESSION_CONTEXT_CHANGE payload correctly', () => {
+      const sessionContext: SpecSessionContext = {
+        sessionId: 'session-switched',
+        cwd: 'D:\\myprogram\\experience\\siruoning\\Ai_medbox',
+      };
+
+      const contextChangeEvent: DownstreamEvent = {
+        type: 'SESSION_CONTEXT_CHANGE',
+        payload: {
+          sessionContext,
+        },
+      };
+
+      expect(contextChangeEvent.type).toBe('SESSION_CONTEXT_CHANGE');
+      expect(contextChangeEvent.payload.sessionContext.cwd).toBe(
+        'D:\\myprogram\\experience\\siruoning\\Ai_medbox'
+      );
+    });
   });
 });

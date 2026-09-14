@@ -3,10 +3,13 @@ import type {
   LiveSpecDoc,
   SpecDiffResult,
   HostToCanvasMessage,
+  DownstreamEvent,
   CanvasToHostMessage,
   LiveSpecHostCardProps,
+  SpecSessionContext,
   ThemeMode,
 } from './types';
+import { normalizeLiveSpec, extractSpecFromMarkdown } from './extractor';
 
 export interface DshClientContext {
   slots: {
@@ -70,6 +73,11 @@ export function LiveSpecPaneTitle(): React.ReactElement {
 export function LiveSpecHostCard({
   canvasUrl = DEFAULT_CANVAS_URL,
   initialSpec = null,
+  initialMeta = null,
+  sessionContext: propSessionContext = null,
+  sessionId: directSessionId,
+  cwd: directCwd,
+  useSessions,
   readOnly = false,
   theme = 'dark',
   onApply,
@@ -81,28 +89,125 @@ export function LiveSpecHostCard({
   const [isReady, setIsReady] = useState(false);
   const [lastNotification, setLastNotification] = useState<string | null>(null);
 
+  // Resolve session context safely
+  const resolvedSessionId =
+    initialMeta?.sessionId ?? propSessionContext?.sessionId ?? directSessionId;
+  const resolvedCwd =
+    typeof useSessions === 'function' && resolvedSessionId
+      ? (useSessions as any)((sessions: any) => sessions?.byId?.[resolvedSessionId]?.cwd)
+      : (initialMeta?.cwd ?? propSessionContext?.cwd ?? directCwd);
+
+  const sessionContext: SpecSessionContext = {
+    sessionId: resolvedSessionId,
+    cwd: resolvedCwd,
+    ...initialMeta,
+    ...propSessionContext,
+  };
+
+  const sessionId = sessionContext.sessionId;
+  const cwd = sessionContext.cwd;
+
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  // Helper to post message to iframe safely
+  const postToCanvas = useCallback((message: DownstreamEvent) => {
+    if (iframeRef.current?.contentWindow) {
+      iframeRef.current.contentWindow.postMessage(message, '*');
+    }
+  }, []);
 
   // Sync initialSpec when prop changes
   useEffect(() => {
     if (initialSpec) {
       setCurrentSpec(initialSpec);
       if (isReady && iframeRef.current?.contentWindow) {
-        const msg: HostToCanvasMessage = {
+        const msg: DownstreamEvent = {
           type: 'SPEC_MOUNT',
-          payload: { spec: initialSpec, readOnly },
+          payload: {
+            spec: initialSpec,
+            readOnly,
+            sessionContext: { sessionId, cwd },
+          },
         };
         iframeRef.current.contentWindow.postMessage(msg, '*');
       }
     }
-  }, [initialSpec, isReady, readOnly]);
+  }, [initialSpec, isReady, readOnly, sessionId, cwd]);
 
-  // Post message to iframe safely
-  const postToCanvas = useCallback((message: HostToCanvasMessage) => {
-    if (iframeRef.current?.contentWindow) {
-      iframeRef.current.contentWindow.postMessage(message, '*');
+  // Sync sessionContext updates to canvas iframe when isReady
+  useEffect(() => {
+    if (isReady && iframeRef.current?.contentWindow) {
+      const msg: DownstreamEvent = {
+        type: 'SESSION_CONTEXT_CHANGE',
+        payload: {
+          sessionContext: { sessionId, cwd },
+        },
+      };
+      iframeRef.current.contentWindow.postMessage(msg, '*');
     }
-  }, []);
+  }, [sessionId, cwd, isReady]);
+
+  // Fetch or auto-load project DAG status for cwd when no initialSpec is provided
+  useEffect(() => {
+    if (initialSpec) return;
+
+    if (!cwd) {
+      setCurrentSpec(null);
+      return;
+    }
+
+    let isMounted = true;
+    const fetchProjectStatus = async () => {
+      try {
+        const res = await fetch(`/api/agentflow/status?cwd=${encodeURIComponent(cwd)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted && data) {
+            const doc = data.spec ? normalizeLiveSpec(data.spec) : normalizeLiveSpec(data);
+            if (doc && doc.tasks && doc.tasks.length > 0) {
+              setCurrentSpec(doc);
+            }
+          }
+        }
+      } catch {
+        // Fallback gracefully if API not yet up or network unavailable
+      }
+    };
+
+    fetchProjectStatus();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [cwd, initialSpec]);
+
+  // Listen to broadcast event from DSH conversation / agentflow stream
+  useEffect(() => {
+    const handleSpecBroadcast = (event: Event) => {
+      const customEvent = event as CustomEvent<{ spec?: LiveSpecDoc; markdown?: string; cwd?: string }>;
+      if (customEvent.detail) {
+        if (customEvent.detail.cwd && cwd && customEvent.detail.cwd !== cwd) {
+          return;
+        }
+        if (customEvent.detail.spec) {
+          const doc = normalizeLiveSpec(customEvent.detail.spec);
+          if (doc && doc.tasks && doc.tasks.length > 0) {
+            setCurrentSpec(doc);
+          }
+        } else if (customEvent.detail.markdown) {
+          const doc = extractSpecFromMarkdown(customEvent.detail.markdown);
+          if (doc && doc.tasks && doc.tasks.length > 0) {
+            setCurrentSpec(doc);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('agentflow:spec', handleSpecBroadcast);
+    return () => {
+      window.removeEventListener('agentflow:spec', handleSpecBroadcast);
+    };
+  }, [cwd]);
 
   // Listen to messages from child iframe
   useEffect(() => {
@@ -113,11 +218,22 @@ export function LiveSpecHostCard({
       switch (data.type) {
         case 'CANVAS_READY': {
           setIsReady(true);
-          // Mount initial spec if available
+          // Mount spec if available
           if (currentSpec) {
             postToCanvas({
               type: 'SPEC_MOUNT',
-              payload: { spec: currentSpec, readOnly },
+              payload: {
+                spec: currentSpec,
+                readOnly,
+                sessionContext: { sessionId, cwd },
+              },
+            });
+          } else {
+            postToCanvas({
+              type: 'SESSION_CONTEXT_CHANGE',
+              payload: {
+                sessionContext: { sessionId, cwd },
+              },
             });
           }
           // Send theme
@@ -154,7 +270,7 @@ export function LiveSpecHostCard({
     return () => {
       window.removeEventListener('message', handleWindowMessage);
     };
-  }, [currentSpec, onApply, onFeedbackIntent, postToCanvas, readOnly, theme]);
+  }, [currentSpec, onApply, onFeedbackIntent, postToCanvas, readOnly, sessionId, cwd, theme]);
 
   const toggleFullscreen = useCallback(() => {
     setIsFullscreen((prev) => !prev);
@@ -211,6 +327,8 @@ export function LiveSpecHostCard({
     transition: 'background-color 0.15s ease',
   };
 
+  const hasValidDag = Boolean(currentSpec && Array.isArray(currentSpec.tasks) && currentSpec.tasks.length > 0);
+
   return React.createElement(
     'div',
     {
@@ -228,7 +346,7 @@ export function LiveSpecHostCard({
         React.createElement(
           'span',
           { style: { fontWeight: 600 } },
-          currentSpec?.title || 'Agentflow Live-Spec Canvas'
+          currentSpec?.title || (cwd ? `工作区: ${cwd}` : 'Agentflow Live-Spec Canvas')
         ),
         currentSpec?.dag_id
           ? React.createElement(
@@ -243,6 +361,26 @@ export function LiveSpecHostCard({
                 },
               },
               currentSpec.dag_id
+            )
+          : cwd
+          ? React.createElement(
+              'span',
+              {
+                'data-testid': 'header-cwd-badge',
+                style: {
+                  fontSize: '11px',
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  backgroundColor: theme === 'light' ? '#e2e8f0' : '#334155',
+                  color: theme === 'light' ? '#475569' : '#94a3b8',
+                  maxWidth: '240px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                },
+                title: cwd,
+              },
+              cwd
             )
           : null,
         lastNotification
@@ -275,6 +413,89 @@ export function LiveSpecHostCard({
         )
       )
     ),
+    // Empty state placeholder when no valid DAG is found
+    !hasValidDag
+      ? React.createElement(
+          'div',
+          {
+            className: 'live-spec-empty-state',
+            'data-testid': 'live-spec-empty-state',
+            style: {
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '32px 16px',
+              textAlign: 'center',
+              color: theme === 'light' ? '#475569' : '#94a3b8',
+              backgroundColor: theme === 'light' ? '#f8fafc' : '#0b0f19',
+            },
+          },
+          React.createElement(
+            'svg',
+            {
+              width: 48,
+              height: 48,
+              viewBox: '0 0 24 24',
+              fill: 'none',
+              stroke: 'currentColor',
+              strokeWidth: 1.5,
+              strokeLinecap: 'round',
+              strokeLinejoin: 'round',
+              style: { marginBottom: '16px', opacity: 0.7 },
+            },
+            React.createElement('rect', { x: 3, y: 3, width: 18, height: 18, rx: 2 }),
+            React.createElement('path', { d: 'M9 9h6' }),
+            React.createElement('path', { d: 'M9 13h6' }),
+            React.createElement('path', { d: 'M9 17h4' })
+          ),
+          React.createElement(
+            'div',
+            {
+              style: {
+                fontSize: '15px',
+                fontWeight: 600,
+                marginBottom: '8px',
+                color: theme === 'light' ? '#0f172a' : '#f8fafc',
+              },
+            },
+            '暂无活动 DAG 编排'
+          ),
+          React.createElement(
+            'div',
+            {
+              'data-testid': 'live-spec-current-cwd',
+              style: {
+                fontSize: '13px',
+                fontFamily: 'monospace',
+                padding: '6px 12px',
+                borderRadius: '4px',
+                backgroundColor: theme === 'light' ? '#e2e8f0' : '#1e293b',
+                color: theme === 'light' ? '#1e293b' : '#38bdf8',
+                maxWidth: '90%',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                marginBottom: '12px',
+              },
+            },
+            `当前工作区: ${cwd || '未绑定工作区'}`
+          ),
+          React.createElement(
+            'div',
+            {
+              style: {
+                fontSize: '12px',
+                maxWidth: '380px',
+                lineHeight: 1.5,
+                color: theme === 'light' ? '#64748b' : '#64748b',
+              },
+            },
+            '当前会话尚未检测到活跃的 Agentflow 任务 DAG。请在对话中让 Leader 启动流程或编排任务。'
+          )
+        )
+      : null,
     // Embedded Iframe
     React.createElement('iframe', {
       ref: iframeRef,
@@ -287,6 +508,7 @@ export function LiveSpecHostCard({
         height: '100%',
         border: 'none',
         backgroundColor: 'transparent',
+        display: hasValidDag ? 'block' : 'none',
       },
     })
   );
@@ -296,9 +518,24 @@ export function LiveSpecHostCard({
  * Live-Spec Pane Body Component registered to DSH slot: sidebar.right.pane.tab
  */
 export function LiveSpecPaneBody(props: any): React.ReactElement {
+  const sessionId = props?.sessionId ?? props?.initialMeta?.sessionId;
+  const useSessions = props?.useSessions;
+  const cwd =
+    typeof useSessions === 'function'
+      ? useSessions((sessions: any) => sessions?.byId?.[sessionId]?.cwd)
+      : (props?.cwd ?? props?.initialMeta?.cwd);
+
+  const initialMeta = {
+    ...(props?.initialMeta || {}),
+    sessionId,
+    cwd,
+  };
+
   return React.createElement(LiveSpecHostCard, {
     canvasUrl: props?.canvasUrl || DEFAULT_CANVAS_URL,
-    initialSpec: props?.spec || null,
+    initialSpec: props?.spec ?? props?.initialSpec ?? null,
+    initialMeta,
+    sessionContext: { sessionId, cwd },
     readOnly: props?.readOnly ?? false,
     theme: props?.theme || 'dark',
     onApply: props?.onApply,

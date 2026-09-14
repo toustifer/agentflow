@@ -5,15 +5,25 @@ export type { LiveSpecDoc, SpecDiffResult, SpecTask };
 export type ThemeMode = 'light' | 'dark';
 
 /**
- * Messages sent from Host (DSH plugin) to Child (Live-Spec Canvas iframe)
+ * Session context binding information (sessionId, cwd, leader metadata)
  */
-export type HostToCanvasMessage =
+export interface SpecSessionContext {
+  sessionId?: string;
+  cwd?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Downstream events sent from Host (DSH plugin) to Child (Live-Spec Canvas iframe)
+ */
+export type DownstreamEvent =
   | {
       type: 'SPEC_MOUNT' | 'INIT_DOC';
       payload: {
         spec?: LiveSpecDoc;
         doc?: LiveSpecDoc;
         readOnly?: boolean;
+        sessionContext?: SpecSessionContext;
       };
     }
   | {
@@ -22,7 +32,14 @@ export type HostToCanvasMessage =
         spec?: LiveSpecDoc;
         patch?: Partial<LiveSpecDoc>;
         tasks?: SpecTask[];
+        sessionContext?: SpecSessionContext;
         [key: string]: unknown;
+      };
+    }
+  | {
+      type: 'SESSION_CONTEXT_CHANGE';
+      payload: {
+        sessionContext: SpecSessionContext;
       };
     }
   | {
@@ -30,7 +47,25 @@ export type HostToCanvasMessage =
       payload: {
         theme: ThemeMode;
       };
+    }
+  | {
+      type: 'SET_SIMULATION_PARAMS';
+      payload: {
+        concurrency?: number;
+        speed?: number;
+      };
+    }
+  | {
+      type: 'SIMULATION_CONTROL';
+      payload: {
+        action: 'start' | 'pause' | 'step' | 'reset';
+      };
     };
+
+/**
+ * Messages sent from Host (DSH plugin) to Child (Live-Spec Canvas iframe)
+ */
+export type HostToCanvasMessage = DownstreamEvent;
 
 /**
  * Messages sent from Child (Live-Spec Canvas iframe) to Host (DSH plugin)
@@ -80,6 +115,30 @@ export interface LiveSpecHostCardProps {
    * Initial spec document to mount.
    */
   initialSpec?: LiveSpecDoc | null;
+  /**
+   * Initial metadata containing session context info (sessionId, cwd, etc.)
+   */
+  initialMeta?: {
+    sessionId?: string;
+    cwd?: string;
+    [key: string]: unknown;
+  } | null;
+  /**
+   * Direct session context binding
+   */
+  sessionContext?: SpecSessionContext | null;
+  /**
+   * Explicit sessionId
+   */
+  sessionId?: string;
+  /**
+   * Explicit cwd
+   */
+  cwd?: string;
+  /**
+   * Optional useSessions hook accessor
+   */
+  useSessions?: unknown;
   /**
    * Read-only mode flag.
    */
