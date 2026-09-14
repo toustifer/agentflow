@@ -2,7 +2,7 @@ import {
   listDagsByCwd,
   getDagDetailByCwd,
   type HistoryServiceOptions,
-} from './history-service';
+} from './history-service.js';
 
 export const DAGS_API_PATH = '/api/agentflow/dags';
 export const DAG_API_PATH = '/api/agentflow/dag';

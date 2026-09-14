@@ -1,5 +1,5 @@
 import type { LiveSpecDoc, SpecTask } from '@agentflow/live-spec-core';
-import type { ExtractOptions } from './types';
+import type { ExtractOptions } from './types.js';
 
 const CODE_BLOCK_REGEX = /`{3,}[ \t]*(?:json:)?agentflow-spec[^\r\n]*\r?\n([\s\S]*?)`{3,}/gi;
 

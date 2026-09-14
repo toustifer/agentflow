@@ -8,8 +8,8 @@ import type {
   LiveSpecHostCardProps,
   SpecSessionContext,
   ThemeMode,
-} from './types';
-import { normalizeLiveSpec, extractSpecFromMarkdown } from './extractor';
+} from './types.js';
+import { normalizeLiveSpec, extractSpecFromMarkdown } from './extractor.js';
 
 export interface DshClientContext {
   slots: {
