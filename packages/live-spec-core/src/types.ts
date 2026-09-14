@@ -16,6 +16,7 @@ export type TaskState =
 
 export interface SpecTask {
   id: string;
+  task_id?: string;
   title: string;
   description?: string;
   assigned_worker?: string;
@@ -43,6 +44,7 @@ export interface LiveSpecDoc {
   namespace_id?: string;
   tasks: SpecTask[];
   concurrency?: number;
+  parameters?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   settings?: SpecSettings;
 }
