@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1856,4 +1857,170 @@ func (t *trackingHubSyncer) SyncNamespace(_ context.Context, ns *engine.Namespac
 
 func (t *trackingHubSyncer) Ping(_ context.Context) error {
 	return nil
+}
+
+func TestTaskListAndQueryExcludeReviewDiffAndTruncateOversizedMetadata(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t)
+	ctx := context.Background()
+
+	diffContent := strings.Repeat("diff --git a/file b/file\n+some changed lines here\n", 1500) // ~55KB
+	largeMetaContent := strings.Repeat("arbitrary metadata chunk 1234567890\n", 1200)          // ~42KB
+	normalMetaContent := "normal-metadata-value"
+
+	_, err := srv.engine.CreateTask(ctx, engine.CreateTaskRequest{
+		NamespaceID: "ns-1",
+		ID:          "T-proj-1",
+		Title:       "Projection Test Task",
+		Metadata: map[string]string{
+			"review.diff": diffContent,
+			"large_meta":  largeMetaContent,
+			"normal_meta": normalMetaContent,
+		},
+	})
+	require.NoError(t, err)
+
+	// 1. task_list response verification
+	listResp, err := srv.Handle(ctx, "task_list", map[string]any{
+		"namespace_id": "ns-1",
+	})
+	require.NoError(t, err)
+	listTasks, ok := listResp["tasks"].([]any)
+	require.True(t, ok)
+	require.Len(t, listTasks, 1)
+
+	listTaskItem, ok := listTasks[0].(map[string]any)
+	require.True(t, ok)
+	listMeta, ok := listTaskItem["metadata"].(map[string]any)
+	require.True(t, ok)
+
+	_, hasDiffInList := listMeta["review.diff"]
+	require.False(t, hasDiffInList, "task_list must exclude review.diff")
+
+	largeMetaInList, ok := listMeta["large_meta"].(string)
+	require.True(t, ok)
+	require.Contains(t, largeMetaInList, `... [metadata "large_meta" truncated: total `)
+	require.Contains(t, largeMetaInList, "exceeds 32KB limit]")
+	require.LessOrEqual(t, len(largeMetaInList), MaxListMetadataBytes+256)
+	require.Equal(t, normalMetaContent, listMeta["normal_meta"])
+
+	// 2. task_query response verification
+	queryResp, err := srv.Handle(ctx, "task_query", map[string]any{
+		"namespace_id": "ns-1",
+	})
+	require.NoError(t, err)
+	queryTasks, ok := queryResp["tasks"].([]any)
+	require.True(t, ok)
+	require.Len(t, queryTasks, 1)
+
+	queryTaskItem, ok := queryTasks[0].(map[string]any)
+	require.True(t, ok)
+	queryMeta, ok := queryTaskItem["metadata"].(map[string]any)
+	require.True(t, ok)
+
+	_, hasDiffInQuery := queryMeta["review.diff"]
+	require.False(t, hasDiffInQuery, "task_query must exclude review.diff")
+
+	largeMetaInQuery, ok := queryMeta["large_meta"].(string)
+	require.True(t, ok)
+	require.Contains(t, largeMetaInQuery, `... [metadata "large_meta" truncated: total `)
+	require.Contains(t, largeMetaInQuery, "exceeds 32KB limit]")
+	require.LessOrEqual(t, len(largeMetaInQuery), MaxListMetadataBytes+256)
+	require.Equal(t, normalMetaContent, queryMeta["normal_meta"])
+
+	// 3. task_get response verification (details preserved)
+	getResp, err := srv.Handle(ctx, "task_get", map[string]any{
+		"namespace_id": "ns-1",
+		"task_id":      "T-proj-1",
+	})
+	require.NoError(t, err)
+	getMeta, ok := getResp["metadata"].(map[string]any)
+	require.True(t, ok)
+
+	diffInGet, ok := getMeta["review.diff"].(string)
+	require.True(t, ok, "task_get must preserve review.diff")
+	require.Equal(t, diffContent, diffInGet, "task_get must retain complete review.diff under 100KB")
+
+	largeMetaInGet, ok := getMeta["large_meta"].(string)
+	require.True(t, ok)
+	require.Equal(t, largeMetaContent, largeMetaInGet, "task_get must retain metadata under 100KB without truncation")
+	require.Equal(t, normalMetaContent, getMeta["normal_meta"])
+}
+
+func TestTaskGetTruncatesOversizedMetadataAt100KB(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t)
+	ctx := context.Background()
+
+	hugeDiff := strings.Repeat("diff --git a/huge b/huge\n+added lines...\n", 4000) // ~150KB
+	hugeNote := strings.Repeat("huge custom note line with payload data\n", 3000)    // ~120KB
+
+	_, err := srv.engine.CreateTask(ctx, engine.CreateTaskRequest{
+		NamespaceID: "ns-1",
+		ID:          "T-huge-1",
+		Title:       "Huge Metadata Task",
+		Metadata: map[string]string{
+			"review.diff": hugeDiff,
+			"huge_note":   hugeNote,
+		},
+	})
+	require.NoError(t, err)
+
+	getResp, err := srv.Handle(ctx, "task_get", map[string]any{
+		"namespace_id": "ns-1",
+		"task_id":      "T-huge-1",
+	})
+	require.NoError(t, err)
+	getMeta, ok := getResp["metadata"].(map[string]any)
+	require.True(t, ok)
+
+	diffVal, ok := getMeta["review.diff"].(string)
+	require.True(t, ok)
+	require.Contains(t, diffVal, `... [metadata "review.diff" truncated: total `)
+	require.Contains(t, diffVal, "exceeds 100KB limit]")
+	require.LessOrEqual(t, len(diffVal), MaxDetailMetadataBytes+256)
+
+	noteVal, ok := getMeta["huge_note"].(string)
+	require.True(t, ok)
+	require.Contains(t, noteVal, `... [metadata "huge_note" truncated: total `)
+	require.Contains(t, noteVal, "exceeds 100KB limit]")
+	require.LessOrEqual(t, len(noteVal), MaxDetailMetadataBytes+256)
+}
+
+func TestTaskToMapProjectionDirect(t *testing.T) {
+	t.Parallel()
+
+	task := &engine.Task{
+		ID:          "T-direct",
+		NamespaceID: "ns-test",
+		Title:       "Direct Test",
+		Metadata: map[string]string{
+			"review.diff": strings.Repeat("diff content\n", 3000), // ~39KB
+			"medium":      strings.Repeat("medium note\n", 3500),  // ~42KB
+			"short":       "short value",
+		},
+	}
+
+	// Summary projection
+	summaryMap := taskToSummaryMap(task)
+	sMeta := summaryMap["metadata"].(map[string]any)
+	require.NotContains(t, sMeta, "review.diff")
+	require.Contains(t, sMeta["medium"].(string), "exceeds 32KB limit]")
+	require.Equal(t, "short value", sMeta["short"])
+
+	// Also via taskToMap(task, true)
+	summaryMap2 := taskToMap(task, true)
+	sMeta2 := summaryMap2["metadata"].(map[string]any)
+	require.NotContains(t, sMeta2, "review.diff")
+	require.Contains(t, sMeta2["medium"].(string), "exceeds 32KB limit]")
+
+	// Detail projection
+	detailMap := taskToMap(task)
+	dMeta := detailMap["metadata"].(map[string]any)
+	require.Contains(t, dMeta, "review.diff")
+	require.Equal(t, task.Metadata["review.diff"], dMeta["review.diff"])
+	require.Equal(t, task.Metadata["medium"], dMeta["medium"])
+	require.Equal(t, "short value", dMeta["short"])
 }
