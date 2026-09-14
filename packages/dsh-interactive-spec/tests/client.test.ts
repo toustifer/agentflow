@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   apply,
+  inject,
   LIVE_SPEC_TAB_KEY,
   DEFAULT_CANVAS_URL,
   LiveSpecPaneTitle,
@@ -11,6 +12,10 @@ import {
 import type { LiveSpecDoc, SpecDiffResult } from '../src/types';
 
 describe('DSH client plugin registration', () => {
+  it('declares every Cordis context service used by the plugin', () => {
+    expect(inject).toEqual(['slots', 'sidebarRightTabs']);
+  });
+
   it('registers sidebar slots and right tabs with key live-spec', () => {
     const injectedSlots: Record<string, () => void> = {};
     const registeredSlots: Record<string, { descriptor: any; component: any }> = {};
@@ -45,6 +50,13 @@ describe('DSH client plugin registration', () => {
       expect.objectContaining({
         id: LIVE_SPEC_TAB_KEY,
         kind: LIVE_SPEC_TAB_KEY,
+        guide: expect.arrayContaining([
+          expect.objectContaining({
+            order: 15,
+            title: expect.any(Function),
+            description: expect.any(Function),
+          }),
+        ]),
       })
     );
 

@@ -307,7 +307,7 @@ export function LiveSpecPaneBody(props: any): React.ReactElement {
 }
 
 export const name = 'dsh-interactive-spec';
-export const inject = ['slots'];
+export const inject = ['slots', 'sidebarRightTabs'];
 
 /**
  * Client plugin entry point for DeepSeek Harness (Cordis runner).
@@ -320,11 +320,13 @@ export function apply(ctx: DshClientContext): void {
         id: LIVE_SPEC_TAB_KEY,
         kind: LIVE_SPEC_TAB_KEY,
         title: () => 'Live Spec',
-        guide: {
-          order: 15,
-          title: 'Live Spec Canvas',
-          description: 'Interactive DAG canvas with real-time simulation and CPM analysis',
-        },
+        guide: [
+          {
+            order: 15,
+            title: () => 'Live Spec Canvas',
+            description: () => 'Interactive DAG canvas with real-time simulation and CPM analysis',
+          },
+        ],
       });
     }
 
