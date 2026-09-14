@@ -10,7 +10,7 @@ import {
 import { TopologyCanvas } from './components/TopologyCanvas';
 import { ParametricPanel, ParametricSettings } from './components/ParametricPanel';
 import { SimulationBar } from './components/SimulationBar';
-import { childBridge, ThemeMode } from './bridge/child-bridge';
+import { childBridge, ThemeMode, SpecSessionContext } from './bridge/child-bridge';
 
 const defaultSampleSpec: LiveSpecDoc = {
   version: '1.0.0',
@@ -69,6 +69,7 @@ const defaultSampleSpec: LiveSpecDoc = {
 export const App: React.FC = () => {
   const [originalSpec, setOriginalSpec] = useState<LiveSpecDoc>(defaultSampleSpec);
   const [currentSpec, setCurrentSpec] = useState<LiveSpecDoc>(defaultSampleSpec);
+  const [sessionContext, setSessionContext] = useState<SpecSessionContext | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>('dark');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -135,6 +136,7 @@ export const App: React.FC = () => {
       };
       setSettings(newSettings);
       initSimulator(incomingSpec, newSettings);
+      setSelectedTaskId(null);
       setToastMessage(`✓ 已接收并挂载 Live-Spec: ${incomingSpec.title || incomingSpec.dag_id}`);
     });
 
@@ -143,7 +145,22 @@ export const App: React.FC = () => {
         setCurrentSpec(payload.spec);
         initSimulator(payload.spec, settings);
         setToastMessage('✓ 已合并增量补丁 SPEC_PATCH');
+      } else if (payload.patch || payload.tasks) {
+        setCurrentSpec((prev) => {
+          const next: LiveSpecDoc = {
+            ...prev,
+            ...(payload.patch || {}),
+            tasks: payload.tasks || payload.patch?.tasks || prev.tasks,
+          };
+          initSimulator(next, settings);
+          return next;
+        });
+        setToastMessage('✓ 已合并增量补丁 SPEC_PATCH');
       }
+    });
+
+    const unbindSession = childBridge.onSessionContextChange((ctx) => {
+      setSessionContext(ctx);
     });
 
     const unbindTheme = childBridge.onTheme((newTheme) => {
@@ -156,6 +173,7 @@ export const App: React.FC = () => {
     return () => {
       unbindMount();
       unbindPatch();
+      unbindSession();
       unbindTheme();
       if (timerRef.current) {
         window.clearInterval(timerRef.current);
@@ -164,9 +182,22 @@ export const App: React.FC = () => {
   }, [initSimulator, settings]);
 
   // Dynamic calculations via live-spec-core
-  const cpm = useMemo(() => calculateCPM(currentSpec.tasks), [currentSpec.tasks]);
-  const cycle = useMemo(() => detectCycle(currentSpec.tasks), [currentSpec.tasks]);
+  const cpm = useMemo(() => calculateCPM(currentSpec.tasks || []), [currentSpec.tasks]);
+  const cycle = useMemo(() => detectCycle(currentSpec.tasks || []), [currentSpec.tasks]);
   const diff = useMemo(() => computeSpecDiff(originalSpec, currentSpec), [originalSpec, currentSpec]);
+
+  // Task statistics
+  const taskStats = useMemo(() => {
+    const tasks = currentSpec.tasks || [];
+    const total = tasks.length;
+    const passed = tasks.filter((t) => t.state === 'passed' || t.state === 'pass').length;
+    const executing = tasks.filter((t) => t.state === 'executing' || t.state === 'running').length;
+    const rework = tasks.filter((t) => t.state === 'rework' || t.state === 'blocked').length;
+    const pending = total - passed - executing - rework;
+    return { total, passed, executing, rework, pending };
+  }, [currentSpec.tasks]);
+
+  const hasValidTasks = Boolean(currentSpec.tasks && currentSpec.tasks.length > 0);
 
   // Handle DAG spec changes from canvas drag-and-drop
   const handleSpecChange = (updatedSpec: LiveSpecDoc) => {
@@ -275,7 +306,7 @@ export const App: React.FC = () => {
         overflow: 'hidden',
       }}
     >
-      {/* Top Header Control Bar: [⬡ 标题] [💬 反哺改动到对话] [✓ 一键应用到工程] */}
+      {/* Top Header Control Bar: [⬡ 标题] [📁 cwd] [🌿 dag_id & 📊 统计] [按钮] */}
       <header
         style={{
           height: '48px',
@@ -284,17 +315,55 @@ export const App: React.FC = () => {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '0 18px',
+          padding: '0 16px',
           zIndex: 20,
           boxShadow: '0 1px 4px rgba(0,0,0,0.15)',
+          gap: '12px',
         }}
       >
-        {/* Title & Status Badges */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '18px', color: 'var(--accent, #38bdf8)' }}>⬡</span>
-          <h1 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text, #f4f4f5)', margin: 0 }}>
+        {/* Left: Title, CWD Breadcrumb & Status Badges */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: '1 1 auto' }}>
+          <span style={{ fontSize: '18px', color: 'var(--accent, #38bdf8)', flexShrink: 0 }}>⬡</span>
+          <h1
+            style={{
+              fontSize: '14px',
+              fontWeight: 700,
+              color: 'var(--text, #f4f4f5)',
+              margin: 0,
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+            }}
+          >
             {currentSpec.title || 'Agentflow Live-Spec 画布'}
           </h1>
+
+          {/* Project CWD Breadcrumb: 📁 [cwd 目录] */}
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid var(--border-subtle, #3f3f46)',
+              padding: '2px 8px',
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+              color: sessionContext?.cwd ? 'var(--text, #f4f4f5)' : 'var(--text-subtle, #a1a1aa)',
+              maxWidth: '320px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              flexShrink: 1,
+            }}
+            title={sessionContext?.cwd ? `当前会话工作目录: ${sessionContext.cwd}` : '未指定会话工作目录'}
+          >
+            <span>📁</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {sessionContext?.cwd || '未连接会话目录'}
+            </span>
+          </div>
+
           {cycle.hasCycle && (
             <span
               style={{
@@ -305,6 +374,7 @@ export const App: React.FC = () => {
                 color: '#ef4444',
                 border: '1px solid #ef4444',
                 fontWeight: 700,
+                flexShrink: 0,
               }}
             >
               ⚠️ 环路告警
@@ -320,6 +390,7 @@ export const App: React.FC = () => {
                 color: '#38bdf8',
                 border: '1px solid rgba(56, 189, 248, 0.4)',
                 fontWeight: 600,
+                flexShrink: 0,
               }}
               title={diff.summary}
             >
@@ -328,8 +399,59 @@ export const App: React.FC = () => {
           )}
         </div>
 
+        {/* Right Info: Leader DAG ID & Task Statistics */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+          {/* Leader DAG ID badge */}
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '3px 8px',
+              borderRadius: '6px',
+              background: 'rgba(56, 189, 248, 0.12)',
+              border: '1px solid rgba(56, 189, 248, 0.3)',
+              color: '#38bdf8',
+              fontSize: '11px',
+              fontWeight: 600,
+            }}
+            title={`当前 Leader DAG: ${currentSpec.dag_id || 'default'}`}
+          >
+            <span style={{ opacity: 0.8 }}>🌿 DAG:</span>
+            <span style={{ fontFamily: 'ui-monospace, monospace' }}>{currentSpec.dag_id || 'default'}</span>
+          </div>
+
+          {/* Task Statistics badge */}
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '3px 8px',
+              borderRadius: '6px',
+              background: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid var(--border, #27272a)',
+              color: 'var(--text, #f4f4f5)',
+              fontSize: '11px',
+              fontWeight: 500,
+            }}
+            title={`任务统计: 总计 ${taskStats.total}，已完成 ${taskStats.passed}，执行中 ${taskStats.executing}，待处理 ${taskStats.pending}${taskStats.rework ? `，返工 ${taskStats.rework}` : ''}`}
+          >
+            <span>📊</span>
+            <span>
+              {taskStats.passed}/{taskStats.total} 完成
+            </span>
+            {taskStats.executing > 0 && (
+              <span style={{ color: '#38bdf8' }}>({taskStats.executing} 运行)</span>
+            )}
+            {taskStats.rework > 0 && (
+              <span style={{ color: '#ef4444' }}>({taskStats.rework} 返工)</span>
+            )}
+          </div>
+        </div>
+
         {/* Action Buttons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
           {/* Theme Toggle */}
           <button
             onClick={handleThemeToggle}
@@ -433,17 +555,131 @@ export const App: React.FC = () => {
           onSelectTask={setSelectedTaskId}
         />
 
-        {/* Zone 2: Central Topology Canvas */}
-        <TopologyCanvas
-          spec={currentSpec}
-          cpm={cpm}
-          cycle={cycle}
-          simTasks={snapshot?.tasks}
-          selectedTaskId={selectedTaskId}
-          onSelectTask={setSelectedTaskId}
-          onSpecChange={handleSpecChange}
-          onFaultInject={handleInjectFault}
-        />
+        {/* Zone 2: Central Topology Canvas or Elegant Empty State */}
+        {hasValidTasks ? (
+          <TopologyCanvas
+            spec={currentSpec}
+            cpm={cpm}
+            cycle={cycle}
+            simTasks={snapshot?.tasks}
+            selectedTaskId={selectedTaskId}
+            onSelectTask={setSelectedTaskId}
+            onSpecChange={handleSpecChange}
+            onFaultInject={handleInjectFault}
+          />
+        ) : (
+          <div
+            style={{
+              flex: 1,
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'radial-gradient(circle at center, rgba(56, 189, 248, 0.03) 0%, transparent 70%)',
+              color: 'var(--text, #f4f4f5)',
+              padding: '32px',
+              position: 'relative',
+              userSelect: 'none',
+            }}
+          >
+            <div
+              style={{
+                maxWidth: '520px',
+                width: '100%',
+                padding: '36px 32px',
+                borderRadius: '16px',
+                background: 'var(--card, #18181b)',
+                border: '1px solid var(--border, #27272a)',
+                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.45)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                textAlign: 'center',
+                gap: '18px',
+              }}
+            >
+              <div
+                style={{
+                  width: '60px',
+                  height: '60px',
+                  borderRadius: '30px',
+                  background: 'rgba(56, 189, 248, 0.1)',
+                  border: '1px solid rgba(56, 189, 248, 0.25)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '28px',
+                }}
+              >
+                🌿
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+                <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--text, #f4f4f5)' }}>
+                  暂无编排任务
+                </h2>
+                <div
+                  style={{
+                    fontSize: '13px',
+                    color: 'var(--text-subtle, #a1a1aa)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <span>当前会话工作目录：</span>
+                  <code
+                    style={{
+                      background: 'rgba(0, 0, 0, 0.35)',
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-subtle, #3f3f46)',
+                      color: '#38bdf8',
+                      fontFamily: 'ui-monospace, monospace',
+                      fontSize: '12px',
+                      wordBreak: 'break-all',
+                      maxWidth: '100%',
+                    }}
+                  >
+                    {sessionContext?.cwd || '(未检测到工作目录)'}
+                  </code>
+                </div>
+              </div>
+
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: '13px',
+                  color: 'var(--subtext, #71717a)',
+                  lineHeight: '1.6',
+                }}
+              >
+                项目尚未派发任何任务节点。请在会话中向 Leader 提出开发目标，Leader 将自动分解任务并生成 DAG 流水线，画布将通过 postMessage 动态热刷新呈现节点拓扑。
+              </p>
+
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '10px 16px',
+                  borderRadius: '8px',
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px dashed var(--border, #27272a)',
+                  fontSize: '12px',
+                  color: 'var(--text-subtle, #a1a1aa)',
+                }}
+              >
+                <span>💡 提示：在对话中输入</span>
+                <span style={{ color: '#38bdf8', fontWeight: 600 }}>/agentflow 你的开发目标</span>
+                <span>即可开工</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Zone 3: Bottom Simulation Bar */}

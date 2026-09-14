@@ -2,21 +2,30 @@ import { LiveSpecDoc, SpecDiffResult } from '@agentflow/live-spec-core';
 
 export type ThemeMode = 'light' | 'dark';
 
+export interface SpecSessionContext {
+  sessionId?: string;
+  cwd?: string;
+  [key: string]: unknown;
+}
+
 export interface BridgeSpecPatchPayload {
   spec?: LiveSpecDoc;
   patch?: Partial<LiveSpecDoc>;
   tasks?: LiveSpecDoc['tasks'];
+  sessionContext?: SpecSessionContext;
   [key: string]: unknown;
 }
 
 export type MountCallback = (spec: LiveSpecDoc) => void;
 export type PatchCallback = (payload: BridgeSpecPatchPayload) => void;
 export type ThemeCallback = (theme: ThemeMode) => void;
+export type SessionContextCallback = (sessionContext: SpecSessionContext) => void;
 
 export class ChildBridge {
   private mountListeners: Set<MountCallback> = new Set();
   private patchListeners: Set<PatchCallback> = new Set();
   private themeListeners: Set<ThemeCallback> = new Set();
+  private sessionContextListeners: Set<SessionContextCallback> = new Set();
   private isListening = false;
 
   constructor() {
@@ -41,15 +50,33 @@ export class ChildBridge {
 
     // SPEC_MOUNT or INIT_DOC
     if (data.type === 'SPEC_MOUNT' || data.type === 'INIT_DOC') {
-      const spec: LiveSpecDoc | undefined =
+      const rawSpec: LiveSpecDoc | undefined =
         data.payload?.spec || data.payload?.doc || (Array.isArray(data.payload?.tasks) ? data.payload : undefined);
-      if (spec && Array.isArray(spec.tasks)) {
+      if (rawSpec) {
+        const spec: LiveSpecDoc = {
+          ...rawSpec,
+          tasks: Array.isArray(rawSpec.tasks) ? rawSpec.tasks : [],
+        };
         this.mountListeners.forEach((cb) => cb(spec));
+      }
+      if (data.payload?.sessionContext) {
+        this.sessionContextListeners.forEach((cb) => cb(data.payload.sessionContext));
       }
     }
     // SPEC_PATCH or SYNC_SPEC
     else if (data.type === 'SPEC_PATCH' || data.type === 'SYNC_SPEC') {
       this.patchListeners.forEach((cb) => cb(data.payload || {}));
+      if (data.payload?.sessionContext) {
+        this.sessionContextListeners.forEach((cb) => cb(data.payload.sessionContext));
+      }
+    }
+    // SESSION_CONTEXT_CHANGE
+    else if (data.type === 'SESSION_CONTEXT_CHANGE') {
+      const sessionContext: SpecSessionContext | undefined =
+        data.payload?.sessionContext || data.payload;
+      if (sessionContext) {
+        this.sessionContextListeners.forEach((cb) => cb(sessionContext));
+      }
     }
     // THEME_CHANGE
     else if (data.type === 'THEME_CHANGE') {
@@ -71,6 +98,11 @@ export class ChildBridge {
   public onTheme(cb: ThemeCallback): () => void {
     this.themeListeners.add(cb);
     return () => this.themeListeners.delete(cb);
+  }
+
+  public onSessionContextChange(cb: SessionContextCallback): () => void {
+    this.sessionContextListeners.add(cb);
+    return () => this.sessionContextListeners.delete(cb);
   }
 
   public send(event: { type: string; payload?: unknown }): void {
