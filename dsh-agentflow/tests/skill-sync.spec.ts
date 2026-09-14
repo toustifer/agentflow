@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { compareVersions, readVersion, syncSkill } from '../src/skill.js'
 
@@ -64,5 +65,26 @@ describe('syncSkill', () => {
     await mkdir(target, { recursive: true })
     await writeFile(join(target, 'SKILL.md'), '# mine\n')
     expect(await syncSkill(source, target)).toBe('copied')
+  })
+
+  it('syncs bundled skill into nested skills/agentflow hierarchy preserving content and frontmatter', async () => {
+    const source = join(tmp, 'bundled', 'skills', 'agentflow')
+    const frontmatter = '---\nname: agentflow\ndescription: test description\n---\n\n# /agentflow\n'
+    await makeSkill(source, 'v0.2.6')
+    await writeFile(join(source, 'SKILL.md'), frontmatter)
+
+    const target = join(tmp, 'home', '.agents', 'skills', 'agentflow')
+    const outcome = await syncSkill(source, target)
+    expect(outcome).toBe('copied')
+    expect(await readFile(join(target, 'SKILL.md'), 'utf8')).toBe(frontmatter)
+    expect(await readVersion(target)).toBe('v0.2.6')
+  })
+
+  it('verifies actual bundled SKILL.md in package contains required YAML frontmatter', async () => {
+    const skillPath = fileURLToPath(new URL('../src/skills/agentflow/SKILL.md', import.meta.url))
+    const content = await readFile(skillPath, 'utf8')
+    expect(content.startsWith('---')).toBe(true)
+    expect(content).toContain('name: agentflow')
+    expect(content).toContain('description: 项目编排引擎调度器。/agentflow 是唯一公开入口')
   })
 })

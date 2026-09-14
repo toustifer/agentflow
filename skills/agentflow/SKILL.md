@@ -1,3 +1,8 @@
+---
+name: agentflow
+description: 项目编排引擎调度器。/agentflow 是唯一公开入口，提供 setup/init/intake/goal/resume/inspect/shape/mode/update 等 flow；先确认 agentflow MCP 可用（mcp__agentflow__*）再进入业务 flow。
+---
+
 # /agentflow
 
 项目编排引擎调度器。`/agentflow` 是唯一公开入口。

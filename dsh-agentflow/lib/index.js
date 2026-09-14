@@ -23,7 +23,7 @@ const mcpClientPlugin = {
  */
 export function apply(ctx, config) {
     if (config.syncSkill) {
-        const target = join(agentsHome(), 'agentflow');
+        const target = join(agentsHome(), 'skills', 'agentflow');
         syncSkill(BUNDLED_SKILL_DIR, target).catch((error) => {
             console.warn(`dsh-agentflow: skill sync to ${target} failed (continuing): ${error instanceof Error ? error.message : String(error)}`);
         });
