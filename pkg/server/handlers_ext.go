@@ -86,15 +86,10 @@ func (s *Server) handleTaskQuery(ctx context.Context, input map[string]any) (map
 		return nil, err
 	}
 
-	items := make([]any, 0, len(tasks))
-	for i := range tasks {
-		items = append(items, taskToMap(&tasks[i]))
-	}
 	enriched := s.enrichTasksWithBlockedBy(ctx, nsID, tasks)
-	for i := range enriched {
-		if i < len(items) {
-			items[i] = enriched[i]
-		}
+	items := make([]any, 0, len(enriched))
+	for _, m := range enriched {
+		items = append(items, m)
 	}
 
 	return map[string]any{"tasks": items}, nil
@@ -103,7 +98,7 @@ func (s *Server) handleTaskQuery(ctx context.Context, input map[string]any) (map
 func (s *Server) enrichTasksWithBlockedBy(ctx context.Context, nsID string, tasks []engine.Task) []map[string]any {
 	out := make([]map[string]any, 0, len(tasks))
 	for i := range tasks {
-		m := taskToMap(&tasks[i])
+		m := taskToSummaryMap(&tasks[i])
 		var blockedBy []string
 		for _, dep := range tasks[i].DependsOn {
 			depTask, err := s.engine.GetTask(ctx, nsID, dep)

@@ -6,9 +6,76 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/toustifer/agentflow/pkg/engine"
 )
+
+// MaxReviewDiffBytes limits git diff stored in task review metadata (100KB).
+const MaxReviewDiffBytes = 100 * 1024
+
+// MaxListMetadataBytes limits any single metadata value in task list/query responses (32KB).
+const MaxListMetadataBytes = 32 * 1024
+
+// MaxDetailMetadataBytes limits any single metadata value in task_get/detail responses (100KB).
+const MaxDetailMetadataBytes = 100 * 1024
+
+func truncateMetadataValue(key, value string, maxBytes int) string {
+	if len(value) <= maxBytes {
+		return value
+	}
+	// Avoid double-truncating an already truncated diff that slightly exceeds maxBytes due to notice
+	if strings.Contains(value, "[git diff truncated:") && len(value) <= maxBytes+1024 {
+		return value
+	}
+	limit := maxBytes
+	for limit > 0 && !utf8.RuneStart(value[limit]) {
+		limit--
+	}
+	kb := maxBytes / 1024
+	notice := fmt.Sprintf(
+		"\n... [metadata %q truncated: total %d bytes; exceeds %dKB limit]",
+		key,
+		len(value),
+		kb,
+	)
+	return value[:limit] + notice
+}
+
+func cloneTaskMetadata(metadata map[string]string, summary bool) map[string]any {
+	if metadata == nil {
+		return nil
+	}
+	out := make(map[string]any, len(metadata))
+	maxBytes := MaxDetailMetadataBytes
+	if summary {
+		maxBytes = MaxListMetadataBytes
+	}
+	for key, value := range metadata {
+		if summary && key == "review.diff" {
+			continue
+		}
+		out[key] = truncateMetadataValue(key, value, maxBytes)
+	}
+	return out
+}
+
+func truncateReviewDiff(diff, base, branch string) string {
+	if len(diff) <= MaxReviewDiffBytes {
+		return diff
+	}
+	limit := MaxReviewDiffBytes
+	for limit > 0 && !utf8.RuneStart(diff[limit]) {
+		limit--
+	}
+	notice := fmt.Sprintf(
+		"\n\n... [git diff truncated: total %d bytes; exceeds 100KB limit. Review the complete diff via 'git diff %s...%s' in worktree]\n",
+		len(diff),
+		base,
+		branch,
+	)
+	return diff[:limit] + notice
+}
 
 type ToolSpec struct {
 	Name        string         `json:"name"`
@@ -998,7 +1065,7 @@ func (s *Server) handleTaskTransition(ctx context.Context, input map[string]any)
 				}
 				if base != "" {
 					if diff, err := runGit(ctx, wtPath, "diff", base+"..."+branch); err == nil {
-						metadata["review.diff"] = diff
+						metadata["review.diff"] = truncateReviewDiff(diff, base, branch)
 					}
 				}
 			}
@@ -1069,7 +1136,7 @@ func (s *Server) handleTaskList(ctx context.Context, input map[string]any) (task
 
 	items := make([]any, 0, len(tasks))
 	for i := range tasks {
-		items = append(items, taskToMap(&tasks[i]))
+		items = append(items, taskToSummaryMap(&tasks[i]))
 	}
 
 	return taskListResult{
@@ -1342,7 +1409,22 @@ func namespaceToMap(ns *engine.Namespace) map[string]any {
 	}
 }
 
-func taskToMap(task *engine.Task) map[string]any {
+func taskToMap(task *engine.Task, summary ...bool) map[string]any {
+	isSummary := false
+	if len(summary) > 0 && summary[0] {
+		isSummary = true
+	}
+	return taskToMapProjection(task, isSummary)
+}
+
+func taskToSummaryMap(task *engine.Task) map[string]any {
+	return taskToMapProjection(task, true)
+}
+
+func taskToMapProjection(task *engine.Task, summary bool) map[string]any {
+	if task == nil {
+		return nil
+	}
 	m := map[string]any{
 		"id":                    task.ID,
 		"namespace_id":          task.NamespaceID,
@@ -1362,7 +1444,7 @@ func taskToMap(task *engine.Task) map[string]any {
 		"review_cycle":          task.ReviewCycle,
 		"created_at":            task.CreatedAt,
 		"updated_at":            task.UpdatedAt,
-		"metadata":              cloneStringMapAny(task.Metadata),
+		"metadata":              cloneTaskMetadata(task.Metadata, summary),
 		"available_transitions": engine.AvailableTransitions(task),
 	}
 	return m
