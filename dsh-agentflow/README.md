@@ -9,12 +9,10 @@ DSH skill root.
 ## Requirements
 
 - DSH (DeepSeek Harness) with the `web` (or any) profile already initialized.
-- An agentflow binary built with **standard MCP Content-Length stdio framing**
-  (the `feat/dsh-mcp-wiring` fix). Older builds crash on the first frame with
-  `invalid character 'C' looking for beginning of value`. Verify:
+- **agentflow binary v0.2.8+**: Starting from v0.2.8, agentflow natively supports auto-adaptive dual-mode stdio framing (Content-Length and NDJSON / newline-delimited JSON). Because DSH relies on the TypeScript MCP SDK which defaults to NDJSON framing over stdio, builds from v0.2.7 or earlier will hang or time out due to framing mismatch. Ensure you upgrade to v0.2.8+. Verify:
 
   ```bash
-  agentflow version    # must print a version, not a server banner
+  agentflow version    # must print a version (v0.2.8+), not a server banner
   ```
 
 ## Install

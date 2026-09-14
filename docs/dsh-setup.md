@@ -1,6 +1,6 @@
 # agentflow on DeepSeek Harness (DSH) — Setup Guide
 
-> Branch: `deepseek/dsh-support` · Base: master (`v0.2.7` Claude/Codex setup)
+> Branch: `deepseek/dsh-support` · Base: master (`v0.2.8+` dual-mode framing setup)
 > Updated: 2026-09-12
 >
 > 本分支把 agentflow 的宿主支持从 Claude Code / Codex 扩展到
@@ -16,6 +16,7 @@
 | Sticky hooks | `UserPromptSubmit` 注入 | `~/.codex/hooks` | **不支持**（无 hook 机制；用 CLI 脚本替代） |
 | UI 检查 | `/mcp` | `codex mcp list` | 无 `/mcp`；以**会话工具存在**为准 |
 | statusline | 支持 | 支持 | **不支持** |
+| stdio 传输帧 | `Content-Length` | `Content-Length` | **NDJSON（换行分隔 JSON）**（需 agentflow v0.2.8+ 原生双模支持） |
 
 DSH 的 skill 系统见 `@deepseek-ai/dsh-skill-filesystem`：只认
 `<root>/<name>/SKILL.md` 或 `<root>/<name>.md`，frontmatter 必填
@@ -68,13 +69,22 @@ DSH 发现根（按 rank 合并）：项目 `.dsh/skills`(100) → `.agents/skil
       config:
         serverName: agentflow
         transport: stdio
-        command: /Users/YOU/.dsh/skills/agentflow/bin/agentflow
+        command: /Users/YOU/.dsh/agentflow/bin/agentflow
+        # Windows 示例：'C:\Users\YOU\.dsh\agentflow\bin\agentflow.exe'
         args: ['stdio']
+        dbPath: /Users/YOU/.dsh/agentflow/agentflow.db
+        # Windows 示例：'C:\Users\YOU\.dsh\agentflow\agentflow.db'
 ```
 
 - `serverName` 决定模型侧工具名：`mcp__agentflow__*`
 - 支持 `stdio` 与 `streamable-http`；重连/退避/HMR 由 dsh-mcp-client 内置
 - 编辑后 HMR 热替换或重启 DSH 生效
+
+#### 目录隔离与 Windows 文件锁避坑
+
+- **推荐独立目录**：统一推荐将二进制放在独立目录 `~/.dsh/agentflow/bin/agentflow`（Windows 为 `.exe`），`dbPath` 对应为 `~/.dsh/agentflow/agentflow.db`。**严禁/不再推荐放入技能目录**（如 `~/.dsh/skills/agentflow/bin/`）。
+- **Windows 平台文件锁风险**：Windows 下运行中的进程与其打开的文件会被系统内核施加强制排他文件锁（Exclusive File Lock）。若将二进制或 `.db` 放入技能目录 `~/.dsh/skills/agentflow/`，当 DSH 正在运行或打开会话时，执行技能更新、`sync-skill` 脚本、`pack-skill` 打包或二次构建时都会因无法写入/替换被锁定的文件而崩溃（报错 `EBUSY: resource busy or locked` 或 `Access is denied`）。将二进制与数据库放置在独立的 `~/.dsh/agentflow/` 即可实现技能文档资源与运行期程序/数据的彻底解耦。
+- **TypeScript MCP SDK stdio 默认帧为 NDJSON**：官方 TypeScript MCP SDK（`@modelcontextprotocol/sdk`，即 DSH 底层 `dsh-mcp-client` 所用）在 stdio 传输上**默认采用换行分隔 JSON (NDJSON)** 帧，而非 HTTP 风格的 `Content-Length: ...\r\n\r\n` 头部封包。Agentflow 自 **v0.2.8** 起原生支持自适应双模帧（自动检测并兼容 NDJSON 和 Content-Length 帧）。若使用 v0.2.7 及更早构建，会因为无法解析 NDJSON 帧导致进程挂起超时无响应，请确保升级到 v0.2.8+。
 
 ### 3. 可选：Hub 团队 MCP
 
@@ -109,10 +119,11 @@ hub-mcp 修复记录（DeepSeek 分支配套）：
 | Hub（可选） | 本轮能调 `mcp__hub__hub_get_dag`（传 `business_code`） | 团队通道通 |
 
 ```bash
-# 服务器侧冒烟（不经 DSH）
+# 服务器侧冒烟（不经 DSH；支持 NDJSON 与 Content-Length 双模帧）
 printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"1.0"}}}' \
-  | ~/.dsh/skills/agentflow/bin/agentflow stdio
+  | ~/.dsh/agentflow/bin/agentflow stdio
+# Windows 下使用 C:\Users\YOU\.dsh\agentflow\bin\agentflow.exe stdio
 ```
 
 预期返回 `serverInfo: agentflow`。MCP 不可用时禁止 Bash 旁路跑
@@ -214,5 +225,5 @@ DSH 的子 Agent 通过 `composeFrom` 固定 join 父预设，**无按调用换 
 ## 八、版本与发布
 
 - 分支 `deepseek/dsh-support` 与 master 并行维护；master 的引擎修复会定期合入
-- Release 命名建议 `v0.2.7-dsh` 系列，与 Claude/Codex 版 `v0.2.7` 区分
+- Release 建议使用 `v0.2.8+` 系列，以获得 stdio 双模自适应帧原生支持
 - 构建与打包沿用 `scripts/build-release.sh`（同一 Go 二进制，无宿主差异）

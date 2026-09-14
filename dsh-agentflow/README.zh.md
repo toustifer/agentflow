@@ -8,12 +8,10 @@ leader_tick、flow_ping……），并把 `agentflow` 技能同步进 DSH 技能
 ## 前置要求
 
 - 已初始化 DSH（任意 profile）。
-- agentflow 二进制需为**标准 MCP Content-Length 帧**版本（`feat/dsh-mcp-wiring`
-  修复）。旧构建收到首条帧即崩溃：
-  `invalid character 'C' looking for beginning of value`。验证：
+- **agentflow 二进制需为 v0.2.8+**：从 v0.2.8 起原生支持 stdio 自适应 Content-Length 与 NDJSON 双模帧。由于 DSH（基于 TypeScript MCP SDK）默认使用换行分隔 JSON（NDJSON）帧，若使用 v0.2.7 及更早构建，会导致协议不匹配或超时不响应，请务必升级到 v0.2.8+。验证：
 
   ```bash
-  agentflow version    # 应打印版本，而不是启动横幅
+  agentflow version    # 应打印版本（v0.2.8+），而不是启动横幅
   ```
 
 ## 安装
