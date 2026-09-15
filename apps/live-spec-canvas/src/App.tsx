@@ -229,8 +229,9 @@ export const App: React.FC = () => {
     const unbindSession = childBridge.onSessionContextChange((ctx) => {
       setSessionContext((prev) => {
         if (ctx.cwd && ctx.cwd !== prev?.cwd) {
-          // Changed session project directory -> reset history viewing and fetch DAGs
+          // Changed session project directory -> reset history viewing, lock state, and fetch DAGs
           setIsViewingHistory(false);
+          setIsLocked(false); 
           fetchHistoryDags(ctx.cwd);
         }
         return ctx;
@@ -266,6 +267,7 @@ export const App: React.FC = () => {
   const handleSelectDag = (dagId: string, spec?: LiveSpecDoc) => {
     if (spec) {
       setIsViewingHistory(true);
+      setIsLocked(true); // Lock view on history
       setOriginalSpec(spec);
       setCurrentSpec(spec);
       const concurrencyVal =
@@ -288,6 +290,7 @@ export const App: React.FC = () => {
   // One-click switch back to latest active live DAG
   const handleSwitchToLatest = () => {
     setIsViewingHistory(false);
+    setIsLocked(false);
     setOriginalSpec(latestLiveSpec);
     setCurrentSpec(latestLiveSpec);
     const concurrencyVal =
