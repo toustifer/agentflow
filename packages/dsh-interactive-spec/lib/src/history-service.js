@@ -15,13 +15,14 @@ export function normalizePath(p) {
         .toLowerCase();
 }
 /**
- * Parses a JSON string safely, returning fallback if invalid.
+ * Parses a JSON string safely, returning fallback if invalid or null.
  */
 function safeJsonParse(raw, fallback) {
     if (typeof raw !== 'string' || !raw.trim())
         return fallback;
     try {
-        return JSON.parse(raw);
+        const val = JSON.parse(raw);
+        return (val === null || val === undefined) ? fallback : val;
     }
     catch {
         return fallback;
@@ -279,11 +280,36 @@ export function getDagDetailByCwd(params, options) {
                 ? dagMeta.concurrency
                 : 2;
         const tasks = taskRows.map((t) => {
-            const dependsOn = safeJsonParse(t.depends_on, []);
-            const criteria = safeJsonParse(t.acceptance_criteria, []);
-            const outputFiles = safeJsonParse(t.output_files, []);
-            const tags = safeJsonParse(t.tags, []);
-            const metadata = safeJsonParse(t.metadata, {});
+            let dependsOn = [];
+            try {
+                const parsed = safeJsonParse(t.depends_on, []);
+                dependsOn = Array.isArray(parsed) ? parsed : [];
+            }
+            catch { }
+            let criteria = [];
+            try {
+                const parsed = safeJsonParse(t.acceptance_criteria, []);
+                criteria = Array.isArray(parsed) ? parsed : [];
+            }
+            catch { }
+            let outputFiles = [];
+            try {
+                const parsed = safeJsonParse(t.output_files, []);
+                outputFiles = Array.isArray(parsed) ? parsed : [];
+            }
+            catch { }
+            let tags = [];
+            try {
+                const parsed = safeJsonParse(t.tags, []);
+                tags = Array.isArray(parsed) ? parsed : [];
+            }
+            catch { }
+            let metadata = {};
+            try {
+                const parsed = safeJsonParse(t.metadata, {});
+                metadata = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+            }
+            catch { }
             return {
                 id: String(t.id),
                 task_id: String(t.id),
@@ -317,10 +343,7 @@ export function getDagDetailByCwd(params, options) {
         };
     }
     catch (err) {
-        return {
-            ok: false,
-            error: err?.message || String(err),
-        };
+        throw err;
     }
     finally {
         db.close();

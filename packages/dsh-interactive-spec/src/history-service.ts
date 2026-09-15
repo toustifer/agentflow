@@ -52,12 +52,13 @@ export function normalizePath(p: string): string {
 }
 
 /**
- * Parses a JSON string safely, returning fallback if invalid.
+ * Parses a JSON string safely, returning fallback if invalid or null.
  */
 function safeJsonParse<T>(raw: unknown, fallback: T): T {
   if (typeof raw !== 'string' || !raw.trim()) return fallback;
   try {
-    return JSON.parse(raw) as T;
+    const val = JSON.parse(raw);
+    return (val === null || val === undefined) ? fallback : (val as T);
   } catch {
     return fallback;
   }
@@ -341,11 +342,35 @@ export function getDagDetailByCwd(
           : 2;
 
     const tasks: SpecTask[] = taskRows.map((t) => {
-      const dependsOn = safeJsonParse<string[]>(t.depends_on, []);
-      const criteria = safeJsonParse<string[]>(t.acceptance_criteria, []);
-      const outputFiles = safeJsonParse<string[]>(t.output_files, []);
-      const tags = safeJsonParse<string[]>(t.tags, []);
-      const metadata = safeJsonParse<Record<string, unknown>>(t.metadata, {});
+      let dependsOn: string[] = [];
+      try {
+        const parsed = safeJsonParse<any>(t.depends_on, []);
+        dependsOn = Array.isArray(parsed) ? parsed : [];
+      } catch {}
+
+      let criteria: string[] = [];
+      try {
+        const parsed = safeJsonParse<any>(t.acceptance_criteria, []);
+        criteria = Array.isArray(parsed) ? parsed : [];
+      } catch {}
+
+      let outputFiles: string[] = [];
+      try {
+        const parsed = safeJsonParse<any>(t.output_files, []);
+        outputFiles = Array.isArray(parsed) ? parsed : [];
+      } catch {}
+
+      let tags: string[] = [];
+      try {
+        const parsed = safeJsonParse<any>(t.tags, []);
+        tags = Array.isArray(parsed) ? parsed : [];
+      } catch {}
+
+      let metadata: Record<string, unknown> = {};
+      try {
+        const parsed = safeJsonParse<any>(t.metadata, {});
+        metadata = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      } catch {}
 
       return {
         id: String(t.id),
@@ -381,10 +406,7 @@ export function getDagDetailByCwd(
       spec,
     };
   } catch (err: any) {
-    return {
-      ok: false,
-      error: err?.message || String(err),
-    };
+    throw err;
   } finally {
     db.close();
   }

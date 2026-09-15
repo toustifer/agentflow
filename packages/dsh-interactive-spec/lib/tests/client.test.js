@@ -171,8 +171,8 @@ describe('LiveSpecHostCard component and message protocol', () => {
             expect(elementMeta.props.initialMeta.cwd).toBe('D:\\myprogram\\experience\\meta-project');
         });
     });
-    describe('Empty state placeholder and session context rendering', () => {
-        it('renders empty state placeholder with current workspace cwd when no valid DAG is present', () => {
+    describe('Session Scope & cwd extraction and iframe forwarding', () => {
+        it('always renders iframe so live-spec-canvas can render interactive topology and history selector', () => {
             const targetCwd = 'D:\\myprogram\\experience\\siruoning\\Ai_medbox';
             const html = renderToStaticMarkup(React.createElement(LiveSpecHostCard, {
                 initialMeta: {
@@ -180,14 +180,13 @@ describe('LiveSpecHostCard component and message protocol', () => {
                     cwd: targetCwd,
                 },
             }));
-            // Verify empty state placeholder exists
-            expect(html).toContain('data-testid="live-spec-empty-state"');
-            expect(html).toContain('暂无活动 DAG 编排');
-            expect(html).toContain(`当前工作区: ${targetCwd}`);
-            // Verify iframe is hidden (display:none) so no default/stale bootstrap sample is shown
-            expect(html).toContain('display:none');
+            // Verify iframe is rendered
+            expect(html).toContain('<iframe');
+            expect(html).toContain('title="Agentflow Live Spec Canvas"');
+            expect(html).toContain('data-testid="header-cwd-badge"');
+            expect(html).toContain(`title="${targetCwd}"`);
         });
-        it('renders iframe in display:block when a valid DAG with tasks is provided', () => {
+        it('renders host card with DAG title and dag_id when initialSpec is provided', () => {
             const sampleDoc = {
                 version: '1.0.0',
                 title: 'Active Project DAG',
@@ -205,12 +204,9 @@ describe('LiveSpecHostCard component and message protocol', () => {
                     cwd: targetCwd,
                 },
             }));
-            // Empty state placeholder should NOT be rendered
-            expect(html).not.toContain('data-testid="live-spec-empty-state"');
             expect(html).toContain('Active Project DAG');
             expect(html).toContain('dag-active-run');
-            // Iframe should be visible with display:block
-            expect(html).toContain('display:block');
+            expect(html).toContain('<iframe');
         });
     });
     describe('DownstreamEvent sessionContext communication contract', () => {

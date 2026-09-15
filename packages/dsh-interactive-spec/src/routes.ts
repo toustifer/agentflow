@@ -52,14 +52,22 @@ export async function handleDagRequest(
     );
   }
 
-  const result = getDagDetailByCwd({ cwd, dag_id: dagId, namespace_id: namespaceId }, options);
-  let status = 200;
-  if (!result.ok) {
-    status = result.error?.toLowerCase().includes('not found') ? 404 : 500;
-  }
+  try {
+    const result = getDagDetailByCwd({ cwd, dag_id: dagId, namespace_id: namespaceId }, options);
+    let status = 200;
+    if (!result.ok) {
+      status = result.error?.toLowerCase().includes('not found') ? 404 : 500;
+    }
 
-  return Response.json(result, {
-    status,
-    headers: { 'cache-control': 'no-store' },
-  });
+    return Response.json(result, {
+      status,
+      headers: { 'cache-control': 'no-store' },
+    });
+  } catch (err: any) {
+    console.error('CRASH IN handleDagRequest:', err.stack);
+    return Response.json(
+      { ok: false, error: err?.message || String(err) },
+      { status: 500, headers: { 'cache-control': 'no-store' } }
+    );
+  }
 }

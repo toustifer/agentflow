@@ -290,14 +290,14 @@ export function getDagDetailByCwd(params, options) {
                 title: String(t.title),
                 description: t.description ? String(t.description) : undefined,
                 assigned_worker: t.assigned_worker ? String(t.assigned_worker) : undefined,
-                depends_on: dependsOn,
+                depends_on: Array.isArray(dependsOn) ? dependsOn : [],
                 state: mapTaskState(String(t.state || 'assigned')),
                 estimated_hours: typeof t.estimated_hours === 'number' ? t.estimated_hours : Number(t.estimated_hours || 0),
                 priority: typeof t.priority === 'number' ? t.priority : Number(t.priority || 0),
-                acceptance_criteria: criteria.length > 0 ? criteria : undefined,
-                output_files: outputFiles.length > 0 ? outputFiles : undefined,
-                tags: tags.length > 0 ? tags : undefined,
-                metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+                acceptance_criteria: Array.isArray(criteria) && criteria.length > 0 ? criteria : undefined,
+                output_files: Array.isArray(outputFiles) && outputFiles.length > 0 ? outputFiles : undefined,
+                tags: Array.isArray(tags) && tags.length > 0 ? tags : undefined,
+                metadata: metadata && typeof metadata === 'object' && Object.keys(metadata).length > 0 ? metadata : undefined,
             };
         });
         const spec = {
