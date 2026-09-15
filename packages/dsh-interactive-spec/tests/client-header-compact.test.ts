@@ -1,12 +1,10 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, it, expect } from 'vitest';
-// NOTE: the explicit `.ts` extension is deliberate. This package ships committed
-// compiled artifacts (src/client.js / lib/src/client.js are tracked), and Vite's
-// default resolution order tries `.js` BEFORE `.ts`, so a bare '../src/client'
-// import would silently test the stale compiled copy instead of the source of
-// truth that tsdown packages into the host-loaded lib/client.js.
-import { LiveSpecHostCard } from '../src/client.ts';
+// Bare specifier on purpose: nothing is emitted next to the sources any more
+// (tsconfig.json sets `noEmit`), so this resolves to src/client.ts — the source of
+// truth tsdown packages into the host-loaded lib/client.js.
+import { LiveSpecHostCard } from '../src/client';
 
 /**
  * Compact-safe host header regression test.

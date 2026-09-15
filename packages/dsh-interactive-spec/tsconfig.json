@@ -9,7 +9,20 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["node"]
+    "types": ["node"],
+    // `tsc -p .` is a PURE TYPECHECK: it emits nothing, anywhere.
+    //
+    // This package used to run `tsc -p .` without an outDir, which emitted
+    // src/*.js + src/*.d.ts and tests/*.js + tests/*.d.ts *next to* the sources and
+    // committed them. Vite resolves `.js` before `.ts`, so a bare `import '../src/client'`
+    // silently loaded the stale compiled copy instead of src/client.ts, and
+    // vitest.config.mjs's `@agentflow/dsh-interactive-spec` alias (-> src/) resolved to
+    // the stale src/index.js. Those in-place artifacts are gone; do not reintroduce them.
+    //
+    // `lib/` is still committed build output (tsdown.config.mjs bundles lib/src/client.js
+    // into the host-loaded lib/client.js). Regenerate it explicitly with:
+    //   npx tsc -p . --outDir lib --noEmit false
+    "noEmit": true
   },
   "include": ["src/**/*", "tests/**/*"]
 }
