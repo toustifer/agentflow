@@ -304,6 +304,12 @@ export function LiveSpecHostCard({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
+    // Compact-safe: keep the action group on screen and let the bar wrap onto a
+    // second row instead of crushing / clipping the left group at ~714px.
+    flexWrap: 'wrap',
+    gap: '8px',
+    rowGap: '6px',
+    minWidth: 0,
     padding: '8px 12px',
     backgroundColor: theme === 'light' ? '#f1f5f9' : '#1e293b',
     borderBottom: theme === 'light' ? '1px solid #e2e8f0' : '1px solid #334155',
@@ -325,6 +331,9 @@ export function LiveSpecHostCard({
     color: theme === 'light' ? '#1e293b' : '#f8fafc',
     cursor: 'pointer',
     transition: 'background-color 0.15s ease',
+    // Never let the host squeeze the fullscreen toggle flat.
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
   };
 
   const hasValidDag = Boolean(currentSpec && Array.isArray(currentSpec.tasks) && currentSpec.tasks.length > 0);
@@ -342,10 +351,31 @@ export function LiveSpecHostCard({
       { style: headerStyle },
       React.createElement(
         'div',
-        { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+        {
+          style: {
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            // Let the left cluster shrink (title/cwd ellipsis) on a single line
+            // instead of shoving the cwd / dag_id badge onto a second row.
+            // basis 0 so the header never line-breaks before shrinking.
+            minWidth: 0,
+            flex: '1 1 0%',
+            overflow: 'hidden',
+          },
+        },
         React.createElement(
           'span',
-          { style: { fontWeight: 600 } },
+          {
+            style: {
+              fontWeight: 600,
+              minWidth: 0,
+              flexShrink: 1,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            },
+          },
           currentSpec?.title || (cwd ? `工作区: ${cwd}` : 'Agentflow Live-Spec Canvas')
         ),
         currentSpec?.dag_id
@@ -358,6 +388,12 @@ export function LiveSpecHostCard({
                   borderRadius: '4px',
                   backgroundColor: theme === 'light' ? '#e2e8f0' : '#334155',
                   color: theme === 'light' ? '#475569' : '#94a3b8',
+                  maxWidth: '240px',
+                  minWidth: 0,
+                  flexShrink: 1,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
                 },
               },
               currentSpec.dag_id
@@ -374,6 +410,8 @@ export function LiveSpecHostCard({
                   backgroundColor: theme === 'light' ? '#e2e8f0' : '#334155',
                   color: theme === 'light' ? '#475569' : '#94a3b8',
                   maxWidth: '240px',
+                  minWidth: 0,
+                  flexShrink: 1,
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
@@ -391,6 +429,11 @@ export function LiveSpecHostCard({
                   fontSize: '11px',
                   color: '#10b981',
                   marginLeft: '8px',
+                  minWidth: 0,
+                  flexShrink: 1,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
                 },
               },
               `✓ ${lastNotification}`
@@ -399,7 +442,9 @@ export function LiveSpecHostCard({
       ),
       React.createElement(
         'div',
-        { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+        {
+          style: { display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 },
+        },
         React.createElement(
           'button',
           {
