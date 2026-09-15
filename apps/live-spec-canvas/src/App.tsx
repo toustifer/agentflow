@@ -136,7 +136,7 @@ export const App: React.FC = () => {
     }
   }, [theme]);
 
-  // Fetch history DAGs whenever cwd changes
+  // Fetch history DAGs whenever cwd changes, and auto-load the latest DAG if current is default
   const fetchHistoryDags = useCallback(async (cwd?: string) => {
     if (!cwd || !cwd.trim()) {
       setHistoryDags([]);
@@ -148,12 +148,30 @@ export const App: React.FC = () => {
         const data = await resp.json();
         if (data.ok && Array.isArray(data.dags)) {
           setHistoryDags(data.dags);
+          // If canvas is currently showing default sample and there are real project DAGs, auto-load the latest one!
+          if (data.dags.length > 0) {
+            const firstDag = data.dags[0];
+            try {
+              const detailResp = await fetch(`/api/agentflow/dag?cwd=${encodeURIComponent(cwd)}&dag_id=${encodeURIComponent(firstDag.id)}`);
+              if (detailResp.ok) {
+                const detailData = await detailResp.json();
+                if (detailData.ok && detailData.spec) {
+                  setLatestLiveSpec(detailData.spec);
+                  setOriginalSpec(detailData.spec);
+                  setCurrentSpec(detailData.spec);
+                  initSimulator(detailData.spec, settings);
+                }
+              }
+            } catch {
+              // ignore detail fetch error
+            }
+          }
         }
       }
     } catch {
       // Background query failure can be retried through UI
     }
-  }, []);
+  }, [initSimulator, settings]);
 
   // ChildBridge registration
   useEffect(() => {
@@ -452,45 +470,50 @@ export const App: React.FC = () => {
         }}
       >
         {/* Left: Title, CWD Breadcrumb & History DAG Selector */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: '1 1 auto' }}>
-          <span style={{ fontSize: '18px', color: 'var(--accent, #38bdf8)', flexShrink: 0 }}>⬡</span>
-          <h1
-            style={{
-              fontSize: '14px',
-              fontWeight: 700,
-              color: 'var(--text, #f4f4f5)',
-              margin: 0,
-              whiteSpace: 'nowrap',
-              flexShrink: 0,
-            }}
-          >
-            {currentSpec.title || 'Agentflow Live-Spec 画布'}
-          </h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+            <span style={{ fontSize: '18px', color: 'var(--accent, #38bdf8)' }}>⬡</span>
+            <h1
+              style={{
+                fontSize: '13px',
+                fontWeight: 700,
+                color: 'var(--text, #f4f4f5)',
+                margin: 0,
+                maxWidth: '200px',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={currentSpec.title || 'Agentflow Live-Spec 画布'}
+            >
+              {currentSpec.title || 'Agentflow Live-Spec 画布'}
+            </h1>
+          </div>
 
           {/* Project CWD Breadcrumb: 📁 [cwd 目录] */}
           <div
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '6px',
+              gap: '4px',
               background: 'rgba(255, 255, 255, 0.05)',
               border: '1px solid var(--border-subtle, #3f3f46)',
-              padding: '2px 8px',
+              padding: '2px 6px',
               borderRadius: '6px',
               fontSize: '11px',
               fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
               color: sessionContext?.cwd ? 'var(--text, #f4f4f5)' : 'var(--text-subtle, #a1a1aa)',
-              maxWidth: '240px',
+              maxWidth: '180px',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
-              flexShrink: 1,
+              flexShrink: 0,
             }}
             title={sessionContext?.cwd ? `当前会话工作目录: ${sessionContext.cwd}` : '未指定会话工作目录'}
           >
             <span>📁</span>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {sessionContext?.cwd || '未连接会话目录'}
+              {sessionContext?.cwd ? sessionContext.cwd.split('\\').pop() : '未连接目录'}
             </span>
           </div>
 
