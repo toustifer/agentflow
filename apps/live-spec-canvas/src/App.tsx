@@ -136,7 +136,7 @@ export const App: React.FC = () => {
     }
   }, [theme]);
 
-  // Fetch history DAGs whenever cwd changes, and auto-load the latest DAG if current is default
+  // Fetch history DAGs whenever cwd changes, and auto-load the latest DAG if current is default and not viewing history
   const fetchHistoryDags = useCallback(async (cwd?: string) => {
     if (!cwd || !cwd.trim()) {
       setHistoryDags([]);
@@ -148,8 +148,8 @@ export const App: React.FC = () => {
         const data = await resp.json();
         if (data.ok && Array.isArray(data.dags)) {
           setHistoryDags(data.dags);
-          // If canvas is currently showing default sample and there are real project DAGs, auto-load the latest one!
-          if (data.dags.length > 0) {
+          // Only auto-load if NOT viewing history and NOT locked
+          if (data.dags.length > 0 && !isViewingHistory && !isLocked) {
             const firstDag = data.dags[0];
             try {
               const detailResp = await fetch(`/api/agentflow/dag?cwd=${encodeURIComponent(cwd)}&dag_id=${encodeURIComponent(firstDag.id)}`);
@@ -171,7 +171,7 @@ export const App: React.FC = () => {
     } catch {
       // Background query failure can be retried through UI
     }
-  }, [initSimulator, settings]);
+  }, [initSimulator, settings, isViewingHistory, isLocked]);
 
   // ChildBridge registration
   useEffect(() => {
