@@ -413,89 +413,6 @@ export function LiveSpecHostCard({
         )
       )
     ),
-    // Empty state placeholder when no valid DAG is found
-    !hasValidDag
-      ? React.createElement(
-          'div',
-          {
-            className: 'live-spec-empty-state',
-            'data-testid': 'live-spec-empty-state',
-            style: {
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '32px 16px',
-              textAlign: 'center',
-              color: theme === 'light' ? '#475569' : '#94a3b8',
-              backgroundColor: theme === 'light' ? '#f8fafc' : '#0b0f19',
-            },
-          },
-          React.createElement(
-            'svg',
-            {
-              width: 48,
-              height: 48,
-              viewBox: '0 0 24 24',
-              fill: 'none',
-              stroke: 'currentColor',
-              strokeWidth: 1.5,
-              strokeLinecap: 'round',
-              strokeLinejoin: 'round',
-              style: { marginBottom: '16px', opacity: 0.7 },
-            },
-            React.createElement('rect', { x: 3, y: 3, width: 18, height: 18, rx: 2 }),
-            React.createElement('path', { d: 'M9 9h6' }),
-            React.createElement('path', { d: 'M9 13h6' }),
-            React.createElement('path', { d: 'M9 17h4' })
-          ),
-          React.createElement(
-            'div',
-            {
-              style: {
-                fontSize: '15px',
-                fontWeight: 600,
-                marginBottom: '8px',
-                color: theme === 'light' ? '#0f172a' : '#f8fafc',
-              },
-            },
-            '暂无活动 DAG 编排'
-          ),
-          React.createElement(
-            'div',
-            {
-              'data-testid': 'live-spec-current-cwd',
-              style: {
-                fontSize: '13px',
-                fontFamily: 'monospace',
-                padding: '6px 12px',
-                borderRadius: '4px',
-                backgroundColor: theme === 'light' ? '#e2e8f0' : '#1e293b',
-                color: theme === 'light' ? '#1e293b' : '#38bdf8',
-                maxWidth: '90%',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                marginBottom: '12px',
-              },
-            },
-            `当前工作区: ${cwd || '未绑定工作区'}`
-          ),
-          React.createElement(
-            'div',
-            {
-              style: {
-                fontSize: '12px',
-                maxWidth: '380px',
-                lineHeight: 1.5,
-                color: theme === 'light' ? '#64748b' : '#64748b',
-              },
-            },
-            '当前会话尚未检测到活跃的 Agentflow 任务 DAG。请在对话中让 Leader 启动流程或编排任务。'
-          )
-        )
-      : null,
     // Embedded Iframe
     React.createElement('iframe', {
       ref: iframeRef,
@@ -508,7 +425,6 @@ export function LiveSpecHostCard({
         height: '100%',
         border: 'none',
         backgroundColor: 'transparent',
-        display: hasValidDag ? 'block' : 'none',
       },
     })
   );

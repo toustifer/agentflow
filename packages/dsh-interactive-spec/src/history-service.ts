@@ -65,28 +65,38 @@ function safeJsonParse<T>(raw: unknown, fallback: T): T {
 
 /**
  * Resolves the Agentflow SQLite database file path.
+ * Checks candidate databases and prefers the one containing non-empty namespaces/dags.
  */
 export function resolveAgentflowDbPath(customPath?: string): string | null {
   if (customPath) {
     return fs.existsSync(customPath) ? customPath : null;
   }
 
+  const candidates: string[] = [];
+
   const envPath = process.env.AGENTFLOW_DB_PATH;
-  if (envPath && fs.existsSync(envPath)) {
-    return envPath;
-  }
+  if (envPath && fs.existsSync(envPath)) candidates.push(envPath);
+
+  const tempDb = path.join(process.env.TEMP || os.tmpdir(), 'agentflow.db');
+  if (fs.existsSync(tempDb)) candidates.push(tempDb);
 
   const userDshDb = path.join(os.homedir(), '.dsh', 'agentflow', 'agentflow.db');
-  if (fs.existsSync(userDshDb)) {
-    return userDshDb;
+  if (fs.existsSync(userDshDb)) candidates.push(userDshDb);
+
+  for (const p of candidates) {
+    try {
+      const db = new DatabaseSync(p, { open: true, readOnly: true });
+      const row = db.prepare('SELECT COUNT(*) as count FROM namespaces').get() as any;
+      db.close();
+      if (row && row.count > 0) {
+        return p;
+      }
+    } catch {
+      // ignore
+    }
   }
 
-  const tempDb = path.join(process.env.TMPDIR || process.env.TEMP || os.tmpdir(), 'agentflow.db');
-  if (fs.existsSync(tempDb)) {
-    return tempDb;
-  }
-
-  return null;
+  return candidates.length > 0 ? candidates[0] : null;
 }
 
 /**
