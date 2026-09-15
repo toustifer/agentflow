@@ -17,6 +17,7 @@ import {
   getDagStatusMeta,
 } from './components/DAGHistorySelect';
 import { childBridge, ThemeMode, SpecSessionContext } from './bridge/child-bridge';
+import { useContainerWidth, COMPACT_BREAKPOINT } from './hooks/useContainerWidth';
 
 const defaultSampleSpec: LiveSpecDoc = {
   version: '1.0.0',
@@ -84,6 +85,10 @@ export const App: React.FC = () => {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>('dark');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Container-driven responsive layout: the canvas lives inside a host iframe,
+  // so we measure our own element instead of trusting window.innerWidth.
+  const { containerRef, width: containerWidth, isCompact } = useContainerWidth<HTMLDivElement>(COMPACT_BREAKPOINT);
 
   // Simulation settings
   const [settings, setSettings] = useState<ParametricSettings>({
@@ -448,6 +453,10 @@ export const App: React.FC = () => {
 
   return (
     <div
+      ref={containerRef}
+      data-testid="live-spec-canvas-root"
+      data-layout={isCompact ? 'compact' : 'wide'}
+      data-container-width={Math.round(containerWidth)}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -459,22 +468,42 @@ export const App: React.FC = () => {
     >
       {/* Top Header Control Bar: [⬡ 标题] [📁 cwd] [📜 历史 DAG 下拉] [🌿 dag_id & 📊 统计] [按钮] */}
       <header
+        data-testid="canvas-header"
         style={{
-          height: '48px',
+          // minHeight (not height) so the bar can grow into extra wrapped rows
+          // instead of clipping its own content at half width.
+          minHeight: '48px',
+          height: 'auto',
+          flex: '0 0 auto',
           background: 'var(--card, #18181b)',
           borderBottom: '1px solid var(--border, #27272a)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '0 16px',
+          flexWrap: 'wrap',
+          padding: isCompact ? '6px 10px' : '0 16px',
+          rowGap: isCompact ? '6px' : '0px',
+          columnGap: isCompact ? '8px' : '12px',
           zIndex: 20,
           boxShadow: '0 1px 4px rgba(0,0,0,0.15)',
-          gap: '12px',
+          boxSizing: 'border-box',
         }}
       >
         {/* Left: Title, CWD Breadcrumb & History DAG Selector */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: isCompact ? '6px' : '8px',
+            minWidth: 0,
+            flexWrap: 'wrap',
+            rowGap: '4px',
+            // In compact mode the left group owns a whole wrapped row so its
+            // own children never have to be squeezed or clipped.
+            flex: isCompact ? '1 1 100%' : '1 1 auto',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0, minWidth: 0 }}>
             <span style={{ fontSize: '18px', color: 'var(--accent, #38bdf8)' }}>⬡</span>
             <h1
               style={{
@@ -482,7 +511,9 @@ export const App: React.FC = () => {
                 fontWeight: 700,
                 color: 'var(--text, #f4f4f5)',
                 margin: 0,
-                maxWidth: '200px',
+                maxWidth: isCompact ? '150px' : '200px',
+                minWidth: 0,
+                flexShrink: 1,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -506,16 +537,17 @@ export const App: React.FC = () => {
               fontSize: '11px',
               fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
               color: sessionContext?.cwd ? 'var(--text, #f4f4f5)' : 'var(--text-subtle, #a1a1aa)',
-              maxWidth: '180px',
+              maxWidth: isCompact ? '120px' : '180px',
+              minWidth: 0,
+              flexShrink: 1,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
-              flexShrink: 0,
             }}
             title={sessionContext?.cwd ? `当前会话工作目录: ${sessionContext.cwd}` : '未指定会话工作目录'}
           >
-            <span>📁</span>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <span style={{ flexShrink: 0 }}>📁</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
               {sessionContext?.cwd ? sessionContext.cwd.split('\\').pop() : '未连接目录'}
             </span>
           </div>
@@ -568,7 +600,17 @@ export const App: React.FC = () => {
         </div>
 
         {/* Right Info: Leader DAG ID & Task Statistics */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            flexShrink: 0,
+            minWidth: 0,
+            flexWrap: 'wrap',
+            rowGap: '4px',
+          }}
+        >
           {/* Leader DAG ID badge */}
           <div
             style={{
@@ -584,11 +626,25 @@ export const App: React.FC = () => {
               color: isViewingHistory ? '#eab308' : '#38bdf8',
               fontSize: '11px',
               fontWeight: 600,
+              maxWidth: isCompact ? '150px' : 'none',
+              minWidth: 0,
+              overflow: 'hidden',
+              whiteSpace: 'nowrap',
             }}
             title={`当前 DAG: ${currentSpec.dag_id || 'default'}${isViewingHistory ? ' (历史战役)' : ''}`}
           >
-            <span style={{ opacity: 0.8 }}>🌿 DAG:</span>
-            <span style={{ fontFamily: 'ui-monospace, monospace' }}>{currentSpec.dag_id || 'default'}</span>
+            <span style={{ opacity: 0.8, flexShrink: 0 }}>🌿 DAG:</span>
+            <span
+              style={{
+                fontFamily: 'ui-monospace, monospace',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                minWidth: 0,
+              }}
+            >
+              {currentSpec.dag_id || 'default'}
+            </span>
           </div>
 
           {/* Task Statistics badge */}
@@ -604,6 +660,7 @@ export const App: React.FC = () => {
               color: 'var(--text, #f4f4f5)',
               fontSize: '11px',
               fontWeight: 500,
+              whiteSpace: 'nowrap',
             }}
             title={`任务统计: 总计 ${taskStats.total}，已完成 ${taskStats.passed}，执行中 ${taskStats.executing}，待处理 ${taskStats.pending}${taskStats.rework ? `，返工 ${taskStats.rework}` : ''}`}
           >
@@ -621,19 +678,30 @@ export const App: React.FC = () => {
         </div>
 
         {/* Action Buttons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: isCompact ? '8px' : '10px',
+            flexShrink: 0,
+            flexWrap: 'wrap',
+            rowGap: '6px',
+          }}
+        >
           {/* Theme Toggle */}
           <button
             onClick={handleThemeToggle}
             title="切换亮色/暗色主题"
             style={{
-              padding: '6px 10px',
+              padding: isCompact ? '5px 8px' : '6px 10px',
               fontSize: '12px',
               borderRadius: '6px',
               background: 'var(--bg, #09090b)',
               color: 'var(--text, #f4f4f5)',
               border: '1px solid var(--border, #27272a)',
               cursor: 'pointer',
+              flexShrink: 0,
+              whiteSpace: 'nowrap',
             }}
           >
             {theme === 'dark' ? '☀️ 浅色' : '🌙 深色'}
@@ -643,7 +711,7 @@ export const App: React.FC = () => {
           <button
             onClick={handleFeedback}
             style={{
-              padding: '6px 14px',
+              padding: isCompact ? '5px 10px' : '6px 14px',
               fontSize: '12px',
               fontWeight: 600,
               borderRadius: '6px',
@@ -655,6 +723,8 @@ export const App: React.FC = () => {
               alignItems: 'center',
               gap: '6px',
               transition: 'background 0.2s',
+              flexShrink: 0,
+              whiteSpace: 'nowrap',
             }}
           >
             <span>💬 反哺改动到对话</span>
@@ -665,7 +735,7 @@ export const App: React.FC = () => {
             onClick={handleApply}
             disabled={cycle.hasCycle}
             style={{
-              padding: '6px 16px',
+              padding: isCompact ? '5px 12px' : '6px 16px',
               fontSize: '12px',
               fontWeight: 700,
               borderRadius: '6px',
@@ -679,6 +749,8 @@ export const App: React.FC = () => {
               opacity: cycle.hasCycle ? 0.6 : 1,
               transition: 'all 0.2s ease',
               boxShadow: cycle.hasCycle ? 'none' : '0 2px 6px rgba(2, 132, 199, 0.4)',
+              flexShrink: 0,
+              whiteSpace: 'nowrap',
             }}
           >
             <span>✓ 一键应用到工程</span>
@@ -713,7 +785,7 @@ export const App: React.FC = () => {
       )}
 
       {/* Three-Zone Layout: Left ParametricPanel, Center TopologyCanvas, Bottom SimulationBar */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden', position: 'relative' }}>
         {/* Zone 1: Left Parametric Panel */}
         <ParametricPanel
           spec={currentSpec}
@@ -723,6 +795,7 @@ export const App: React.FC = () => {
           onSettingsChange={handleSettingsChange}
           selectedTaskId={selectedTaskId}
           onSelectTask={setSelectedTaskId}
+          isCompact={isCompact}
         />
 
         {/* Zone 2: Central Topology Canvas or Enhanced History-aware Empty State */}
@@ -736,6 +809,7 @@ export const App: React.FC = () => {
             onSelectTask={setSelectedTaskId}
             onSpecChange={handleSpecChange}
             onFaultInject={handleInjectFault}
+            isCompact={isCompact}
           />
         ) : (
           <div
@@ -1106,6 +1180,7 @@ export const App: React.FC = () => {
         selectedTaskId={selectedTaskId}
         speedMs={speedMs}
         onSpeedChange={setSpeedMs}
+        isCompact={isCompact}
       />
     </div>
   );

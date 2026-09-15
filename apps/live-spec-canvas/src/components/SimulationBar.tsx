@@ -12,6 +12,8 @@ export interface SimulationBarProps {
   selectedTaskId?: string | null;
   speedMs: number;
   onSpeedChange: (speed: number) => void;
+  /** Narrow (half-width right pane) layout: wrap into 2 rows instead of clipping. */
+  isCompact?: boolean;
 }
 
 export const SimulationBar: React.FC<SimulationBarProps> = ({
@@ -25,6 +27,7 @@ export const SimulationBar: React.FC<SimulationBarProps> = ({
   selectedTaskId,
   speedMs,
   onSpeedChange,
+  isCompact = false,
 }) => {
   const clock = snapshot?.clock ?? 0;
   const runningCount = snapshot?.activeRunningCount ?? 0;
@@ -56,25 +59,49 @@ export const SimulationBar: React.FC<SimulationBarProps> = ({
 
   return (
     <div
+      data-testid="simulation-bar"
       style={{
-        height: '56px',
+        // minHeight + wrap: at ~714px the three groups no longer fit on one row,
+        // so the bar grows to two rows instead of clipping its buttons.
+        minHeight: '56px',
+        height: 'auto',
+        flex: '0 0 auto',
         background: 'var(--card, #18181b)',
         borderTop: '1px solid var(--border, #27272a)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '0 20px',
+        flexWrap: 'wrap',
+        padding: isCompact ? '8px 12px' : '0 20px',
+        rowGap: isCompact ? '8px' : '0px',
+        columnGap: '12px',
         fontSize: '12px',
         color: 'var(--text, #f4f4f5)',
         zIndex: 10,
         boxShadow: '0 -2px 10px rgba(0,0,0,0.15)',
+        boxSizing: 'border-box',
       }}
     >
       {/* Left: Clock and Slot Status */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: isCompact ? '10px' : '16px',
+          flexShrink: 0,
+          whiteSpace: 'nowrap',
+        }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <span style={{ fontSize: '14px' }}>⏱️</span>
-          <span style={{ fontWeight: 700, fontSize: '13px', fontFamily: 'monospace' }}>
+          <span
+            style={{
+              fontWeight: 700,
+              fontSize: isCompact ? '12px' : '13px',
+              fontFamily: 'monospace',
+              whiteSpace: 'nowrap',
+            }}
+          >
             时钟: T+{clock}h
           </span>
         </div>
@@ -89,6 +116,7 @@ export const SimulationBar: React.FC<SimulationBarProps> = ({
               color: runningCount > 0 ? '#38bdf8' : 'var(--subtext, #a1a1aa)',
               fontWeight: 700,
               fontFamily: 'monospace',
+              whiteSpace: 'nowrap',
             }}
           >
             {runningCount} / {concurrency} 活跃
@@ -104,6 +132,7 @@ export const SimulationBar: React.FC<SimulationBarProps> = ({
               borderRadius: '12px',
               fontSize: '11px',
               fontWeight: 700,
+              whiteSpace: 'nowrap',
             }}
           >
             ✓ 全部任务完成
@@ -112,14 +141,22 @@ export const SimulationBar: React.FC<SimulationBarProps> = ({
       </div>
 
       {/* Center: Playback Controls */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: isCompact ? '8px' : '10px',
+          flexShrink: 0,
+          whiteSpace: 'nowrap',
+        }}
+      >
         {/* Play/Pause Button */}
         <button
           onClick={onTogglePlay}
           disabled={isComplete}
           style={{
-            padding: '6px 14px',
-            fontSize: '12px',
+            padding: isCompact ? '5px 9px' : '6px 14px',
+            fontSize: isCompact ? '11px' : '12px',
             fontWeight: 600,
             borderRadius: '6px',
             cursor: isComplete ? 'not-allowed' : 'pointer',
@@ -131,6 +168,8 @@ export const SimulationBar: React.FC<SimulationBarProps> = ({
             gap: '6px',
             transition: 'background 0.2s',
             opacity: isComplete ? 0.5 : 1,
+            flexShrink: 0,
+            whiteSpace: 'nowrap',
           }}
         >
           <span>{isPlaying ? '⏸️ 暂停' : '▶️ 播放回放'}</span>
@@ -141,8 +180,8 @@ export const SimulationBar: React.FC<SimulationBarProps> = ({
           onClick={onStep}
           disabled={isPlaying || isComplete}
           style={{
-            padding: '6px 12px',
-            fontSize: '12px',
+            padding: isCompact ? '5px 9px' : '6px 12px',
+            fontSize: isCompact ? '11px' : '12px',
             fontWeight: 500,
             borderRadius: '6px',
             cursor: isPlaying || isComplete ? 'not-allowed' : 'pointer',
@@ -153,6 +192,8 @@ export const SimulationBar: React.FC<SimulationBarProps> = ({
             alignItems: 'center',
             gap: '4px',
             opacity: isPlaying || isComplete ? 0.5 : 1,
+            flexShrink: 0,
+            whiteSpace: 'nowrap',
           }}
         >
           <span>⏭️ 单步推进 (+1h)</span>
@@ -162,8 +203,8 @@ export const SimulationBar: React.FC<SimulationBarProps> = ({
         <button
           onClick={onReset}
           style={{
-            padding: '6px 12px',
-            fontSize: '12px',
+            padding: isCompact ? '5px 9px' : '6px 12px',
+            fontSize: isCompact ? '11px' : '12px',
             fontWeight: 500,
             borderRadius: '6px',
             cursor: 'pointer',
@@ -173,14 +214,25 @@ export const SimulationBar: React.FC<SimulationBarProps> = ({
             display: 'flex',
             alignItems: 'center',
             gap: '4px',
+            flexShrink: 0,
+            whiteSpace: 'nowrap',
           }}
         >
           <span>🔄 重置</span>
         </button>
 
         {/* Speed Selector */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '6px' }}>
-          <span style={{ fontSize: '11px', color: 'var(--subtext, #a1a1aa)' }}>速率:</span>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            marginLeft: isCompact ? '2px' : '6px',
+            flexShrink: 0,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <span style={{ fontSize: '11px', color: 'var(--subtext, #a1a1aa)', whiteSpace: 'nowrap' }}>速率:</span>
           {[
             { label: '0.5x', ms: 1500 },
             { label: '1x', ms: 800 },
@@ -198,6 +250,8 @@ export const SimulationBar: React.FC<SimulationBarProps> = ({
                 border: '1px solid var(--border, #27272a)',
                 cursor: 'pointer',
                 fontWeight: speedMs === s.ms ? 700 : 400,
+                flexShrink: 0,
+                whiteSpace: 'nowrap',
               }}
             >
               {s.label}
@@ -207,13 +261,13 @@ export const SimulationBar: React.FC<SimulationBarProps> = ({
       </div>
 
       {/* Right: Chaos Engineering Fault Injection */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, whiteSpace: 'nowrap' }}>
         <button
           onClick={handleInjectFaultClick}
           title="随机或对当前选中任务注入故障，令其进入 rework 返工状态"
           style={{
-            padding: '6px 12px',
-            fontSize: '12px',
+            padding: isCompact ? '5px 9px' : '6px 12px',
+            fontSize: isCompact ? '11px' : '12px',
             fontWeight: 600,
             borderRadius: '6px',
             cursor: 'pointer',
@@ -224,6 +278,8 @@ export const SimulationBar: React.FC<SimulationBarProps> = ({
             alignItems: 'center',
             gap: '6px',
             transition: 'all 0.2s ease',
+            flexShrink: 0,
+            whiteSpace: 'nowrap',
           }}
         >
           <span>💥 混沌故障注入 (触发 Rework)</span>

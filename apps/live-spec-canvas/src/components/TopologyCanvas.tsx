@@ -31,6 +31,8 @@ interface TopologyProps {
   onSelectTask?: (taskId: string | null) => void;
   onSpecChange: (newSpec: LiveSpecDoc) => void;
   onFaultInject?: (taskId: string) => void;
+  /** Narrow (half-width right pane) layout: compact the floating legend so it stops covering nodes. */
+  isCompact?: boolean;
 }
 
 const nodeTypes = { taskNode: TaskNodeCard };
@@ -91,6 +93,7 @@ export const TopologyCanvas: React.FC<TopologyProps> = ({
   onSelectTask,
   onSpecChange,
   onFaultInject,
+  isCompact = false,
 }) => {
   const tasks = spec.tasks || [];
   const criticalSet = useMemo(() => new Set(cpm.criticalPath || []), [cpm]);
@@ -317,22 +320,31 @@ export const TopologyCanvas: React.FC<TopologyProps> = ({
         <Controls />
       </ReactFlow>
 
-      {/* Floating Canvas Quick Hint */}
+      {/* Floating Canvas Quick Hint (all three hints always rendered — compact mode
+          only shrinks/stacks them into a narrow corner block so they stop blanketing
+          the task nodes) */}
       <div
+        data-testid="canvas-quick-hint"
         style={{
           position: 'absolute',
-          bottom: '16px',
-          right: '16px',
+          // 20px clears React Flow's own bottom-right attribution link.
+          bottom: isCompact ? '20px' : '16px',
+          right: isCompact ? '8px' : '16px',
+          maxWidth: isCompact ? 'none' : 'calc(100% - 32px)',
           background: 'rgba(24, 24, 27, 0.85)',
           backdropFilter: 'blur(8px)',
           border: '1px solid var(--border, #27272a)',
           borderRadius: '6px',
-          padding: '6px 12px',
-          fontSize: '11px',
+          padding: isCompact ? '4px 8px' : '6px 12px',
+          fontSize: isCompact ? '10px' : '11px',
+          lineHeight: 1.4,
           color: 'var(--subtext, #a1a1aa)',
           pointerEvents: 'none',
           display: 'flex',
-          gap: '12px',
+          flexDirection: isCompact ? 'column' : 'row',
+          alignItems: isCompact ? 'flex-start' : 'center',
+          gap: isCompact ? '2px' : '12px',
+          boxSizing: 'border-box',
         }}
       >
         <span>💡 拖拽端点可连接依赖</span>
