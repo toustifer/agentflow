@@ -76,7 +76,7 @@ export const App: React.FC = () => {
   const [latestLiveSpec, setLatestLiveSpec] = useState<LiveSpecDoc>(defaultSampleSpec);
   const [originalSpec, setOriginalSpec] = useState<LiveSpecDoc>(defaultSampleSpec);
   const [currentSpec, setCurrentSpec] = useState<LiveSpecDoc>(defaultSampleSpec);
-  const [isViewingHistory, setIsViewingHistory] = useState<boolean>(false);
+  const [isViewingHistory, setIsViewingHistory] = useState<boolean>(false); const [isLocked, setIsLocked] = useState<boolean>(false);
   const [historyDags, setHistoryDags] = useState<DagSummary[]>([]);
   const [loadingHistoryDagId, setLoadingHistoryDagId] = useState<string | null>(null);
 
@@ -179,7 +179,7 @@ export const App: React.FC = () => {
       setLatestLiveSpec(incomingSpec);
       if (!isViewingHistory) {
         setOriginalSpec(incomingSpec);
-        setCurrentSpec(incomingSpec);
+        if (!isLocked) setCurrentSpec(incomingSpec);
         const newSettings: ParametricSettings = {
           concurrency: incomingSpec.concurrency ?? incomingSpec.settings?.concurrency ?? 3,
           autoRetry: true,
@@ -197,7 +197,7 @@ export const App: React.FC = () => {
       if (payload.spec) {
         setLatestLiveSpec(payload.spec);
         if (!isViewingHistory) {
-          setCurrentSpec(payload.spec);
+          if (!isLocked) setCurrentSpec(payload.spec);
           initSimulator(payload.spec, settings);
           setToastMessage('✓ 已合并增量补丁 SPEC_PATCH');
         } else {
