@@ -1,6 +1,6 @@
 # Build release binaries for all target platforms + pack skill.tgz
 param(
-  [string]$Version = "v0.2.7",
+  [string]$Version = "v0.2.9",
   [string]$OutDir
 )
 
