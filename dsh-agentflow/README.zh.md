@@ -1,7 +1,7 @@
-# @toustifer/dsh-agentflow
+# @stifer/dsh-agentflow
 
 [![dshfind](https://dshfind.com/api/badge/toustifer/agentflow)](https://dshfind.com/en/plugins/toustifer/agentflow?ref=badge)
-[![npm version](https://img.shields.io/npm/v/@toustifer/dsh-agentflow.svg)](https://www.npmjs.com/package/@toustifer/dsh-agentflow)
+[![npm version](https://img.shields.io/npm/v/@stifer/dsh-agentflow.svg)](https://www.npmjs.com/package/@stifer/dsh-agentflow)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 > DeepSeek Harness (DSH) 原生多智能体自主工程编排器：融合 Live-Spec 4D 动态画布与 Team Hub 联邦协作。
@@ -17,7 +17,7 @@
 
 ### 1. 安装插件
 ```bash
-dsh plugin --profile web add @toustifer/dsh-agentflow
+dsh plugin --profile web add @stifer/dsh-agentflow
 ```
 
 ### 2. 启用配置
@@ -26,7 +26,7 @@ dsh plugin --profile web add @toustifer/dsh-agentflow
 ```yaml
 - insert:
     - id: agentflow
-      name: '@toustifer/dsh-agentflow'
+      name: '@stifer/dsh-agentflow'
 ```
 
 ### 3. 重启与验证
@@ -45,7 +45,7 @@ Agentflow 采用解耦而严密的双引擎架构，确保高可靠性与沙箱�
 ┌─────────────────────────────────────────────────────────────┐
 │                    DeepSeek Harness (DSH)                   │
 │   ┌───────────────────────┐       ┌─────────────────────┐   │
-│   │  @toustifer/dsh-agentflow  │ ────> │  Live-Spec 4D 动态画布│   │
+│   │  @stifer/dsh-agentflow     │ ────> │  Live-Spec 4D 动态画布│   │
 │   └───────────────────────┘       └─────────────────────┘   │
 └───────────────┬─────────────────────────────────────────────┘
                 │ stdio (自适应 Content-Length / NDJSON 双模帧)
@@ -107,7 +107,7 @@ Agentflow 采用解耦而严密的双引擎架构，确保高可靠性与沙箱�
 ```yaml
 - insert:
     - id: agentflow
-      name: '@toustifer/dsh-agentflow'
+      name: '@stifer/dsh-agentflow'
       config:
         command: 'D:\myprogram\agentflow\bin\agentflow.exe'
         dbPath: 'C:\Users\me\.dsh\agentflow\agentflow.db'

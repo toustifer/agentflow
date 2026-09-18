@@ -1,6 +1,6 @@
 /**
- * Package-owned invariant companion for `@toustifer/dsh-agentflow`.
- * @module @toustifer/dsh-agentflow/invariant
+ * Package-owned invariant companion for `@stifer/dsh-agentflow`.
+ * @module @stifer/dsh-agentflow/invariant
  */
 import type { Context } from '@deepseek-ai/cordis';
 /** Cordis companion plugin name. */

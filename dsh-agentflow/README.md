@@ -1,7 +1,7 @@
-# @toustifer/dsh-agentflow
+# @stifer/dsh-agentflow
 
 [![dshfind](https://dshfind.com/api/badge/toustifer/agentflow)](https://dshfind.com/en/plugins/toustifer/agentflow?ref=badge)
-[![npm version](https://img.shields.io/npm/v/@toustifer/dsh-agentflow.svg)](https://www.npmjs.com/package/@toustifer/dsh-agentflow)
+[![npm version](https://img.shields.io/npm/v/@stifer/dsh-agentflow.svg)](https://www.npmjs.com/package/@stifer/dsh-agentflow)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 > Autonomous Multi-Agent Engineering Orchestrator with Live-Spec 4D Canvas & Team Hub Federation for DeepSeek Harness.
@@ -17,7 +17,7 @@ Enables full Agentflow lifecycle orchestration within DeepSeek Harness (DSH). In
 
 ### 1. Install Plugin
 ```bash
-dsh plugin --profile web add @toustifer/dsh-agentflow
+dsh plugin --profile web add @stifer/dsh-agentflow
 ```
 
 ### 2. Configure Activation
@@ -26,7 +26,7 @@ Append the plugin configuration in `<dshHome>/profiles/web/cordis.patch.yml`:
 ```yaml
 - insert:
     - id: agentflow
-      name: '@toustifer/dsh-agentflow'
+      name: '@stifer/dsh-agentflow'
 ```
 
 ### 3. Restart & Verify
@@ -45,7 +45,7 @@ Agentflow is engineered around a decoupled dual-engine architecture to ensure hi
 ┌─────────────────────────────────────────────────────────────┐
 │                    DeepSeek Harness (DSH)                   │
 │   ┌───────────────────────┐       ┌─────────────────────┐   │
-│   │  @toustifer/dsh-agentflow  │ ────> │ Live-Spec 4D Canvas │   │
+│   │  @stifer/dsh-agentflow     │ ────> │ Live-Spec 4D Canvas │   │
 │   └───────────────────────┘       └─────────────────────┘   │
 └───────────────┬─────────────────────────────────────────────┘
                 │ stdio (Auto-adaptive Content-Length / NDJSON)
@@ -107,7 +107,7 @@ Example configuration with explicit path:
 ```yaml
 - insert:
     - id: agentflow
-      name: '@toustifer/dsh-agentflow'
+      name: '@stifer/dsh-agentflow'
       config:
         command: 'D:\myprogram\agentflow\bin\agentflow.exe'
         dbPath: 'C:\Users\me\.dsh\agentflow\agentflow.db'

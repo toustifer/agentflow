@@ -1,5 +1,5 @@
 {
-  "name": "@toustifer/dsh-agentflow",
+  "name": "@stifer/dsh-agentflow",
   "version": "0.2.9",
   "description": "Agentflow for DeepSeek Harness: Autonomous Multi-Agent Engineering Orchestrator with Live-Spec 4D Canvas & Team Hub Federation",
   "type": "module",

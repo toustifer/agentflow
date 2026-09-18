@@ -1,8 +1,8 @@
 /**
- * Package-owned invariant companion for `@toustifer/dsh-agentflow`.
- * @module @toustifer/dsh-agentflow/invariant
+ * Package-owned invariant companion for `@stifer/dsh-agentflow`.
+ * @module @stifer/dsh-agentflow/invariant
  */
-const PACKAGE_NAME = '@toustifer/dsh-agentflow';
+const PACKAGE_NAME = '@stifer/dsh-agentflow';
 /** Cordis companion plugin name. */
 export const name = 'agentflow-invariant';
 /** Service required before the companion can reserve package ownership. */
