@@ -199,47 +199,102 @@ README 不再硬编码工具数量；当前工具面请以 `pkg/server/mcp.go` �
 - `project_report`
 - `flow_ping`
 
-## Quick Start
+## 安装与快速开始 (Installation & Quick Start)
 
-### 1. Build
+agentflow 提供多种宿主集成方案，推荐优先使用 DeepSeek Harness (DSH) 原生插件体验完整的多 Agent 协同与 4D 动态画布能力；同时也支持作为独立 MCP 服务接入 Claude Code、Codex 等终端工具，或连接 Agent Hub 进行多机分布式团队协同。
 
-```bash
-go build -o agentflow ./cmd/agentflow/
-```
+### 推荐方式一：DeepSeek Harness (DSH) 原生插件安装（首推）
 
-### 2. Run as an MCP stdio server
+通过 DSH 插件体系可实现核心状态机、技能与交互式拓扑画布的开箱即用：
 
-```bash
-./agentflow stdio
-```
+1. **社区市场安装 (1024Store / dshfind)**：
+   - 打开 DSH 插件市场 / 社区合作提供方（如 [dshfind](https://dshfind.com/en/plugins/toustifer/agentflow)），搜索 `@stifer/dsh-agentflow`，点击一键安装；
+2. **CLI 命令行快速安装**：
+   ```bash
+   dsh plugin --profile web add @stifer/dsh-agentflow
+   ```
+3. **配置启用**（在 `<dshHome>/profiles/web/cordis.patch.yml` 中追加）：
+   ```yaml
+   - insert:
+       - id: agentflow
+         name: '@stifer/dsh-agentflow'
+   ```
+4. **验证与体验**：
+   - 启动 DSH 后在会话中输入 `/agentflow` 即可唤起引导；
+   - 自动挂载 `mcp__agentflow__*` (61+ 工具)；
+   - 原生集成 Live-Spec 4D 动态可视化拓扑画布（自动适配半宽与全宽视口），实时推演任务依赖与流转。
 
-接入 Claude Code 的 `.claude.json`：
+---
 
-```json
-{
-  "mcpServers": {
-    "agentflow": {
-      "command": "./agentflow",
-      "args": ["stdio"],
-      "type": "stdio"
-    }
-  }
-}
-```
+### 方式二：Claude Code / Codex 独立安装
 
-### 3. Bootstrap a real project
+适用于基于独立二进制或 CLI 终端的代码协作环境：
 
-推荐的 happy path 不是先手动零散创建对象，而是：
+1. **一键安装脚本（自动下载二进制与技能包）**：
+   - **Windows (PowerShell)**：
+     ```powershell
+     irm https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.ps1 | iex
+     ```
+   - **Linux / macOS (Bash)**：
+     ```bash
+     curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.sh | bash
+     ```
+2. **源码构建（可选）**：
+   ```bash
+   go build -o agentflow ./cmd/agentflow/
+   ```
+3. **手动配置 stdio 模式**：
+   - **Claude Code (`.claude.json`)**：
+     ```json
+     {
+       "mcpServers": {
+         "agentflow": {
+           "command": "agentflow",
+           "args": ["stdio"],
+           "type": "stdio"
+         }
+       }
+     }
+     ```
+   - **Codex (`codex.json`)**：
+     ```json
+     {
+       "mcpServers": {
+         "agentflow": {
+           "command": "agentflow",
+           "args": ["stdio"]
+         }
+       }
+     }
+     ```
 
-1. `project_init`
-2. `worker_register`
-3. `dag_create`
-4. `task_create` / `task_create_batch`
-5. `project_next_steps`
-6. `leader_tick`
+---
 
-### 4. Minimal lifecycle sketch
+### 方式三：结合 Agent Hub 多机多用户协同
 
+搭配 [hub.stifer.xyz](https://hub.stifer.xyz) 控制平面，解锁跨机器、跨座席的多智能体团队协同能力：
+
+- **`hub_login()`**：OAuth 浏览器一键授权，快速获取协同凭证；
+- **`hub_bind_team(namespace_id, business_code)`**：将本地工作区 namespace 绑定至团队专属 4 位业务码；
+- **核心协同特性**：
+  - **分支占用防撞车**：分布式租约与锁定机制，避免多端并行开发分支冲突；
+  - **全局任务大盘投影**：实时向 Web 控制台软同步任务 DAG 状态与执行拓扑；
+  - **跨机 Playbook 避坑库共享**：多 Agent 跨会话沉淀与检索团队避坑知识库。
+
+---
+
+### 项目快速启动 (Bootstrap a real project)
+
+无论采用哪种安装方式，推荐的标准项目启动生命周期流（Happy Path）：
+
+1. `project_init`：绑定代码仓库与 namespace
+2. `worker_register`：登记参与团队的 Worker 角色
+3. `dag_create`：基于需求分支创建 DAG 工作流
+4. `task_create` / `task_create_batch`：拆解创建带依赖的任务
+5. `project_next_steps`：评估阶段并获取行动建议
+6. `leader_tick`：启动 Leader 行为树推进调度与审查
+
+极简生命周期流图：
 ```text
 project_init
 -> worker_register
@@ -392,12 +447,42 @@ It now combines:
 - explicit review handoff through `review.commit` and `review.diff`
 - persistent project memory via docs, worker handbooks, and diaries
 
-### Main runtime
+### Installation & Quick Start
 
-```bash
-go build -o agentflow ./cmd/agentflow/
-./agentflow stdio
-```
+#### Option 1: DeepSeek Harness (DSH) Native Plugin (Recommended)
+1. **Marketplace (1024Store / dshfind)**:
+   - Search `@stifer/dsh-agentflow` in DSH Plugin Marketplace or community directory ([dshfind](https://dshfind.com/en/plugins/toustifer/agentflow)), click install.
+2. **CLI Quick Install**:
+   ```bash
+   dsh plugin --profile web add @stifer/dsh-agentflow
+   ```
+3. **Enable in profile** (append to `<dshHome>/profiles/web/cordis.patch.yml`):
+   ```yaml
+   - insert:
+       - id: agentflow
+         name: '@stifer/dsh-agentflow'
+   ```
+4. **Verify & Experience**:
+   - Type `/agentflow` in conversation to bring up the orchestrator guide.
+   - Automatically mounts 61+ atomic MCP tools (`mcp__agentflow__*`).
+   - Native Live-Spec 4D dynamic visualization topology canvas (auto-responsive half/full-width viewport).
+
+#### Option 2: Claude Code / Codex Standalone Install
+- **Windows (PowerShell)**:
+  ```powershell
+  irm https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.ps1 | iex
+  ```
+- **Linux / macOS (Bash)**:
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.sh | bash
+  ```
+- Configure stdio mode in `.claude.json` or `codex.json`. Or build from source: `go build -o agentflow ./cmd/agentflow/ && ./agentflow stdio`.
+
+#### Option 3: Agent Hub Multi-host & Multi-agent Collaboration
+Connect with [hub.stifer.xyz](https://hub.stifer.xyz) control plane for team coordination:
+- `hub_login()`: One-click OAuth browser authorization.
+- `hub_bind_team(namespace_id, business_code)`: Bind local workspace with 4-digit team business code.
+- Automatic branch lock prevention, global task board projection, and cross-machine playbook sharing.
 
 ### Recommended bootstrap path
 
