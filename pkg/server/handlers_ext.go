@@ -264,8 +264,15 @@ func (s *Server) handleTaskCreateBatch(ctx context.Context, input map[string]any
 	}
 
 	tasks := make([]any, 0, len(result.Created))
-	for _, t := range result.Created {
-		tasks = append(tasks, taskToMap(t))
+	for i := range result.Created {
+		task := result.Created[i]
+		item := taskToMap(task)
+		// Each created task is projected individually. Fresh tasks carry no git
+		// metadata yet, so branch/head are empty until task_prepare_start.
+		if note := s.projectTask(ctx, task, "", ""); note != "" {
+			item[hubNoteKey] = note
+		}
+		tasks = append(tasks, item)
 	}
 	return map[string]any{"tasks": tasks}, nil
 }

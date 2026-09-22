@@ -428,6 +428,7 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 			return nil, err
 		}
 		s.syncTask(ctx, result.task)
+		s.attachLifecycleHubNotes(ctx, result, false, false)
 		return result.payload, nil
 	case "task_prepare_start":
 		result, err := s.handleTaskPrepareStart(ctx, input)
@@ -435,6 +436,9 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 			return nil, err
 		}
 		s.syncTask(ctx, result.task)
+		// The worktree now exists, so the projection can carry git.branch /
+		// git.head_sha and the branch tip is reported alongside the task row.
+		s.attachLifecycleHubNotes(ctx, result, true, false)
 		return result.payload, nil
 	case "task_transition":
 		result, err := s.handleTaskTransition(ctx, input)
@@ -442,6 +446,9 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 			return nil, err
 		}
 		s.syncTask(ctx, result.task)
+		// Covers both handleTaskTransition return paths (the start/resume path
+		// and the generic path) with one projection hook keyed on the verb.
+		s.attachLifecycleHubNotes(ctx, result, false, preferReviewTip(input))
 		return result.payload, nil
 	case "task_worker_sync":
 		result, err := s.handleTaskWorkerSync(ctx, input)

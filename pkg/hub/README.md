@@ -1,7 +1,7 @@
 # pkg/hub — optional agent-hub federation client
 
 > **Default: fully local.** Hub is opt-in via credentials; the kill-switch always wins.
-> Nothing in this package is wired into the task lifecycle yet — see "Wiring" below.
+> Wired into four MCP lifecycle triggers as a soft, note-reported projection — see "Wiring" below.
 
 This package has two independent halves:
 
@@ -104,9 +104,24 @@ no BT internals, no full docs/diary/description, no prompt bodies, no diffs, no 
 
 ## Wiring
 
-This package performs no I/O unless a caller invokes it. Connecting `SyncTask` /
-`ReportBranch` to `task_create` / `task_transition` is a separate change: it must go through
-`pkg/server`'s `HubSyncer` seam, not `pkg/engine`.
+`SyncTask` / `ReportBranch` are now wired into the MCP edge (`pkg/server`), not into
+`pkg/engine`:
+
+| Trigger | Projection |
+|---------|-----------|
+| `task_create` | `SyncTask` |
+| `task_prepare_start` | `SyncTask` (with `branch`/`head_sha`) + `ReportBranch` (`bind_type=task`) |
+| `task_transition` | `SyncTask` (`submit` and later carry `review.commit`) |
+| `task_create_batch` | `SyncTask` per created task |
+
+`pkg/server/hub_project.go` builds a client per call via `NewFromNamespace`, so a
+team bind or the kill-switch takes effect on the next tool call instead of at
+process start. The consequence is a cold membership cache: one enabled projection
+costs 1 auth probe + 1 write. The note is backfilled into the tool payload as
+`hub_note` (plus `hub_branch_note` where a branch is reported).
+
+`pkg/engine` must still never import `pkg/hub`. Field whitelist and trigger
+semantics: `docs/SYNC_CONTRACT.md`; per-surface completion: `docs/HUB_ALIGNMENT.md`.
 
 ## Tests
 

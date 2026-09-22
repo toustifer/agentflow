@@ -199,6 +199,52 @@ README 不再硬编码工具数量；当前工具面请以 `pkg/server/mcp.go` �
 - `project_report`
 - `flow_ping`
 
+## agentflow ↔ agent-hub：单向投影、soft-fail、默认关闭
+
+agentflow 可以把任务与分支状态**单向投影**到 [agent-hub](https://hub.stifer.xyz) 控制平面，让多机团队看到同一张任务大盘。三条铁律：
+
+1. **单向 L→H**：只从 agentflow 推送到 Hub，**从不**把 Hub 状态读回本地。`agentflow` 的 SQLite 永远是唯一真源。
+2. **soft-fail**：Hub 的任何故障（连接拒绝 / 超时 / 401 / 500）都**不会**让 MCP 工具调用失败，也**不会**回滚本地状态。发生了什么只体现在返回值里的一个 note 字符串。
+3. **默认关闭**：没有绑定 team code **或**没有凭据 ⇒ 直接跳过，**零出网请求**。不配置就不会有"用户不知情就被上报"。
+
+### 接线了哪些时机
+
+| 工具 | 投影内容 | 回填的 note 键 |
+|------|----------|----------------|
+| `task_create` | 任务行 8 字段 | `hub_note` |
+| `task_prepare_start` | 任务行（带 `branch`/`head_sha`）+ 分支上报（`bind_type=task`） | `hub_note` + `hub_branch_note` |
+| `task_transition` | 任务行；`submit` 起带 reviewer 将看到的 `review.commit` | `hub_note` |
+| `task_create_batch` | **每个**任务各一条 | 每个 item 的 `hub_note` |
+
+note 形如：
+
+```text
+hub_task_sync_ok
+hub_task_sync_skipped: no login token / business_code     ← 没配置，什么都没发
+hub_task_sync_disabled: HUB_SYNC/HUB_ENABLED off           ← 被 kill switch 关掉
+hub_task_sync_failed: status 401 forbidden                 ← 试过了，失败了；本地不受影响
+```
+
+### 怎么打开
+
+```jsonc
+// 1) 绑定团队（唯一产品真源：namespace metadata）
+//    hub_bind_team({ "namespace_id": "insighttutor", "business_code": "z8gw" })
+
+// 2) 提供凭据（env 优先；也可放 {workdir}/.mycompany/hub-client.json）
+//    HUB_TOKEN=<Hub JWT>        # 推荐；只有 API key 时部分能力不可用
+//    HUB_BASE_URL=https://hub.stifer.xyz
+```
+
+关闭方式（任一）：`HUB_DISABLED=1`、`HUB_SYNC=0`、`HUB_ENABLED=false`。**kill switch 永远优先于凭据。**
+
+### 边界（照代码写实）
+
+- `~/.agent-hub/config.json` 是 **JWT-only**：它**永远不提供 team code**（否则同机两个 namespace 会争抢同一个团队）。team code 只可能来自 env / namespace metadata / workdir 文件。
+- MCP 工具表里只有 `hub_status` 与 `hub_bind_team` 两个 Hub 工具；**没有 `hub_login` / `hub_list_teams`**，登录需在 Hub 侧完成。
+- 没有重试队列、没有离线补发、没有顺序保证，也没有 H→L 对账。
+- 完整字段白名单见 [`docs/SYNC_CONTRACT.md`](docs/SYNC_CONTRACT.md)，逐面完成度矩阵见 [`docs/HUB_ALIGNMENT.md`](docs/HUB_ALIGNMENT.md)。
+
 ## 安装与快速开始 (Installation & Quick Start)
 
 agentflow 提供多种宿主集成方案，推荐优先使用 DeepSeek Harness (DSH) 原生插件体验完整的多 Agent 协同与 4D 动态画布能力；同时也支持作为独立 MCP 服务接入 Claude Code、Codex 等终端工具，或连接 Agent Hub 进行多机分布式团队协同。

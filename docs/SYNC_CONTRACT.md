@@ -1,0 +1,224 @@
+# SYNC_CONTRACT — agentflow → agent-hub 单向投影契约
+
+> 状态：**已接线**（`task-2-lifecycle-wiring`，分支 `feat/hub-federation-rebuild`）。
+> 实现：`pkg/hub`（客户端）+ `pkg/server/hub_project.go`（唯一的接线点）。
+> 本文只描述**代码里真实存在**的行为；未实现的部分集中在 §7。
+
+---
+
+## 1. 三条铁律
+
+| # | 铁律 | 含义 |
+|---|------|------|
+| 1 | **单向 L→H** | 只做 agentflow → Hub。没有任何代码把 Hub 状态读回 SQLite；Hub 是镜像，`agentflow` SQLite 是唯一真源。 |
+| 2 | **soft-fail** | 任何 Hub 故障（DNS/连接拒绝/超时/4xx/5xx/解析失败）都**不得**让 MCP 工具调用返回错误，**不得**回滚任何本地状态。失败只体现为一个 note 字符串。 |
+| 3 | **默认关闭 / 零出网** | 没有 team code **或**没有凭据 ⇒ `StatusSkipped`，**零请求**。用户不配置就绝不会被上报。 |
+
+实现上，`pkg/engine` **不 import `pkg/hub`**（`pkg/engine` 不知道 Hub 存在）；投影只发生在 MCP 边缘 `pkg/server`。
+
+---
+
+## 2. 开关、凭据与 team code
+
+### 2.1 是否出网的唯一判据
+
+```text
+Config.Enabled() == true
+  ⟺ business_code 非空
+  ∧ ( token 非空 ∨ api_key 非空 )
+  ∧ kill switch 未触发
+```
+
+其余一切情况都是 `StatusSkipped` / `StatusDisabled`，**不发起任何请求**。
+
+### 2.2 kill switch（三者任一，且永远优先）
+
+| 变量 | 触发 "关闭" 的取值 |
+|------|-------------------|
+| `HUB_SYNC` | `0` / `false` / `off` / `no` / `disabled` |
+| `HUB_DISABLED` | `1` / `true` / `on` / `yes` / `disabled` |
+| `HUB_ENABLED` | `0` / `false` / `off` / `no` / `disabled`（留空 = 按凭据自动） |
+
+命中 kill switch ⇒ `StatusDisabled`（不是 `failed`），note 为 `hub_<op>_disabled: HUB_SYNC/HUB_ENABLED off`。
+
+### 2.3 凭据分层（env > workdir > home）
+
+| 层 | 键 |
+|----|----|
+| env | `HUB_BASE_URL`、`HUB_TOKEN` \| `HUB_JWT`、`HUB_API_KEY`、`HUB_BUSINESS_CODE` \| `HUB_BUSINESS` |
+| workdir | `{workdir}/.mycompany/hub-client.json` |
+| home | `~/.agent-hub/config.json` |
+
+文件只会填补 env 留空的槽位。凭据在线上以 `Authorization: Bearer <jwt>` 优先；没有 JWT 时用 `X-API-Key` + `X-Business-Code`。**JWT 永远优先于 API key。**
+
+### 2.4 team code（业务码）解析顺序
+
+```text
+env HUB_BUSINESS_CODE | HUB_BUSINESS
+  > namespace.metadata["hub.business_code"]     ← 唯一产品真源（hub_bind_team 写的就是它）
+  > {workdir}/.mycompany/hub-client.json
+  # ~/.agent-hub/config.json 的 business_code：永不使用（JWT-only home）
+```
+
+**home 是 JWT-only。** `Load()` 刻意不取 home 的 team code：home 是机器级的，若承认它，同一台机器上的两个 namespace 会争抢同一个 Hub 团队。接线点因此使用 `hub.NewFromNamespace(nsMeta, workdir)`（= `LoadForNamespace` + `New`），team code 只可能来自 env / namespace / workdir。这条不变量由 `pkg/hub/config_test.go`、`bind_test.go` 钉住，**不要"修"它**。
+
+### 2.5 出网代价（冷缓存）
+
+每个触发点都**新建一个 client**（`hub.NewFromNamespace`）。这是有意的：`hub_bind_team`、换凭据、`HUB_DISABLED=1` 都会在下一次工具调用立即生效，而不是等进程重启。
+
+代价是 `pkg/hub` 的成员缓存**每次都从冷态开始**：
+
+```text
+一次已启用的任务投影 = 1 次成员探针(GET) + 1 次写入(POST) = 2 个请求
+一次已启用的分支上报 = 1 次成员探针(GET) + 1 次写入(POST) = 2 个请求
+未配置 / 被 kill switch ⇒ 0 个请求
+```
+
+### 2.6 鉴权是顾问，不是门闸
+
+`EnsureMembership` 的结果**被忽略**（`_ = c.EnsureMembership(ctx)`）：探针失败也继续尝试写入，真正的 enforcer 是 Hub 服务端。本地任务永远照常推进。`ListMyTeams` 是唯一的例外——它需要 JWT，只有 API key 时返回 `StatusSkipped`。
+
+---
+
+## 3. 出网字段白名单
+
+### 3.1 任务行 — `POST /v1/hub/dag/{business_code}`
+
+`pkg/hub.TaskProjection`，**恰好 8 个字段**：
+
+| 字段 | 来源 |
+|------|------|
+| `task_id` | `Task.ID` |
+| `title` | `Task.Title` |
+| `status` | `Task.State`（agentflow 状态字符串，原样透传） |
+| `assigned_worker` | `Task.AssignedWorker` |
+| `depends_on` | `Task.DependsOn` |
+| `output_files` | `Task.OutputFiles` |
+| `branch` | task metadata `git.branch`（无 worktree 时为空串） |
+| `head_sha` | 见 §4.2 |
+
+字段名由 `pkg/hub/task_test.go::TestSyncTaskBodyFields` 钉死，**改名即毁约**。
+
+### 3.2 分支上报 — `POST /v1/hub/repos/{business_code}/branches/report`
+
+```jsonc
+{
+  "reporter":   "agentflow",
+  "repo_url":   "",                       // 当前留空：namespace metadata 没有规范 remote 字段
+  "branches":   [{ "name": "<branch>", "tip_sha": "<sha>", "source": "report" }],
+  "bindings":   [{
+    "bind_type":     "task",
+    "bind_id":       "<task_id>",
+    "branch_name":   "<branch>",
+    "head_sha":      "<sha>",
+    "worktree_host": "<os.Hostname()>",   // 只放主机名
+    "status":        "active"
+  }]
+}
+```
+
+> `bindings[].head_sha` 与 `branches[].tip_sha` 同源，都是本次投影的 `head_sha`（见 §4.2）。
+
+### 3.3 永不上网
+
+- ❌ 任何绝对路径（worktree 路径、repo 路径、home 目录）
+- ❌ `description` / `acceptance_criteria` / `tags` / `metadata` 全文
+- ❌ `review.diff` / 任何 diff 正文
+- ❌ prompt 正文、worker prompt template
+- ❌ 日记 / 文档 / handbook 正文
+- ❌ BT（行为树）内部状态、blackboard
+- ❌ 任何密钥：token / api_key / JWT 只出现在请求头，绝不进 body
+- ✅ 唯一与机器身份相关的字段是 `worktree_host = os.Hostname()`
+
+---
+
+## 4. 触发点与 note 回填
+
+### 4.1 四个触发点
+
+| 时机 | 入口 | task 投影 | 分支上报 | payload 键 |
+|------|------|-----------|----------|------------|
+| `task_create` | `Handle` → `handleTaskCreate` | ✅ 8 字段 | — | `hub_note` |
+| `task_prepare_start` | `Handle` → `handleTaskPrepareStart` | ✅ 8 字段（带 branch/head） | ✅ `bind_type=task` | `hub_note` + `hub_branch_note` |
+| `task_transition` | `Handle` → `handleTaskTransition`（start/resume 路径与通用路径**两条**都覆盖） | ✅ 8 字段（submit 及之后带 reviewed tip） | — | `hub_note` |
+| `task_create_batch` | `handleTaskCreateBatch` | ✅ **每个** task 一条 | — | 每个 item 的 `hub_note` |
+
+note 在本地状态**已经提交之后**才计算并回填，所以 Hub 故障对生命周期完全不可见：工具照常返回推进后的 task，只有 note 记录镜像发生了什么。
+
+### 4.2 branch / head_sha 的取值
+
+| 触发点 | `branch` | `head_sha` |
+|--------|----------|------------|
+| `task_create` / `task_create_batch` | 空 | 空（新任务还没有 worktree） |
+| `task_prepare_start` | `git.branch` | `git.head_sha`（刚建好的 worktree 顶端） |
+| `task_transition` = `start` / `resume` | `git.branch` | `git.head_sha`（刚刷新，此时 `review.commit` 可能是上一轮的陈旧值） |
+| `task_transition` = `submit` / `pass` / `rework` / `cancel` / `reassign` | `git.branch` | `review.commit`（reviewer 将看到的那一个 tip），缺失时回退 `git.head_sha` |
+
+### 4.3 note 的确切格式
+
+`Result.Note()`，由 `pkg/hub/result_test.go::TestResultNote` 钉死：
+
+```text
+hub_task_sync_ok
+hub_task_sync_skipped: no login token / business_code
+hub_task_sync_disabled: HUB_SYNC/HUB_ENABLED off
+hub_task_sync_failed: status 401 forbidden
+hub_task_sync_failed: status 500
+hub_task_sync_failed: <transport error>
+hub_branch_report_ok
+hub_branch_report_skipped: no login token / business_code
+hub_branch_report_disabled: HUB_SYNC/HUB_ENABLED off
+hub_branch_report_failed: status 403 forbidden
+hub_branch_report_skipped: empty branch
+hub_auth_skipped / hub_auth_ok / hub_auth_failed: ...
+hub_list_teams_ok: N teams / hub_list_teams_skipped: ...
+```
+
+op token 只有这五个：`task_sync`、`branch_report`、`auth`、`list_teams`、`login`。
+
+### 4.4 未接线的旧 seam（诚实说明）
+
+`task_get` / `task_list` / `task_history` / `task_worker_sync` / `namespace_create` / `namespace_update` / `project_init` / `flow_ping` 走的是进程内的 `pkg/server.HubSyncer` seam（`noopHubSyncer`），它**只在 `Config.HubEnabled` 为 true 时被装上，而 `cmd/agentflow` 从不设置该字段**。因此这些工具**今天零 Hub I/O**。它们与真正的 `pkg/hub` 客户端是两条不同的路径，别把它们当成已接线。
+
+---
+
+## 5. 重试、补偿、顺序
+
+- **没有重试队列，没有离线补发。** 一次 `failed` 之后，该任务要到**下一次生命周期事件**才会重新投影。
+- **没有顺序保证。** Hub 侧的 UPSERT 以 `task_id` 为键；乱序到达的旧快照可能覆盖新快照。当前不做版本号/时间戳比对。
+- **不做 H→L**：不拉取、不对账、不冲突解决。
+
+---
+
+## 6. 端点清单
+
+| 方法 + 路径 | 用途 | 触发时机 |
+|-------------|------|----------|
+| `POST /v1/hub/dag/{code}` | 任务行 UPSERT | §4.1 四个触发点 |
+| `POST /v1/hub/repos/{code}/branches/report` | 分支 tip + 绑定 | 仅 `task_prepare_start` |
+| `GET /v1/hub/me/businesses` | `EnsureMembership` 探针（JWT）、`ListMyTeams` | 每次投影前（探针，结果被忽略） |
+| `GET /v1/hub/dag/{code}` | `EnsureMembership` 探针（API key） | 同上 |
+| `POST /v1/hub/auth/device` | 设备码登录开始 | **无 MCP 工具调用它**（见 §7） |
+| `GET /v1/hub/auth/device/token?code=` | 设备码登录完成 | 同上 |
+
+请求超时 `5s`（`pkg/hub.defaultTimeout`），响应体上限 1 MiB。
+
+---
+
+## 7. 明确的非目标 / 当前未完成
+
+1. **没有 H→L**：不拉 Hub 状态，不做双向对账。
+2. **没有重试/补偿**（见 §5）。
+3. **登录与团队列表没有 MCP 工具**：`pkg/hub/login.go` 的设备码流程与 `ListMyTeams` 有实现、有单测，但 master 的 MCP 工具表里**只有 `hub_status` 与 `hub_bind_team`**——没有 `hub_login`，也没有 `hub_list_teams`。JWT 需要由 Hub 侧自己的登录入口写进 `~/.agent-hub/config.json`。
+4. **未对生产 Hub 做过端到端验证**：本机凭据已于 2026-07-29 过期，任何真实请求都会 401。本次全部验证使用 `net/http/httptest`；`hub.stifer.xyz` **零访问**。
+5. **`repo_url` 未上报**（留空）。
+6. **旧联邦分支那一代 API 未复引入**：`hub.BindTeam` 与旧分支的 `StatusSnapshot` 语义没有回来；master 的等价物是 `BindNamespaceTeam` 与 `SnapshotForNamespace`（`StatusSnapshot` 类型本身是 master 自己的）。
+7. **`pkg/engine` 不 import `pkg/hub`**，这条是硬约束，不是巧合。
+
+---
+
+## 8. 相关文档
+
+- `docs/HUB_ALIGNMENT.md` — Hub 面 ↔ agentflow 面矩阵与真实完成度
+- `docs/HUB_SOFT_SYNC.md` — namespace ↔ team 绑定模型（无网络的那一半）
+- `pkg/hub/README.md` — 客户端实现细节
