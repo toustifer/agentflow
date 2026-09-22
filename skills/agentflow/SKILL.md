@@ -185,6 +185,44 @@ statusline     -> 可选显示 agentflow:on
    - 先读取 `flows/intake.md`
    - 再读取 `flows/goal.md`
 
+## 模型路由声明（provider / model）
+
+Worker 与 Task 都可以声明"这条任务该用哪个模型"。公开的 MCP 入参字段名始终是
+**`provider` / `model`**（可选、成对出现），但**内部落库分成两套独立命名空间**，
+这是本契约最关键的设计点：
+
+| 用途 | metadata key | 生命周期 |
+|---|---|---|
+| **声明**（契约） | `route.provider` / `route.model` | `worker_register`/`task_create` 时写入，**跨重派永久存活** |
+| **观测**（实际跑了什么） | `runtime.provider` / `runtime.model` | `task_transition(start)` 时写入，**重派时清空** |
+
+### 规则
+
+1. **成对声明**：`provider` 与 `model` 必须同时提供；只给一个直接报错。空串视为"未声明"，不会写入空值键。
+2. **优先级**：Task 级声明 > 所属 Worker 级声明 > `unset`。
+3. **start 强制相等**：当 Task 声明了 `route.model` 时，`task_transition(start)` 的 `metadata` 里
+   必须原样带上 `runtime.model=<同一值>`；**缺失或不一致都会返回 `ErrInvalidTransition`**，
+   错误信息会同时给出"声明值"与"上报值"。
+   这是刻意从严的：若允许静默不一致，最省事的绕过方式就是把声明值抄进上报字段却实际跑别的模型——
+   那正是本契约要消灭的误报。**要换模型，正确做法是先显式改声明，再启动。**
+4. **约束跨重派存活**：`TransReassign` 与 prepare_start 自愈重入**只清 `runtime.*`（观测），
+   绝不触碰 `route.*`（声明）**。因此 Worker 挂掉后走标准恢复路径（重派 → 重新 `prepare_start` → 重新 `start`），
+   同一条模型约束依然生效。
+5. **旧键兼容**：本特性拆命名空间之前，声明与观测共用 `runtime.*`。对这类旧数据：
+   **`route.*` 缺失且任务从未 start（`runtime.status` 为空）时，把既有 `runtime.*` 视为遗留声明**。
+   一旦 start 过，`runtime.model` 语义就是"实际跑了什么"，不再被解释为契约。
+   命中该规则时，briefing 与 `task_get` 的 `declared_route.legacy` 会回填 `true`，便于审计区分。
+
+### 操作要点（Leader）
+
+- `task_prepare_start` 返回的 `worker_launch` briefing 里同时给出三者，命名互不混淆：
+  - `route.provider` / `route.model` / `route_source`（`task` | `worker` | `unset`）—— 声明
+  - `runtime.provider` / `runtime.model` —— 观测
+- 当 `route_source != "unset"` 时，briefing 的 `launch_instructions` 会附一条**带具体值**的指令；
+  照它执行即可：把 `runtime.provider` / `runtime.model` 放进 `task_transition(start)` 的
+  **`metadata` 对象内**（不是顶层）。
+- `task_get` 的 `declared_route` / `observed_route` 两个投影可一眼对比"声明要跑 X / 实际跑在 X"。
+
 ## Shape 约束
 
 当 goal flow 进入 `shape` 阶段时：
