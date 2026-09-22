@@ -680,6 +680,42 @@ func applyRuntimeRouteDeclaration(metadata map[string]string, provider, model st
 	return metadata, nil
 }
 
+// Runtime route sources reported by resolveRuntimeRoute.
+const (
+	RouteSourceTask   = "task"
+	RouteSourceWorker = "worker"
+	RouteSourceUnset  = "unset"
+)
+
+// declaredRuntimeRoute reports whether a metadata map carries a route
+// declaration. Either key being present counts as declared so that even a
+// malformed partial declaration is attributed to the level that set it rather
+// than silently falling through to a lower-priority level.
+func declaredRuntimeRoute(metadata map[string]string) (provider, model string, ok bool) {
+	if len(metadata) == 0 {
+		return "", "", false
+	}
+	provider = strings.TrimSpace(metadata[MetaRuntimeProvider])
+	model = strings.TrimSpace(metadata[MetaRuntimeModel])
+	if provider == "" && model == "" {
+		return "", "", false
+	}
+	return provider, model, true
+}
+
+// resolveRuntimeRoute picks the effective provider/model for a task and reports
+// where it came from. A task-level declaration always outranks the assigned
+// Worker's declaration; when neither declares a route, the source is "unset".
+func resolveRuntimeRoute(taskMetadata, workerMetadata map[string]string) (provider, model, source string) {
+	if p, m, ok := declaredRuntimeRoute(taskMetadata); ok {
+		return p, m, RouteSourceTask
+	}
+	if p, m, ok := declaredRuntimeRoute(workerMetadata); ok {
+		return p, m, RouteSourceWorker
+	}
+	return "", "", RouteSourceUnset
+}
+
 func (s *Server) prepareTaskStart(ctx context.Context, namespaceID, taskID string, allowRepair bool) (*engine.Namespace, *engine.Task, *engine.DAG, map[string]string, error) {
 	ns, err := s.engine.GetNamespace(ctx, namespaceID)
 	if err != nil {
@@ -743,7 +779,8 @@ func (s *Server) handleTaskPrepareStart(ctx context.Context, input map[string]an
 		updateReq.ClearWorkerAgentID = true
 		delete(metadata, "worker_agent_id")
 		delete(metadata, "runtime.status")
-		delete(metadata, "runtime.provider")
+		delete(metadata, MetaRuntimeProvider)
+		delete(metadata, MetaRuntimeModel)
 		delete(metadata, "runtime.last_event_at")
 	}
 

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -81,6 +82,7 @@ func (s *Server) buildWorkerLaunchBriefing(ctx context.Context, ns *engine.Names
 	// Skill-primary: prepare/dispatch never starts the worker.
 	// Only an existing executing task reports started=true (real agent already bound).
 	started := task.State == engine.TaskExecuting && task.WorkerAgentID != ""
+	routeProvider, routeModel, routeSource := resolveRuntimeRoute(task.Metadata, w.Metadata)
 	leaderNext := "launch_worker_manually"
 	warning := "This call only prepared the worker context (prepare-only). BT dispatch_task does NOT start the task. Spawn a real Agent, then task_transition(start) with launch.ticket + real worker_agent_id. Do NOT implement product code in the main session."
 	instructions := []string{
@@ -93,6 +95,15 @@ func (s *Server) buildWorkerLaunchBriefing(ctx context.Context, ns *engine.Names
 		"If prepare/start fails, repair worktree/branch ownership or escalate; do not hand-write the task.",
 		"Keep task ownership when blocked and follow recovery_policy before escalating.",
 		"Do not assume this MCP call already started the worker.",
+	}
+	// The effective route is pinned onto the start call: TransStart rejects a
+	// missing or mismatching runtime.model when the task declares one, so the
+	// concrete values must reach the Leader verbatim rather than as a reminder.
+	if routeSource != RouteSourceUnset {
+		instructions = append(instructions, fmt.Sprintf(
+			"Runtime route is pinned (source=%s): when calling task_transition(start), pass runtime.provider=%q and runtime.model=%q verbatim inside the transition `metadata` object. Do not omit, substitute, or report a different model — start is rejected when the reported model is missing or does not match the declared route.",
+			routeSource, routeProvider, routeModel,
+		))
 	}
 	if started {
 		leaderNext = "monitor_or_sync_worker"
@@ -147,6 +158,9 @@ func (s *Server) buildWorkerLaunchBriefing(ctx context.Context, ns *engine.Names
 		"stuck_playbook":      briefing.StuckPlaybook,
 		"escalation_mode":     briefing.EscalationMode,
 		"launch_instructions": stringSliceToAny(briefing.LaunchInstructions),
+		"runtime.provider":    routeProvider,
+		"runtime.model":       routeModel,
+		"runtime.route_source": routeSource,
 	}, nil
 }
 

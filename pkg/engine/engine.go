@@ -545,7 +545,7 @@ func (e *Engine) TransitionTask(ctx context.Context, nsID, taskID string, t Task
 		task.Metadata = ensureMap(task.Metadata)
 		for _, k := range []string{
 			"worker_agent_id",
-			"runtime.provider", "runtime.status", "runtime.last_event_at",
+			"runtime.provider", "runtime.model", "runtime.status", "runtime.last_event_at",
 			"launch.ticket", "launch.ticket_state", "launch.ticket_issued_at", "launch.ticket_expires_at",
 		} {
 			delete(task.Metadata, k)
@@ -821,6 +821,30 @@ func validateTransitionMetadata(task *Task, t TaskTransition, meta map[string]st
 		}
 		if meta["runtime.provider"] == "" {
 			return fmt.Errorf("%w: %s requires runtime.provider", ErrInvalidTransition, t)
+		}
+		// A task-level runtime.model declaration is authoritative: the model
+		// reported at start must match it exactly.
+		//
+		// This is deliberately strict. If a mismatch were accepted silently, the
+		// cheapest way to get past this gate would be to copy the declared value
+		// into the reported field while actually running something else — which
+		// is precisely the misreporting this contract exists to prevent. The
+		// supported way to run a different model is to re-declare the task route
+		// explicitly first, so that the declaration and the report never disagree.
+		if declaredModel := task.Metadata["runtime.model"]; declaredModel != "" {
+			reported := meta["runtime.model"]
+			if reported == "" {
+				return fmt.Errorf(
+					"%w: task %s declares runtime.model=%q but start reported no runtime.model; pass runtime.model=%q verbatim, or explicitly re-declare the task route before starting",
+					ErrInvalidTransition, task.ID, declaredModel, declaredModel,
+				)
+			}
+			if reported != declaredModel {
+				return fmt.Errorf(
+					"%w: task %s declares runtime.model=%q but start reported runtime.model=%q; report the declared route verbatim, or explicitly re-declare the task route before starting",
+					ErrInvalidTransition, task.ID, declaredModel, reported,
+				)
+			}
 		}
 		if meta["runtime.status"] != "started" {
 			return fmt.Errorf("%w: %s requires runtime.status=started", ErrInvalidTransition, t)
