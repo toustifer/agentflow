@@ -176,6 +176,21 @@ func (s *Server) handleTaskCreateBatch(ctx context.Context, input map[string]any
 	}
 	dagID, _ := optionalString(input, "dag_id")
 
+	// Batch-level route is only a fallback for items that declare none of their
+	// own. It is validated up front so a malformed batch declaration fails before
+	// any task is created.
+	batchProvider, err := optionalString(input, "provider")
+	if err != nil {
+		return nil, err
+	}
+	batchModel, err := optionalString(input, "model")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := applyRuntimeRouteDeclaration(nil, batchProvider, batchModel); err != nil {
+		return nil, err
+	}
+
 	tasksRaw, err := requiredList(input, "tasks")
 	if err != nil {
 		return nil, err
@@ -204,6 +219,25 @@ func (s *Server) handleTaskCreateBatch(ctx context.Context, input map[string]any
 		priority, _ := optionalInt(m, "priority")
 		hours, _ := optionalFloat(m, "estimated_hours")
 		meta, _ := optionalStringMap(m, "metadata")
+
+		// Each item may carry its own route; a per-item declaration always wins
+		// over the batch-level fallback so one batch can mix models.
+		itemProvider, err := optionalString(m, "provider")
+		if err != nil {
+			return nil, fmt.Errorf("tasks[%d]: %w", i, err)
+		}
+		itemModel, err := optionalString(m, "model")
+		if err != nil {
+			return nil, fmt.Errorf("tasks[%d]: %w", i, err)
+		}
+		provider, model := itemProvider, itemModel
+		if strings.TrimSpace(provider) == "" && strings.TrimSpace(model) == "" {
+			provider, model = batchProvider, batchModel
+		}
+		meta, err = applyRuntimeRouteDeclaration(meta, provider, model)
+		if err != nil {
+			return nil, fmt.Errorf("tasks[%d]: %w", i, err)
+		}
 
 		items = append(items, engine.BatchTaskItem{
 			ID:                 taskID,

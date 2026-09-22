@@ -230,6 +230,7 @@ func toolInputSchema(name string) map[string]any {
 		required = []string{"namespace_id", "worker_id"}
 	case "task_create":
 		add("namespace_id", "task_id", "title", "assigned_worker", "description", "dag_id")
+		add("provider", "model")
 		addStringLists("acceptance_criteria", "output_files", "depends_on", "tags")
 		properties["priority"] = numberProp
 		properties["estimated_hours"] = numberProp
@@ -237,6 +238,9 @@ func toolInputSchema(name string) map[string]any {
 		required = []string{"namespace_id", "task_id", "title"}
 	case "task_create_batch":
 		add("namespace_id", "dag_id")
+		// Batch-level provider/model are the default route for items that do not
+		// declare their own; each item can still override them independently.
+		add("provider", "model")
 		properties["tasks"] = map[string]any{
 			"type": "array",
 			"items": map[string]any{
@@ -247,6 +251,7 @@ func toolInputSchema(name string) map[string]any {
 					"output_files": stringListProp, "depends_on": stringListProp,
 					"tags": stringListProp, "priority": numberProp, "estimated_hours": numberProp,
 					"metadata": stringMapProp,
+					"provider": stringProp, "model": stringProp,
 				},
 				"required": []string{"task_id", "title"},
 			},
@@ -1261,6 +1266,18 @@ func decodeCreateTaskRequest(input map[string]any) (engine.CreateTaskRequest, er
 		return req, err
 	}
 	metadata, err := optionalStringMap(input, "metadata")
+	if err != nil {
+		return req, err
+	}
+	provider, err := optionalString(input, "provider")
+	if err != nil {
+		return req, err
+	}
+	model, err := optionalString(input, "model")
+	if err != nil {
+		return req, err
+	}
+	metadata, err = applyRuntimeRouteDeclaration(metadata, provider, model)
 	if err != nil {
 		return req, err
 	}
