@@ -877,6 +877,18 @@ func (s *Server) handleWorkerRegister(ctx context.Context, input map[string]any)
 	escalationMode, _ := optionalString(input, "escalation_mode")
 	launchMode, _ := optionalString(input, "launch_mode")
 	metadata, _ := optionalStringMap(input, "metadata")
+	provider, err := optionalString(input, "provider")
+	if err != nil {
+		return nil, err
+	}
+	model, err := optionalString(input, "model")
+	if err != nil {
+		return nil, err
+	}
+	metadata, err = applyRuntimeRouteDeclaration(metadata, provider, model)
+	if err != nil {
+		return nil, err
+	}
 	promptTemplate, _ := optionalString(input, "prompt_template")
 	if strings.TrimSpace(promptTemplate) == "" {
 		return nil, fmt.Errorf("%w: prompt_template is required", ErrInvalidToolInput)
@@ -986,6 +998,27 @@ func (s *Server) handleWorkerUpdate(ctx context.Context, input map[string]any) (
 	var metadata map[string]string
 	if m, err := optionalStringMap(input, "metadata"); err == nil {
 		metadata = m
+	}
+	provider, err := optionalString(input, "provider")
+	if err != nil {
+		return nil, err
+	}
+	model, err := optionalString(input, "model")
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(provider) != "" || strings.TrimSpace(model) != "" {
+		// UpdateWorker replaces Metadata wholesale, so seed the declaration onto
+		// the stored metadata instead of dropping the worker's existing keys.
+		if metadata == nil {
+			if existing, gerr := s.engine.GetWorker(ctx, nsID, workerID); gerr == nil {
+				metadata = cloneStringMap(existing.Metadata)
+			}
+		}
+	}
+	metadata, err = applyRuntimeRouteDeclaration(metadata, provider, model)
+	if err != nil {
+		return nil, err
 	}
 	promptTemplate, _ := optionalString(input, "prompt_template")
 	launchMode, _ := optionalString(input, "launch_mode")

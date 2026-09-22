@@ -217,6 +217,7 @@ func toolInputSchema(name string) map[string]any {
 		required = []string{"namespace_id", "dag_id"}
 	case "worker_register":
 		add("namespace_id", "worker_id", "name", "scope", "kind", "stuck_playbook", "escalation_mode", "launch_mode", "prompt_template")
+		add("provider", "model")
 		addStringLists("skills", "task_tags", "required_reads", "recommended_mcp", "handoff_targets", "recovery_policy", "fallback_mcp")
 		properties["metadata"] = stringMapProp
 		required = []string{"namespace_id", "worker_id", "name", "prompt_template"}
@@ -344,6 +345,7 @@ func toolInputSchema(name string) map[string]any {
 		required = []string{"namespace_id", "goal_id"}
 	case "worker_update":
 		add("namespace_id", "worker_id", "name", "scope", "kind", "stuck_playbook", "escalation_mode", "launch_mode", "prompt_template")
+		add("provider", "model")
 		addStringLists("skills", "task_tags", "required_reads", "recommended_mcp", "handoff_targets", "recovery_policy", "fallback_mcp")
 		properties["metadata"] = stringMapProp
 		required = []string{"namespace_id", "worker_id"}
@@ -638,6 +640,39 @@ func cloneStringMap(values map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+// Metadata keys used to declare the runtime model route of a Worker or Task.
+// Declarations live in the existing metadata map, so no DB migration is needed.
+const (
+	MetaRuntimeProvider = "runtime.provider"
+	MetaRuntimeModel    = "runtime.model"
+)
+
+// applyRuntimeRouteDeclaration merges an optional provider/model declaration into
+// metadata and returns the resulting map.
+//
+// provider and model must be declared together: supplying exactly one of them is
+// an error. Empty (or whitespace-only) values count as "not declared", so a
+// missing declaration never writes an empty-valued key and callers that declare
+// nothing keep their existing metadata untouched.
+func applyRuntimeRouteDeclaration(metadata map[string]string, provider, model string) (map[string]string, error) {
+	provider = strings.TrimSpace(provider)
+	model = strings.TrimSpace(model)
+
+	if provider == "" && model == "" {
+		return metadata, nil
+	}
+	if provider == "" || model == "" {
+		return nil, fmt.Errorf("%w: provider and model must be provided together", ErrInvalidToolInput)
+	}
+
+	if metadata == nil {
+		metadata = make(map[string]string, 2)
+	}
+	metadata[MetaRuntimeProvider] = provider
+	metadata[MetaRuntimeModel] = model
+	return metadata, nil
 }
 
 func (s *Server) prepareTaskStart(ctx context.Context, namespaceID, taskID string, allowRepair bool) (*engine.Namespace, *engine.Task, *engine.DAG, map[string]string, error) {
