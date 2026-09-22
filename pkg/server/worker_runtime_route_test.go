@@ -36,8 +36,8 @@ func TestWorkerRegisterDeclaresRuntimeRoute(t *testing.T) {
 
 	meta, ok := result["metadata"].(map[string]string)
 	require.True(t, ok, "worker_register should echo metadata")
-	require.Equal(t, "deepseek", meta[MetaRuntimeProvider])
-	require.Equal(t, "deepseek-v4.1-flash", meta[MetaRuntimeModel])
+	require.Equal(t, "deepseek", meta[MetaRouteProvider])
+	require.Equal(t, "deepseek-v4.1-flash", meta[MetaRouteModel])
 
 	// worker_get must round-trip the declaration.
 	got, err := srv.Handle(context.Background(), "worker_get", map[string]any{
@@ -47,8 +47,8 @@ func TestWorkerRegisterDeclaresRuntimeRoute(t *testing.T) {
 	require.NoError(t, err)
 	gotMeta, ok := got["metadata"].(map[string]string)
 	require.True(t, ok, "worker_get should echo metadata")
-	require.Equal(t, "deepseek", gotMeta[MetaRuntimeProvider])
-	require.Equal(t, "deepseek-v4.1-flash", gotMeta[MetaRuntimeModel])
+	require.Equal(t, "deepseek", gotMeta[MetaRouteProvider])
+	require.Equal(t, "deepseek-v4.1-flash", gotMeta[MetaRouteModel])
 }
 
 func TestWorkerRegisterDeclaresRuntimeRouteAlongsideMetadata(t *testing.T) {
@@ -66,8 +66,8 @@ func TestWorkerRegisterDeclaresRuntimeRouteAlongsideMetadata(t *testing.T) {
 	meta, ok := result["metadata"].(map[string]string)
 	require.True(t, ok)
 	require.Equal(t, "prod", meta["env"])
-	require.Equal(t, "deepseek", meta[MetaRuntimeProvider])
-	require.Equal(t, "deepseek-v4.1-flash", meta[MetaRuntimeModel])
+	require.Equal(t, "deepseek", meta[MetaRouteProvider])
+	require.Equal(t, "deepseek-v4.1-flash", meta[MetaRouteModel])
 }
 
 func TestWorkerRegisterRejectsPartialRuntimeRoute(t *testing.T) {
@@ -114,8 +114,8 @@ func TestWorkerRegisterEmptyRuntimeRouteIsUndeclared(t *testing.T) {
 	require.NoError(t, err)
 
 	if meta, ok := result["metadata"].(map[string]string); ok {
-		_, hasProvider := meta[MetaRuntimeProvider]
-		_, hasModel := meta[MetaRuntimeModel]
+		_, hasProvider := meta[MetaRouteProvider]
+		_, hasModel := meta[MetaRouteModel]
 		require.False(t, hasProvider, "empty provider must not be persisted")
 		require.False(t, hasModel, "empty model must not be persisted")
 	}
@@ -158,8 +158,8 @@ func TestWorkerUpdateDeclaresRuntimeRouteAndPreservesMetadata(t *testing.T) {
 	meta, ok := result["metadata"].(map[string]string)
 	require.True(t, ok)
 	require.Equal(t, "prod", meta["env"], "declaring a route must not drop existing metadata")
-	require.Equal(t, "deepseek", meta[MetaRuntimeProvider])
-	require.Equal(t, "deepseek-v4.1-flash", meta[MetaRuntimeModel])
+	require.Equal(t, "deepseek", meta[MetaRouteProvider])
+	require.Equal(t, "deepseek-v4.1-flash", meta[MetaRouteModel])
 }
 
 func TestWorkerUpdateRejectsPartialRuntimeRoute(t *testing.T) {

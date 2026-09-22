@@ -187,7 +187,7 @@ func (s *Server) handleTaskCreateBatch(ctx context.Context, input map[string]any
 	if err != nil {
 		return nil, err
 	}
-	if _, err := applyRuntimeRouteDeclaration(nil, batchProvider, batchModel); err != nil {
+	if _, err := applyRouteDeclaration(nil, batchProvider, batchModel); err != nil {
 		return nil, err
 	}
 
@@ -234,7 +234,7 @@ func (s *Server) handleTaskCreateBatch(ctx context.Context, input map[string]any
 		if strings.TrimSpace(provider) == "" && strings.TrimSpace(model) == "" {
 			provider, model = batchProvider, batchModel
 		}
-		meta, err = applyRuntimeRouteDeclaration(meta, provider, model)
+		meta, err = applyRouteDeclaration(meta, provider, model)
 		if err != nil {
 			return nil, fmt.Errorf("tasks[%d]: %w", i, err)
 		}
@@ -919,7 +919,7 @@ func (s *Server) handleWorkerRegister(ctx context.Context, input map[string]any)
 	if err != nil {
 		return nil, err
 	}
-	metadata, err = applyRuntimeRouteDeclaration(metadata, provider, model)
+	metadata, err = applyRouteDeclaration(metadata, provider, model)
 	if err != nil {
 		return nil, err
 	}
@@ -1050,7 +1050,7 @@ func (s *Server) handleWorkerUpdate(ctx context.Context, input map[string]any) (
 			}
 		}
 	}
-	metadata, err = applyRuntimeRouteDeclaration(metadata, provider, model)
+	metadata, err = applyRouteDeclaration(metadata, provider, model)
 	if err != nil {
 		return nil, err
 	}

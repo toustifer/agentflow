@@ -41,8 +41,8 @@ func TestTaskCreateDeclaresRuntimeRoute(t *testing.T) {
 	require.NoError(t, err)
 
 	meta := taskMeta(t, result)
-	require.Equal(t, "deepseek", meta[MetaRuntimeProvider])
-	require.Equal(t, "deepseek-v4.1-flash", meta[MetaRuntimeModel])
+	require.Equal(t, "deepseek", meta[MetaRouteProvider])
+	require.Equal(t, "deepseek-v4.1-flash", meta[MetaRouteModel])
 
 	// task_get must round-trip the declaration.
 	got, err := srv.Handle(context.Background(), "task_get", map[string]any{
@@ -51,8 +51,8 @@ func TestTaskCreateDeclaresRuntimeRoute(t *testing.T) {
 	})
 	require.NoError(t, err)
 	gotMeta := taskMeta(t, got)
-	require.Equal(t, "deepseek", gotMeta[MetaRuntimeProvider])
-	require.Equal(t, "deepseek-v4.1-flash", gotMeta[MetaRuntimeModel])
+	require.Equal(t, "deepseek", gotMeta[MetaRouteProvider])
+	require.Equal(t, "deepseek-v4.1-flash", gotMeta[MetaRouteModel])
 }
 
 func TestTaskCreateDeclaresRuntimeRouteAlongsideMetadata(t *testing.T) {
@@ -69,8 +69,8 @@ func TestTaskCreateDeclaresRuntimeRouteAlongsideMetadata(t *testing.T) {
 
 	meta := taskMeta(t, result)
 	require.Equal(t, "prod", meta["env"], "route declaration must not drop existing metadata")
-	require.Equal(t, "deepseek", meta[MetaRuntimeProvider])
-	require.Equal(t, "deepseek-v4.1-flash", meta[MetaRuntimeModel])
+	require.Equal(t, "deepseek", meta[MetaRouteProvider])
+	require.Equal(t, "deepseek-v4.1-flash", meta[MetaRouteModel])
 }
 
 func TestTaskCreateRejectsPartialRuntimeRoute(t *testing.T) {
@@ -151,10 +151,10 @@ func TestTaskCreateBatchAllowsDistinctRoutesPerItem(t *testing.T) {
 		byID[m["id"].(string)] = taskMeta(t, m)
 	}
 
-	require.Equal(t, "deepseek", byID["T-a"][MetaRuntimeProvider])
-	require.Equal(t, "deepseek-v4.1-flash", byID["T-a"][MetaRuntimeModel])
-	require.Equal(t, "anthropic", byID["T-b"][MetaRuntimeProvider])
-	require.Equal(t, "claude-sonnet-4", byID["T-b"][MetaRuntimeModel])
+	require.Equal(t, "deepseek", byID["T-a"][MetaRouteProvider])
+	require.Equal(t, "deepseek-v4.1-flash", byID["T-a"][MetaRouteModel])
+	require.Equal(t, "anthropic", byID["T-b"][MetaRouteProvider])
+	require.Equal(t, "claude-sonnet-4", byID["T-b"][MetaRouteModel])
 }
 
 func TestTaskCreateBatchRejectsPartialItemRoute(t *testing.T) {
@@ -216,10 +216,10 @@ func TestTaskCreateBatchPerItemRouteOverridesBatchFallback(t *testing.T) {
 		byID[m["id"].(string)] = taskMeta(t, m)
 	}
 
-	require.Equal(t, "deepseek", byID["T-inherit"][MetaRuntimeProvider])
-	require.Equal(t, "deepseek-v4.1-flash", byID["T-inherit"][MetaRuntimeModel])
-	require.Equal(t, "anthropic", byID["T-override"][MetaRuntimeProvider])
-	require.Equal(t, "claude-sonnet-4", byID["T-override"][MetaRuntimeModel])
+	require.Equal(t, "deepseek", byID["T-inherit"][MetaRouteProvider])
+	require.Equal(t, "deepseek-v4.1-flash", byID["T-inherit"][MetaRouteModel])
+	require.Equal(t, "anthropic", byID["T-override"][MetaRouteProvider])
+	require.Equal(t, "claude-sonnet-4", byID["T-override"][MetaRouteModel])
 }
 
 func TestTaskCreateBatchRejectsPartialBatchRoute(t *testing.T) {

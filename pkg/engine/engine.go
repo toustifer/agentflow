@@ -455,11 +455,11 @@ func (e *Engine) CreateTask(ctx context.Context, req CreateTaskRequest) (*Task, 
 }
 
 type UpdateTaskRequest struct {
-	State          TaskState
-	ReviewMetadata      map[string]string
-	Metadata            map[string]string
-	WorkerAgentID       string
-	ClearWorkerAgentID  bool
+	State              TaskState
+	ReviewMetadata     map[string]string
+	Metadata           map[string]string
+	WorkerAgentID      string
+	ClearWorkerAgentID bool
 }
 
 func (e *Engine) UpdateTask(ctx context.Context, nsID, taskID string, req UpdateTaskRequest) (*Task, error) {
@@ -539,13 +539,19 @@ func (e *Engine) TransitionTask(ctx context.Context, nsID, taskID string, t Task
 	}
 	if t == TransReassign {
 		// A reassign swaps the Worker: drop the previous agent binding and its
-		// runtime/launch state so a later start with a fresh worker_agent_id is
-		// not rejected as "already bound to another worker_agent_id".
+		// OBSERVED runtime/launch state so a later start with a fresh
+		// worker_agent_id is not rejected as "already bound to another
+		// worker_agent_id".
+		//
+		// Only runtime.* (observation) is cleared here. The route.* DECLARATION
+		// must survive a reassign — clearing it would silently void the model
+		// constraint on the standard Worker-recovery path, which is exactly the
+		// hole this split exists to close. Never add a route.* key to this list.
 		task.WorkerAgentID = ""
 		task.Metadata = ensureMap(task.Metadata)
 		for _, k := range []string{
 			"worker_agent_id",
-			"runtime.provider", "runtime.model", "runtime.status", "runtime.last_event_at",
+			MetaRuntimeProvider, MetaRuntimeModel, MetaRuntimeStatus, "runtime.last_event_at",
 			"launch.ticket", "launch.ticket_state", "launch.ticket_issued_at", "launch.ticket_expires_at",
 		} {
 			delete(task.Metadata, k)
@@ -781,6 +787,51 @@ func (e *Engine) appendEventLocked(nsID, taskID string, event Event) {
 	e.history[nsID][taskID] = append(e.history[nsID][taskID], event)
 }
 
+// Metadata keys for the runtime model route contract.
+//
+// The two namespaces have deliberately different lifecycles:
+//
+//	route.*   — the DECLARATION (contract). Written when a Worker/Task is
+//	            created and must survive a reassign, so the model constraint
+//	            cannot silently disappear on the standard Worker-recovery path.
+//	runtime.* — the OBSERVATION (what actually ran). Written at start and
+//	            cleared on reassign.
+//
+// Because they are separate keys, clearing the observation can never destroy
+// the declaration. These constants live in the engine because the engine owns
+// the start-time validation that reads them.
+const (
+	MetaRouteProvider = "route.provider"
+	MetaRouteModel    = "route.model"
+
+	MetaRuntimeProvider = "runtime.provider"
+	MetaRuntimeModel    = "runtime.model"
+	MetaRuntimeStatus   = "runtime.status"
+)
+
+// declaredRouteModel returns the model declared for a task, or "" when the task
+// declares no model.
+//
+// Legacy fallback: before the route.*/runtime.* split the declaration and the
+// observation shared the runtime.* keys. Data written back then has no route.*,
+// so it is still honoured — but only while the task has never started
+// (runtime.status is empty). Once a task has started, runtime.model means "what
+// actually ran" and must never be reinterpreted as a contract. The feature
+// shipped the same day as this refactor, so the legacy window is bounded and the
+// rule deliberately stays simple rather than covering hypothetical data.
+func declaredRouteModel(task *Task) string {
+	if task.Metadata == nil {
+		return ""
+	}
+	if v := task.Metadata[MetaRouteModel]; v != "" {
+		return v
+	}
+	if task.Metadata[MetaRuntimeStatus] == "" {
+		return task.Metadata[MetaRuntimeModel]
+	}
+	return ""
+}
+
 func validateTransitionMetadata(task *Task, t TaskTransition, meta map[string]string) error {
 	switch t {
 	case TransStart, TransResume:
@@ -819,11 +870,11 @@ func validateTransitionMetadata(task *Task, t TaskTransition, meta map[string]st
 		if workerAgentID == "" {
 			return fmt.Errorf("%w: %s requires worker_agent_id", ErrInvalidTransition, t)
 		}
-		if meta["runtime.provider"] == "" {
+		if meta[MetaRuntimeProvider] == "" {
 			return fmt.Errorf("%w: %s requires runtime.provider", ErrInvalidTransition, t)
 		}
-		// A task-level runtime.model declaration is authoritative: the model
-		// reported at start must match it exactly.
+		// The task-level DECLARATION (route.model) is authoritative: the model
+		// actually reported at start (runtime.model) must match it exactly.
 		//
 		// This is deliberately strict. If a mismatch were accepted silently, the
 		// cheapest way to get past this gate would be to copy the declared value
@@ -831,18 +882,18 @@ func validateTransitionMetadata(task *Task, t TaskTransition, meta map[string]st
 		// is precisely the misreporting this contract exists to prevent. The
 		// supported way to run a different model is to re-declare the task route
 		// explicitly first, so that the declaration and the report never disagree.
-		if declaredModel := task.Metadata["runtime.model"]; declaredModel != "" {
-			reported := meta["runtime.model"]
+		if declaredModel := declaredRouteModel(task); declaredModel != "" {
+			reported := meta[MetaRuntimeModel]
 			if reported == "" {
 				return fmt.Errorf(
-					"%w: task %s declares runtime.model=%q but start reported no runtime.model; pass runtime.model=%q verbatim, or explicitly re-declare the task route before starting",
-					ErrInvalidTransition, task.ID, declaredModel, declaredModel,
+					"%w: task %s declares %s=%q but start reported no %s; pass %s=%q verbatim, or explicitly re-declare the task route before starting",
+					ErrInvalidTransition, task.ID, MetaRouteModel, declaredModel, MetaRuntimeModel, MetaRuntimeModel, declaredModel,
 				)
 			}
 			if reported != declaredModel {
 				return fmt.Errorf(
-					"%w: task %s declares runtime.model=%q but start reported runtime.model=%q; report the declared route verbatim, or explicitly re-declare the task route before starting",
-					ErrInvalidTransition, task.ID, declaredModel, reported,
+					"%w: task %s declares %s=%q but start reported %s=%q; report the declared route verbatim, or explicitly re-declare the task route before starting",
+					ErrInvalidTransition, task.ID, MetaRouteModel, declaredModel, MetaRuntimeModel, reported,
 				)
 			}
 		}

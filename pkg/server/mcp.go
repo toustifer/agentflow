@@ -647,21 +647,31 @@ func cloneStringMap(values map[string]string) map[string]string {
 	return out
 }
 
-// Metadata keys used to declare the runtime model route of a Worker or Task.
-// Declarations live in the existing metadata map, so no DB migration is needed.
+// Metadata keys for the runtime model route contract. The engine owns these
+// strings (it performs the start-time validation); the aliases below keep the
+// server package readable without duplicating the contract.
+//
+//	route.*   — DECLARATION: written on create, survives a reassign.
+//	runtime.* — OBSERVATION: written at start, cleared on reassign.
 const (
-	MetaRuntimeProvider = "runtime.provider"
-	MetaRuntimeModel    = "runtime.model"
+	MetaRouteProvider = engine.MetaRouteProvider
+	MetaRouteModel    = engine.MetaRouteModel
+
+	MetaRuntimeProvider = engine.MetaRuntimeProvider
+	MetaRuntimeModel    = engine.MetaRuntimeModel
+	MetaRuntimeStatus   = engine.MetaRuntimeStatus
 )
 
-// applyRuntimeRouteDeclaration merges an optional provider/model declaration into
-// metadata and returns the resulting map.
+// applyRouteDeclaration merges an optional provider/model DECLARATION into
+// metadata and returns the resulting map. It writes route.* only: the
+// declaration must never share keys with the runtime.* observation, otherwise
+// clearing the observation on reassign would destroy the contract.
 //
 // provider and model must be declared together: supplying exactly one of them is
 // an error. Empty (or whitespace-only) values count as "not declared", so a
 // missing declaration never writes an empty-valued key and callers that declare
 // nothing keep their existing metadata untouched.
-func applyRuntimeRouteDeclaration(metadata map[string]string, provider, model string) (map[string]string, error) {
+func applyRouteDeclaration(metadata map[string]string, provider, model string) (map[string]string, error) {
 	provider = strings.TrimSpace(provider)
 	model = strings.TrimSpace(model)
 
@@ -675,8 +685,8 @@ func applyRuntimeRouteDeclaration(metadata map[string]string, provider, model st
 	if metadata == nil {
 		metadata = make(map[string]string, 2)
 	}
-	metadata[MetaRuntimeProvider] = provider
-	metadata[MetaRuntimeModel] = model
+	metadata[MetaRouteProvider] = provider
+	metadata[MetaRouteModel] = model
 	return metadata, nil
 }
 
@@ -687,33 +697,69 @@ const (
 	RouteSourceUnset  = "unset"
 )
 
-// declaredRuntimeRoute reports whether a metadata map carries a route
-// declaration. Either key being present counts as declared so that even a
-// malformed partial declaration is attributed to the level that set it rather
-// than silently falling through to a lower-priority level.
-func declaredRuntimeRoute(metadata map[string]string) (provider, model string, ok bool) {
+// declaredRouteFrom reads a route DECLARATION from a metadata map. Either key
+// being present counts as declared, so even a malformed partial declaration is
+// attributed to the level that set it rather than silently falling through to a
+// lower-priority level.
+//
+// Legacy fallback: data written before the route.*/runtime.* split kept the
+// declaration in the runtime.* keys. It is still honoured — but only while the
+// holder has never started (runtime.status empty), because once started
+// runtime.* means "what actually ran" and must not be reinterpreted as a
+// contract. legacy=true reports that this rule (rather than route.*) produced
+// the declaration, so callers can surface it.
+func declaredRouteFrom(metadata map[string]string) (provider, model string, ok bool, legacy bool) {
 	if len(metadata) == 0 {
-		return "", "", false
+		return "", "", false, false
 	}
-	provider = strings.TrimSpace(metadata[MetaRuntimeProvider])
-	model = strings.TrimSpace(metadata[MetaRuntimeModel])
-	if provider == "" && model == "" {
-		return "", "", false
+	provider = strings.TrimSpace(metadata[MetaRouteProvider])
+	model = strings.TrimSpace(metadata[MetaRouteModel])
+	if provider != "" || model != "" {
+		return provider, model, true, false
 	}
-	return provider, model, true
+	if metadata[MetaRuntimeStatus] == "" {
+		legacyProvider := strings.TrimSpace(metadata[MetaRuntimeProvider])
+		legacyModel := strings.TrimSpace(metadata[MetaRuntimeModel])
+		if legacyProvider != "" || legacyModel != "" {
+			return legacyProvider, legacyModel, true, true
+		}
+	}
+	return "", "", false, false
 }
 
-// resolveRuntimeRoute picks the effective provider/model for a task and reports
-// where it came from. A task-level declaration always outranks the assigned
-// Worker's declaration; when neither declares a route, the source is "unset".
-func resolveRuntimeRoute(taskMetadata, workerMetadata map[string]string) (provider, model, source string) {
-	if p, m, ok := declaredRuntimeRoute(taskMetadata); ok {
-		return p, m, RouteSourceTask
+// runtimeRouteResolution separates the declared route (the contract) from the
+// observed route (what actually ran). They are reported side by side and never
+// overwrite each other.
+type runtimeRouteResolution struct {
+	// Declared route — the contract.
+	Provider string
+	Model    string
+	Source   string
+	Legacy   bool
+	// Observed route — what the task actually started with (runtime.*).
+	ObservedProvider string
+	ObservedModel    string
+}
+
+// resolveRuntimeRoute picks the effective DECLARED route for a task and reports
+// where it came from, alongside the OBSERVED route recorded on the task. A
+// task-level declaration always outranks the assigned Worker's declaration;
+// when neither declares a route the source is "unset".
+func resolveRuntimeRoute(taskMetadata, workerMetadata map[string]string) runtimeRouteResolution {
+	res := runtimeRouteResolution{
+		Source:           RouteSourceUnset,
+		ObservedProvider: strings.TrimSpace(taskMetadata[MetaRuntimeProvider]),
+		ObservedModel:    strings.TrimSpace(taskMetadata[MetaRuntimeModel]),
 	}
-	if p, m, ok := declaredRuntimeRoute(workerMetadata); ok {
-		return p, m, RouteSourceWorker
+	if p, m, ok, legacy := declaredRouteFrom(taskMetadata); ok {
+		res.Provider, res.Model, res.Source, res.Legacy = p, m, RouteSourceTask, legacy
+		return res
 	}
-	return "", "", RouteSourceUnset
+	if p, m, ok, legacy := declaredRouteFrom(workerMetadata); ok {
+		res.Provider, res.Model, res.Source, res.Legacy = p, m, RouteSourceWorker, legacy
+		return res
+	}
+	return res
 }
 
 func (s *Server) prepareTaskStart(ctx context.Context, namespaceID, taskID string, allowRepair bool) (*engine.Namespace, *engine.Task, *engine.DAG, map[string]string, error) {
@@ -774,11 +820,15 @@ func (s *Server) handleTaskPrepareStart(ctx context.Context, input map[string]an
 	// Self-healing re-entry: when re-preparing a task that is in assigned or rework_needed state,
 	// automatically clear any dead or stale worker_agent_id binding so that the new worker agent
 	// is not blocked by "task already bound to another worker_agent_id".
+	//
+	// Only runtime.* (observation) is cleared, never route.* (declaration): the
+	// declaration must survive re-preparation and reassignment so the model
+	// constraint keeps applying to the replacement Worker.
 	updateReq := engine.UpdateTaskRequest{Metadata: metadata}
 	if (task.State == engine.TaskAssigned || task.State == engine.TaskReworkNeeded) && task.WorkerAgentID != "" {
 		updateReq.ClearWorkerAgentID = true
 		delete(metadata, "worker_agent_id")
-		delete(metadata, "runtime.status")
+		delete(metadata, MetaRuntimeStatus)
 		delete(metadata, MetaRuntimeProvider)
 		delete(metadata, MetaRuntimeModel)
 		delete(metadata, "runtime.last_event_at")
@@ -1314,7 +1364,7 @@ func decodeCreateTaskRequest(input map[string]any) (engine.CreateTaskRequest, er
 	if err != nil {
 		return req, err
 	}
-	metadata, err = applyRuntimeRouteDeclaration(metadata, provider, model)
+	metadata, err = applyRouteDeclaration(metadata, provider, model)
 	if err != nil {
 		return req, err
 	}
@@ -1498,6 +1548,31 @@ func namespaceToMap(ns *engine.Namespace) map[string]any {
 	}
 }
 
+// declaredRouteProjection renders the route DECLARATION recorded on a task
+// (route.*), including the legacy fallback rule.
+func declaredRouteProjection(metadata map[string]string) map[string]any {
+	provider, model, ok, legacy := declaredRouteFrom(metadata)
+	source := RouteSourceUnset
+	if ok {
+		source = RouteSourceTask
+	}
+	return map[string]any{
+		"provider": provider,
+		"model":    model,
+		"source":   source,
+		"legacy":   legacy,
+	}
+}
+
+// observedRouteProjection renders the route OBSERVATION recorded on a task
+// (runtime.*) — what the task actually started with.
+func observedRouteProjection(metadata map[string]string) map[string]any {
+	return map[string]any{
+		"provider": strings.TrimSpace(metadata[MetaRuntimeProvider]),
+		"model":    strings.TrimSpace(metadata[MetaRuntimeModel]),
+	}
+}
+
 func taskToMap(task *engine.Task, summary ...bool) map[string]any {
 	isSummary := false
 	if len(summary) > 0 && summary[0] {
@@ -1535,6 +1610,12 @@ func taskToMapProjection(task *engine.Task, summary bool) map[string]any {
 		"updated_at":            task.UpdatedAt,
 		"metadata":              cloneTaskMetadata(task.Metadata, summary),
 		"available_transitions": engine.AvailableTransitions(task),
+		// The declared route (the contract) and the observed route (what the
+		// task actually started with) are projected side by side under distinct
+		// names, so an auditor can see "declared X / ran X" at a glance and the
+		// two can never overwrite each other.
+		"declared_route": declaredRouteProjection(task.Metadata),
+		"observed_route": observedRouteProjection(task.Metadata),
 	}
 	return m
 }
