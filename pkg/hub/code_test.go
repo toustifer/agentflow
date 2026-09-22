@@ -24,7 +24,7 @@ func TestNormalizeBusinessCode(t *testing.T) {
 		{"Z8GW", "z8gw", true},
 		{"zhiji-z8gw", "z8gw", true},
 		{"insighttutor-z8gw", "z8gw", true},
-		{"https://hub.stifer.xyz/team/zhiji-z8gw", "z8gw", true},
+		{"https://hub.example.invalid/team/zhiji-z8gw", "z8gw", true},
 		{"zhiji", "", false},
 		{"", "", false},
 		{"z8gwx", "", false},
