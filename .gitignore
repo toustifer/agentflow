@@ -25,7 +25,16 @@ node_modules/
 bin/
 dist/
 .release-*/
-agentflow-*-*
+# Release binaries: the exact <os>-<arch> names produced by
+# scripts/build-release.{sh,ps1} (see skills/agentflow/SETUP.md).
+# NOTE: this used to be a blanket `agentflow-*-*`, which also matched skill
+# directories such as skills/agentflow/agents/agentflow-dev-leader/ and
+# silently ignored every file added there. Keep this list pinned to the real
+# artifacts instead of widening it.
+agentflow-windows-amd64*
+agentflow-linux-amd64*
+agentflow-darwin-amd64*
+agentflow-darwin-arm64*
 
 # Intermediate build and test scratchpads
 .tmp*

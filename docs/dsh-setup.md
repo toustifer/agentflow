@@ -158,42 +158,83 @@ printf '%s\n' \
 
 ```bash
 mkdir -p ~/.dsh/.agent-presets
-# 把两个预设目录复制到 DSH 本地预设根
-cp -a skills/agentflow/agents/agentflow-leader ~/.dsh/.agent-presets/
-cp -a skills/agentflow/agents/agentflow-worker ~/.dsh/.agent-presets/
+# 把仓库镜像里的预设目录复制到 DSH 本地预设根（当前共 4 个）
+for p in agentflow-leader agentflow-worker agentflow-dev agentflow-dev-leader; do
+  cp -a "skills/agentflow/agents/$p" ~/.dsh/.agent-presets/
+done
 ```
 
 创建 DSH 会话时选择对应预设（显示名「AgentFlow · Leader」/「AgentFlow · Worker」）。
 
-> ⚠️ **装后校验：`cp -a` 之后必须比对 sha256，不一致一律视为安装失败。**
+### 装后校验：`scripts/preset-drift.ps1 -Check`
+
+> ⚠️ **装完必须跑一次 `-Check`，退出码 0 才算装好。**
 >
-> preset 镜像是**人工维护**的：`scripts/sync-skill.ps1` 只同步 `bt_service` /
-> `trees` / `requirements.txt`，**完全不碰 preset**。也就是说仓库里的
-> `agent.cordis.yml` 与 `~/.dsh/.agent-presets/` 下的 live 副本之间
-> **目前没有任何自动同步机制**，脱钩了不会有任何报错——只会静默生效一份错误的预设。
-> 所以每次安装/更新后都要逐 preset 校验（在仓库根执行）：
+> preset 镜像是**半人工维护**的：`scripts/sync-skill.ps1` 只同步 `bt_service` /
+> `trees` / `requirements.txt`，**完全不碰 preset**；仓库里的 `agent.cordis.yml`
+> 与 `~/.dsh/.agent-presets/` 下的 live 副本之间**没有自动同步机制**，脱钩了不会
+> 有任何报错——只会静默生效一份错误的预设。`scripts/preset-drift.ps1` 就是补这个洞的守卫。
+
+```powershell
+# 1) 装后校验：live 与仓库镜像应当一致 -> 退出码 0
+pwsh -NoProfile -File scripts\preset-drift.ps1 -Check
+echo "exit=$LASTEXITCODE"
+```
+
+`-Check` 会逐 preset 打印归一化 sha256；不一致时**逐对列出差异行**并以**非零退出码**
+（`1`）结束。其它退出码：`2` 用法错误、`3` 环境错误（live 根/镜像根不存在、
+文件缺失）、`4` 导出阶段失败。**任一 live 或镜像文件缺失都会明确报错，不会被当成
+"无差异"**。
+
+> **判据为什么是「行尾归一化后一致」而不是裸 sha256（重要）**
 >
-> ```bash
-> for p in agentflow-leader agentflow-worker agentflow-dev agentflow-dev-leader; do
->   repo=$(sha256sum "skills/agentflow/agents/$p/agent.cordis.yml" | cut -c1-64)
->   live=$(sha256sum "$HOME/.dsh/.agent-presets/$p/agent.cordis.yml" | cut -c1-64)
->   if [ "$repo" = "$live" ]; then echo "OK   $p $repo"
->   else echo "FAIL $p repo=$repo live=$live"; fi
-> done
-> ```
+> 本仓库在 Windows 上 `core.autocrlf=true`：提交时 CRLF→LF 进 blob，checkout 时
+> LF→CRLF 回到工作树。而 live 那四个文件的行尾**本来就不统一**
+> （`agentflow-leader` / `agentflow-dev-leader` 是 LF；`agentflow-worker` /
+> `agentflow-dev` 是 CRLF）。于是**任何一次全新 checkout 之后**，工作树侧四个文件
+> 全变 CRLF，其中两个与 live 的裸 sha256 立刻不等——**在零真实漂移的情况下报"脱钩"**。
+> 实测（`git checkout-index -a` 到新目录 vs live，2026-09-23）：
 >
-> Windows（PowerShell）等价写法：
+> | preset | live | 全新 checkout | 裸 sha256 |
+> |---|---|---|---|
+> | `agentflow-leader` | LF ×479 | CRLF ×479 | **不等（假阳性）** |
+> | `agentflow-dev-leader` | LF ×202 | CRLF ×202 | **不等（假阳性）** |
+> | `agentflow-worker` | CRLF ×244 | CRLF ×244 | 相等（运气） |
+> | `agentflow-dev` | CRLF ×148 | CRLF ×148 | 相等（运气） |
 >
-> ```powershell
-> foreach ($p in 'agentflow-leader','agentflow-worker','agentflow-dev','agentflow-dev-leader') {
->   $repo = (Get-FileHash "skills\agentflow\agents\$p\agent.cordis.yml" -Algorithm SHA256).Hash
->   $live = (Get-FileHash "$env:USERPROFILE\.dsh\.agent-presets\$p\agent.cordis.yml" -Algorithm SHA256).Hash
->   if ($repo -eq $live) { "OK   $p" } else { "FAIL $p repo=$repo live=$live" }
-> }
-> ```
->
-> 出现任何 `FAIL` 即为安装失败：**不要用那份预设创建会话**，先让仓库镜像与 live
-> 对齐（或反过来把 live 收敛回仓库），再重跑校验。
+> 也就是说旧文档里那条"逐 preset 比对 `sha256sum`"的校验**本身就会假阳性**，
+> 且恰好在守卫最该说"健康"的时候报警。因此守卫比较的是
+> **CRLF/CR→LF 归一化之后的内容**；`-Export` 写出的内容也统一用 LF，
+> 让仓库侧不再掷硬币。**文档旧版让你比对裸 sha256 的写法已作废，请用 `-Check`。**
+
+### 改了 live preset 之后：必须用 `-Export` 回写仓库
+
+> ⚠️ **只要你改了 `~/.dsh/.agent-presets/**`（改配置、调 `toolFilter`、
+> 换 provider/model、改 SKILL.md），就地跑一次 `-Export` 把 live 回写进仓库并提交。**
+
+```powershell
+# 2) live -> 仓库镜像（写了 LF），再用既有机制同步 src/lib 两份派生副本
+pwsh -NoProfile -File scripts\preset-drift.ps1 -Export
+git status --porcelain      # 应当只看到你刚改的那几个 preset 文件
+git add -A && git commit -m "fix(presets): ..."
+```
+
+`-Export` 的语义与边界：
+
+- 方向固定为 **live → 仓库镜像**；`skills/agentflow/agents/<name>/` 会被对齐成
+  live 目录的忠实副本（新增、更新、并删除 live 里已不存在的镜像文件）。
+- 派生副本 `dsh-agentflow/src|lib/skills/agentflow/` **不手拷**，由
+  `node dsh-agentflow/scripts/copy-skill.mjs` 这个既有机制重新生成。
+- **默认跳过 `.bak-*` / `*.bak` / `*~` 等备份与scratch 文件**，live 目录里放了
+  备份也不会被带进仓库。
+- live 目录里缺 `agent.cordis.yml`、或 live 根 / 镜像根不存在，一律**报错退出**，
+  不会把"缺失"当成"无差异"。
+
+> **只提供 PowerShell 版，不配 `.sh`（明确说明）**：live 根 `%USERPROFILE%\.dsh\.agent-presets`
+> 是本机 DSH profile 的 Windows 路径，本自举回路只在 Windows 上跑；而本机
+> `bash` 是 WSL，它对同一棵树给出的是 `/mnt/c/...` 的第二视角，行尾/属性可能与
+> 原生 Git 不一致——再写一份"看起来能跑但从未被真实验证"的 `.sh` 只会制造假信心。
+> 需要跨平台时，正确做法是给这份 PowerShell 加 CI 覆盖，而不是旁开第二条实现。
 
 ### 关键工具：`spawn_worker`
 
@@ -292,6 +333,11 @@ else runtimeCtx.logger.info(`subagent provider "..." not registered yet; the "..
 > 变化**（`preset.yml` 只是 `METADATA_FILE`，不参与 stamp），必须等到
 > `agent.cordis.yml` **本身变动**（mtime 或 size 改变）**或进程重启**为止。
 > 修 preset 时请直接改组装文件本身，不要指望改旁边文件能热生效。
+>
+> 与守卫的关系：`preset-drift.ps1 -Export` **只写仓库侧**，不碰 live，
+> 因此它**不会**让 stamp 前进；反过来 `cp -a` 重装会刷新 `agent.cordis.yml`
+> 的 mtime，stamp 立刻前进。**stamp 前进 ≠ 内容正确**——内容是否真的一致，
+> 仍然只由 `-Check` 回答。
 
 ### 完整说明
 
