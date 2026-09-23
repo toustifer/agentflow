@@ -2,7 +2,7 @@
 
 > Canonical public mirror: https://hub.stifer.xyz/agentflow-setup.md  
 > **Default install = download Release (no Go, no git clone).**  
-> Updated: 2026-09-12 · Release **v0.2.9**
+> Updated: 2026-09-12 · Release **v0.3.0**
 
 ## 概述
 
@@ -41,7 +41,7 @@ curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.sh \
-  | VERSION=v0.2.9 bash -s -- --write-config --write-codex-config
+  | VERSION=v0.3.0 bash -s -- --write-config --write-codex-config
 ```
 
 脚本会：
@@ -65,14 +65,14 @@ curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/
 irm https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.ps1 | iex
 # 或:
 # $script = irm 'https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.ps1'
-# & ([scriptblock]::Create($script)) -Version 'v0.2.9' -WriteConfig -WriteCodexConfig
+# & ([scriptblock]::Create($script)) -Version 'v0.3.0' -WriteConfig -WriteCodexConfig
 ```
 
 装到 `%USERPROFILE%\.claude\skills\agentflow\`，二进制为 `bin\agentflow.exe`。环境要求：PowerShell、Node 18+、Python 3.8+（纯标准库无 pip 依赖）。
 
 ## 手动下载（不用 install 脚本）
 
-Release：https://github.com/toustifer/agentflow/releases/tag/v0.2.9
+Release：https://github.com/toustifer/agentflow/releases/tag/v0.3.0
 
 | 资产 | 用途 |
 |------|------|
@@ -83,7 +83,7 @@ Release：https://github.com/toustifer/agentflow/releases/tag/v0.2.9
 | `agentflow-windows-amd64.exe` | Windows x64 |
 
 ```bash
-VERSION=v0.2.9
+VERSION=v0.3.0
 BASE=https://github.com/toustifer/agentflow/releases/download/$VERSION
 DEST=~/.claude/skills/agentflow
 mkdir -p "$DEST/bin"
@@ -181,7 +181,7 @@ node ~/.claude/skills/agentflow/hooks/mode-cli.js update
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.sh \
-  | VERSION=v0.2.9 bash -s -- --write-config --write-codex-config
+  | VERSION=v0.3.0 bash -s -- --write-config --write-codex-config
 ```
 
 然后**完全退出并重启 Claude Code 和 Codex**，再跑一次 `/agentflow update`。
@@ -207,8 +207,8 @@ rsync -a skills/agentflow/ ~/.claude/skills/agentflow/
 mkdir -p ~/.claude/skills/agentflow/bin
 go build -o ~/.claude/skills/agentflow/bin/agentflow ./cmd/agentflow/
 # 发布者：
-# VERSION=v0.2.9 bash scripts/build-release.sh
-# gh release create v0.2.9 dist/agentflow-* dist/skill.tgz
+# VERSION=v0.3.0 bash scripts/build-release.sh
+# gh release create v0.3.0 dist/agentflow-* dist/skill.tgz
 ```
 
 ## Codex CLI（同一二进制）

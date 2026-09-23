@@ -78,11 +78,11 @@ Agentflow 采用解耦而严密的双引擎架构，确保高可靠性与沙箱�
 ## 前置要求
 
 - 已安装并初始化 DeepSeek Harness（任意 profile）。
-- **agentflow 核心二进制 v0.2.8+**（推荐最新 **v0.2.9**）：
+- **agentflow 核心二进制 v0.2.8+**（推荐最新 **v0.3.0**）：
   从 v0.2.8 起原生支持 stdio 自适应 Content-Length 与 NDJSON 双模帧。由于 DSH（基于 TypeScript MCP SDK）默认使用换行分隔 JSON 帧，早期版本可能引发协议超时。
   验证本地版本：
   ```bash
-  agentflow version    # 应输出 agentflow v0.2.9 (commit ...)
+  agentflow version    # 应输出 agentflow v0.3.0 (commit ...)
   ```
 
 ---

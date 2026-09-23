@@ -78,11 +78,11 @@ Agentflow is engineered around a decoupled dual-engine architecture to ensure hi
 ## Requirements
 
 - DeepSeek Harness (DSH) with any initialized profile.
-- **agentflow binary v0.2.8+** (recommended: **v0.2.9**):
+- **agentflow binary v0.2.8+** (recommended: **v0.3.0**):
   Starting from v0.2.8, agentflow natively supports auto-adaptive dual-mode stdio framing. Earlier builds may experience protocol timeouts due to framing mismatches.
   Verify local installation:
   ```bash
-  agentflow version    # Output: agentflow v0.2.9 (commit ...)
+  agentflow version    # Output: agentflow v0.3.0 (commit ...)
   ```
 
 ---

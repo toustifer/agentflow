@@ -1,6 +1,6 @@
 # Build release binaries for all target platforms + pack skill.tgz
 param(
-  [string]$Version = "v0.2.9",
+  [string]$Version = $((Get-Content -Raw (Join-Path $PSScriptRoot "..\skills\agentflow\VERSION")).Trim()),
   [string]$OutDir
 )
 

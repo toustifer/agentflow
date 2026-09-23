@@ -29,7 +29,10 @@ test("installers default to the packaged skill version and support Codex", () =>
   assert.match(installSh, /--write-codex-config/);
   assert.match(installSh, /codex mcp add agentflow/);
 
-  assert.ok(installPs1.includes(`else { "${skillVersion}" }`));
+  assert.ok(
+    installPs1.includes("skills\\agentflow\\VERSION") ||
+    installPs1.includes("skills/agentflow/VERSION")
+  );
   assert.match(installPs1, /WriteCodexConfig/);
   assert.match(installPs1, /codex mcp add agentflow/);
 });

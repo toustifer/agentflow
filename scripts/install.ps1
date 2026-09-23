@@ -1,11 +1,26 @@
 # Download-first install for Windows (no Go, no git clone).
 # Usage (PowerShell):
 #   irm https://raw.githubusercontent.com/toustifer/agentflow/master/scripts/install.ps1 | iex
-#   $env:VERSION='v0.2.9'; .\install.ps1
+#   $env:VERSION='v0.3.0'; .\install.ps1
 #   .\install.ps1 -WriteConfig -WriteCodexConfig
 
 param(
-  [string]$Version = $(if ($env:VERSION) { $env:VERSION } else { "v0.2.9" }),
+  [string]$Version = $(
+    if ($env:VERSION) {
+      $env:VERSION
+    } else {
+      $verPath = Join-Path $PSScriptRoot "..\skills\agentflow\VERSION"
+      if (Test-Path $verPath) {
+        (Get-Content -Raw $verPath).Trim()
+      } else {
+        try {
+          (Invoke-RestMethod "https://raw.githubusercontent.com/toustifer/agentflow/master/skills/agentflow/VERSION" -UseBasicParsing).Trim()
+        } catch {
+          "v0.3.0"
+        }
+      }
+    }
+  ),
   [string]$Repo = "toustifer/agentflow",
   [string]$Dest = $(Join-Path $env:USERPROFILE ".claude\skills\agentflow"),
   [switch]$WriteConfig,
