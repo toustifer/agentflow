@@ -326,6 +326,11 @@ func TestLifecycleProjectionCoversAllFourTriggers(t *testing.T) {
 	require.Len(t, syncs, 3)
 	require.Equal(t, "executing", decodeWireTask(t, syncs[2]).Status)
 
+	// A start transition projects the task row only. The tip has not moved, so it
+	// must not re-report the branch — one event, one request, never both paths.
+	require.Len(t, f.postsTo("/v1/hub/repos/z8gw/branches/report"), 1)
+	require.NotContains(t, transitioned, hubBranchNoteKey)
+
 	// (4) task_create_batch ---------------------------------------------------
 	batch, err := srv.Handle(ctx, "task_create_batch", map[string]any{
 		"namespace_id": "ns-1",
@@ -428,6 +433,8 @@ func TestTransitionSubmitCarriesReviewedTip(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "review_pending", submitted["state"])
 	require.Equal(t, "hub_task_sync_ok", hubNoteOf(t, submitted))
+	// submit is the one transition that also reports the branch tip.
+	require.Equal(t, "hub_branch_report_ok", submitted[hubBranchNoteKey])
 
 	task, err = srv.engine.GetTask(ctx, "ns-1", "T-hub-submit")
 	require.NoError(t, err)
@@ -441,6 +448,173 @@ func TestTransitionSubmitCarriesReviewedTip(t *testing.T) {
 	require.Equal(t, "review_pending", submitBody.Status)
 	require.Equal(t, "feat/test", submitBody.Branch)
 	require.Equal(t, reviewCommit, submitBody.HeadSHA)
+
+	// The branch report on submit refreshes the occupancy tip to the commit the
+	// reviewer will see — otherwise peers would keep colliding with the tip that
+	// was published at task_prepare_start.
+	branchPosts := f.postsTo("/v1/hub/repos/z8gw/branches/report")
+	require.Len(t, branchPosts, 2, "one report at prepare_start, one at submit")
+	t.Logf("submit branch report body: %s", branchPosts[1])
+	t.Logf("submit task projection body: %s", syncs[2])
+	var report wireBranchReport
+	require.NoError(t, json.Unmarshal(branchPosts[1], &report))
+	require.Equal(t, "agentflow", report.Reporter)
+	require.Len(t, report.Branches, 1)
+	require.Equal(t, "feat/test", report.Branches[0].Name)
+	require.Equal(t, reviewCommit, report.Branches[0].TipSHA, "tip_sha must be review.commit")
+	require.NotEqual(t, baseTip, report.Branches[0].TipSHA)
+	require.Equal(t, "report", report.Branches[0].Source)
+	require.Len(t, report.Bindings, 1)
+	require.Equal(t, "task", report.Bindings[0].BindType)
+	require.Equal(t, "T-hub-submit", report.Bindings[0].BindID)
+	require.Equal(t, reviewCommit, report.Bindings[0].HeadSHA, "head_sha must be review.commit")
+	require.Equal(t, "active", report.Bindings[0].Status)
+}
+
+// driveTaskToSubmitBoundary leaves taskID one call short of submit: prepared,
+// started, committed in the worktree, diary written. Returns the tip that
+// task_prepare_start published, so a case can prove submit moved past it.
+func driveTaskToSubmitBoundary(t *testing.T, srv *Server, f *fakeHub, taskID string) string {
+	t.Helper()
+	ctx := context.Background()
+
+	createDagTaskForStart(t, srv, taskID)
+	prepared, err := srv.Handle(ctx, "task_prepare_start", map[string]any{
+		"namespace_id": "ns-1", "task_id": taskID,
+	})
+	require.NoError(t, err)
+	prepSyncs := f.postsTo("/v1/hub/dag/z8gw")
+	require.Len(t, prepSyncs, 1)
+	baseTip := decodeWireTask(t, prepSyncs[0]).HeadSHA
+	require.NotEmpty(t, baseTip)
+
+	_, err = srv.Handle(ctx, "task_transition", map[string]any{
+		"namespace_id": "ns-1", "task_id": taskID,
+		"transition": "start", "actor_role": "leader",
+		"metadata": startMetadata(t, prepared),
+	})
+	require.NoError(t, err)
+
+	task, err := srv.engine.GetTask(ctx, "ns-1", taskID)
+	require.NoError(t, err)
+	worktree := task.Metadata["git.worktree_path"]
+	require.NotEmpty(t, worktree)
+	require.NoError(t, os.WriteFile(filepath.Join(worktree, "work.txt"), []byte("done"), 0o644))
+	runGitTest(t, worktree, "add", ".")
+	runGitTest(t, worktree, "commit", "-m", "implement "+taskID)
+
+	today := time.Now().UTC().Format("2006-01-02")
+	_, err = srv.Handle(ctx, "worker_diary_write", map[string]any{
+		"namespace_id": "ns-1", "worker_id": "worker-b", "date": today,
+		"content": "finished " + taskID, "task_id": taskID,
+	})
+	require.NoError(t, err)
+
+	return baseTip
+}
+
+// TestTransitionSubmitBranchReportSoftFailKeepsLifecycleMoving is the red-line
+// case for the submit-leg branch report: with the Hub broken, the submit must
+// still advance locally to review_pending and return a task the reviewer can
+// act on — only the two notes record that the mirror failed.
+func TestTransitionSubmitBranchReportSoftFailKeepsLifecycleMoving(t *testing.T) {
+	const taskID = "T-submit-fault"
+
+	cases := []struct {
+		name             string
+		status           int
+		refused          bool
+		wantSyncNote     string
+		wantBranchNote   string
+		wantBranchDetail string
+		attempted        bool
+	}{
+		{
+			name:   "status_500",
+			status: http.StatusInternalServerError,
+			// The fake Hub returns a bodyless 500, so no message is appended.
+			wantSyncNote:   "hub_task_sync_failed: status 500",
+			wantBranchNote: "hub_branch_report_failed: status 500",
+			attempted:      true,
+		},
+		{
+			name:             "connection_refused",
+			refused:          true,
+			wantSyncNote:     "hub_task_sync_failed",
+			wantBranchNote:   "hub_branch_report_failed",
+			wantBranchDetail: "dial tcp",
+			attempted:        false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateHubEnv(t)
+			srv := newTestServer(t)
+			ctx := context.Background()
+
+			// Prepare against a healthy Hub: what this case measures is the
+			// submit, not the prepare path.
+			f := newFakeHub(t, 0, 0)
+			enableHubForTest(t, f)
+			baseTip := driveTaskToSubmitBoundary(t, srv, f, taskID)
+
+			if tc.refused {
+				t.Setenv("HUB_BASE_URL", closedPortURL(t))
+			} else {
+				f.setFault(tc.status, 0)
+			}
+			before := f.count()
+			branchPostsBefore := len(f.postsTo("/v1/hub/repos/z8gw/branches/report"))
+
+			// (a) the tool call still succeeds...
+			submitted, err := srv.Handle(ctx, "task_transition", map[string]any{
+				"namespace_id": "ns-1", "task_id": taskID,
+				"transition": "submit", "actor_role": "worker",
+			})
+			require.NoError(t, err, "a Hub fault must never surface as a tool error")
+
+			// (b) ...the local lifecycle advanced to review_pending and is durable,
+			// with the reviewed tip recorded for the reviewer...
+			require.Equal(t, "review_pending", submitted["state"])
+			task, err := srv.engine.GetTask(ctx, "ns-1", taskID)
+			require.NoError(t, err)
+			require.Equal(t, engine.TaskReviewPending, task.State)
+			reviewCommit := task.Metadata["review.commit"]
+			require.NotEmpty(t, reviewCommit)
+			require.NotEqual(t, baseTip, reviewCommit, "the worker commit must move the tip")
+
+			// (c) ...and both notes record what the mirror did, naming the fault.
+			require.Contains(t, hubNoteOf(t, submitted), tc.wantSyncNote)
+			branchNote, ok := submitted[hubBranchNoteKey].(string)
+			require.True(t, ok, "%s missing from payload: %v", hubBranchNoteKey, submitted)
+			require.Contains(t, branchNote, tc.wantBranchNote)
+			if tc.wantBranchDetail != "" {
+				require.Contains(t, branchNote, tc.wantBranchDetail, "note must name the concrete fault")
+			}
+			t.Logf("state=%v review.commit=%s", submitted["state"], reviewCommit)
+			t.Logf("%s=%s", hubNoteKey, hubNoteOf(t, submitted))
+			t.Logf("%s=%s", hubBranchNoteKey, branchNote)
+
+			if tc.attempted {
+				require.Greater(t, f.count(), before, "the fault must have been attempted, not skipped")
+			} else {
+				require.Equal(t, before, f.count(), "a refused connection cannot reach the recorder")
+				require.Len(t, f.postsTo("/v1/hub/repos/z8gw/branches/report"), branchPostsBefore)
+			}
+		})
+	}
+}
+
+// TestSubmitReportsBranchOnlyForSubmitVerb pins the trigger predicate directly,
+// so the "no extra branch report" property does not depend on a full lifecycle.
+func TestSubmitReportsBranchOnlyForSubmitVerb(t *testing.T) {
+	require.True(t, submitReportsBranch(map[string]any{"transition": "submit"}))
+	require.True(t, submitReportsBranch(map[string]any{"transition": " submit "}))
+	for _, verb := range []string{"start", "resume", "pass", "rework", "reassign", "cancel", ""} {
+		require.False(t, submitReportsBranch(map[string]any{"transition": verb}), verb)
+	}
+	require.False(t, submitReportsBranch(map[string]any{}))
 }
 
 // TestProjectionStaysOffWhenPartialGitMetadata covers the other transition

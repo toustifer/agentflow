@@ -430,7 +430,6 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 		if err != nil {
 			return nil, err
 		}
-		s.syncNamespace(ctx, result.namespace)
 		return result.payload, nil
 	case "namespace_list":
 		return s.handleNamespaceList(ctx, input)
@@ -441,7 +440,6 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 		if err != nil {
 			return nil, err
 		}
-		s.syncNamespace(ctx, result.namespace)
 		return result.payload, nil
 	case "namespace_delete":
 		return s.handleNamespaceDelete(ctx, input)
@@ -458,7 +456,6 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 		if err != nil {
 			return nil, err
 		}
-		s.syncTask(ctx, result.task)
 		s.attachLifecycleHubNotes(ctx, result, false, false)
 		return result.payload, nil
 	case "task_prepare_start":
@@ -466,7 +463,6 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 		if err != nil {
 			return nil, err
 		}
-		s.syncTask(ctx, result.task)
 		// The worktree now exists, so the projection can carry git.branch /
 		// git.head_sha and the branch tip is reported alongside the task row.
 		s.attachLifecycleHubNotes(ctx, result, true, false)
@@ -476,32 +472,33 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 		if err != nil {
 			return nil, err
 		}
-		s.syncTask(ctx, result.task)
 		// Covers both handleTaskTransition return paths (the start/resume path
 		// and the generic path) with one projection hook keyed on the verb.
-		s.attachLifecycleHubNotes(ctx, result, false, preferReviewTip(input))
+		//
+		// submit additionally reports the branch: the worker committed in the
+		// worktree since task_prepare_start, so the tip on record would otherwise
+		// stay frozen at the tip that was reported when the task started, and a
+		// colleague reading the occupancy board would collide with work that has
+		// already moved on. The reported tip is review.commit — the same sha the
+		// reviewer will be handed.
+		s.attachLifecycleHubNotes(ctx, result, submitReportsBranch(input), preferReviewTip(input))
 		return result.payload, nil
 	case "task_worker_sync":
 		result, err := s.handleTaskWorkerSync(ctx, input)
 		if err != nil {
 			return nil, err
 		}
-		s.syncTask(ctx, result.task)
 		return result.payload, nil
 	case "task_get":
 		result, err := s.handleTaskGet(ctx, input)
 		if err != nil {
 			return nil, err
 		}
-		s.syncTask(ctx, result.task)
 		return result.payload, nil
 	case "task_list":
 		result, err := s.handleTaskList(ctx, input)
 		if err != nil {
 			return nil, err
-		}
-		for i := range result.tasks {
-			s.syncTask(ctx, &result.tasks[i])
 		}
 		return result.payload, nil
 	case "task_history":
@@ -509,7 +506,6 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 		if err != nil {
 			return nil, err
 		}
-		s.syncTask(ctx, result.task)
 		return result.payload, nil
 	case "task_query":
 		return s.handleTaskQuery(ctx, input)
@@ -562,7 +558,6 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 		if err != nil {
 			return nil, err
 		}
-		s.syncNamespace(ctx, result.namespace)
 		return result.payload, nil
 	case "project_blockers":
 		return s.handleProjectBlockers(ctx, input)
@@ -615,14 +610,12 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 	case "project_next_steps":
 		return s.handleProjectNextSteps(ctx, input)
 	case "flow_ping":
-		result := map[string]any{
+		return map[string]any{
 			"ok":      true,
 			"version": BuildVersion,
 			"commit":  BuildCommit,
 			"date":    BuildDate,
-		}
-		s.syncPing(ctx)
-		return result, nil
+		}, nil
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnknownTool, tool)
 	}
@@ -639,12 +632,10 @@ type taskResult struct {
 }
 
 type taskListResult struct {
-	tasks   []engine.Task
 	payload map[string]any
 }
 
 type taskHistoryResult struct {
-	task    *engine.Task
 	payload map[string]any
 }
 
@@ -1305,7 +1296,6 @@ func (s *Server) handleTaskList(ctx context.Context, input map[string]any) (task
 	}
 
 	return taskListResult{
-		tasks:   tasks,
 		payload: map[string]any{"tasks": items},
 	}, nil
 }
@@ -1330,11 +1320,7 @@ func (s *Server) handleTaskHistory(ctx context.Context, input map[string]any) (t
 		items = append(items, eventToMap(history[i]))
 	}
 
-	// best-effort: fetch task for hub sync (ignore error, syncTask handles nil)
-	task, _ := s.engine.GetTask(ctx, namespaceID, taskID)
-
 	return taskHistoryResult{
-		task:    task,
 		payload: map[string]any{"history": items},
 	}, nil
 }

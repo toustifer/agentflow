@@ -176,3 +176,15 @@ func preferReviewTip(input map[string]any) bool {
 		return true
 	}
 }
+
+// submitReportsBranch reports whether a transition must also report the branch
+// tip (bind_type=task), and not merely project the task row.
+//
+// submit is the only verb whose tip has moved past what task_prepare_start
+// recorded: the worker commits inside the worktree between start and submit. So
+// it is the only transition that refreshes the occupancy peers see; reporting a
+// branch on reassign/cancel would re-publish a tip that did not move.
+func submitReportsBranch(input map[string]any) bool {
+	transition, _ := input["transition"].(string)
+	return strings.TrimSpace(transition) == "submit"
+}

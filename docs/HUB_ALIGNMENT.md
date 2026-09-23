@@ -12,7 +12,7 @@
 |--------|---------------|------------------|----------|----------|-----------|
 | **团队绑定**（namespace ↔ team） | 无网络（本地 metadata + workdir 文件） | `hub.ResolveBusinessCode` / `BindNamespaceTeam` / `SnapshotForNamespace` | ✅ `hub_bind_team`、`hub_status` | ✅ 已接线（master 既有） | **完整**。写入 `namespaces.metadata["hub.business_code"]`，同时镜像到 `{workdir}/.mycompany/hub-client.json`，并清理 home 里遗留的 legacy team code |
 | **任务大盘投影** | `POST /v1/hub/dag/{code}` | `hub.SyncTask` | 无（由生命周期自动触发） | ✅ **本次接线**（4 个触发点） | **soft 投影可用**；无重试、无顺序保证（`docs/SYNC_CONTRACT.md` §5） |
-| **分支上报 / 防撞车** | `POST /v1/hub/repos/{code}/branches/report` | `hub.ReportBranch` | 无（自动触发） | ✅ **本次接线**（仅 `task_prepare_start`） | **soft 上报可用**；`repo_url` 留空；不含 worktree 路径，只有 `os.Hostname()` |
+| **分支上报 / 防撞车** | `POST /v1/hub/repos/{code}/branches/report` | `hub.ReportBranch` | 无（自动触发） | ✅ **本次接线**（`task_prepare_start` + `task_transition`=`submit`） | **soft 上报可用**；`repo_url` 留空；不含 worktree 路径，只有 `os.Hostname()` |
 | **登录 / 凭据** | `POST /v1/hub/auth/device`、`GET /v1/hub/auth/device/token?code=` | `hub.StartDeviceLogin` / `FinishDeviceLogin`（JWT 落 `~/.agent-hub/config.json`） | ✅ **`hub_login`（两段式）** | ✅ 已接线（`dag-hub-login-and-mcp`） | **完整**。`hub_login({})` 返回 `code` + `verification_url`；浏览器点 Approve 后 `hub_login({code})` 轮询一次。未批准 = `pending_approval`（**不是** `failed`），可反复轮询；成功才落盘 JWT，**不发明 team code**（home 保持 JWT-only） |
 | **团队成员列表** | `GET /v1/hub/me/businesses` | `hub.ListMyTeams` | ✅ **`hub_list_teams`** | ✅ 已接线（`dag-hub-login-and-mcp`） | **完整**。需要 JWT；**只有 API key 时返回 `skipped`（不是 `failed`）且零出网**，`hint` 指向 `hub_login`；用于发现 `hub_bind_team` 要用的 4 位 code |
 | **成员资格校验** | `GET /v1/hub/me/businesses`（JWT）/ `GET /v1/hub/dag/{code}`（API key） | `hub.EnsureMembership` | 无（内部探针） | ✅ 随投影一起跑 | **顾问而非门闸**：结果被忽略，探针失败也继续写；**冷缓存 = 1 探针 + 1 写** |
@@ -26,12 +26,15 @@
 | MCP 工具 | 任务投影 | 分支上报 | 回填键 |
 |----------|----------|----------|--------|
 | `task_create` | ✅ | — | `hub_note` |
-| `task_prepare_start` | ✅（带 `branch` / `head_sha`） | ✅ `bind_type=task`、`bind_id=<task_id>` | `hub_note` + `hub_branch_note` |
-| `task_transition` | ✅（`start`/`resume` 与通用路径两条都覆盖；`submit` 起带 reviewed tip） | — | `hub_note` |
+| `task_prepare_start` | ✅（带 `branch` / `head_sha`） | ✅ `bind_type=task`、`bind_id=<task_id>`、`tip_sha` = 刚建好的 worktree 顶端 | `hub_note` + `hub_branch_note` |
+| `task_transition` | ✅（`start`/`resume` 与通用路径两条都覆盖；`submit` 起带 reviewed tip） | ✅ **仅 `transition=submit`**：`tip_sha`/`head_sha` = `review.commit`（reviewer 将看到的那个 tip） | `hub_note`（submit 时另有 `hub_branch_note`） |
 | `task_create_batch` | ✅ 每个 task 一条 | — | 每个 item 的 `hub_note` |
 
-**未接线**（走旧的进程内 `HubSyncer` seam，且 `cmd/agentflow` 从不设置 `Config.HubEnabled` ⇒ 今天零 I/O）：
-`task_get`、`task_list`、`task_history`、`task_worker_sync`、`namespace_create`、`namespace_update`、`project_init`、`flow_ping`。
+`submit` 是唯一会额外上报分支的 transition：worker 在 worktree 里 commit 之后 tip 已经前移，若不上报，同事看到的占用会冻结在 `task_prepare_start` 那个旧 tip 上（这正是本任务关闭的缺口 1）。`start`/`resume`/`pass`/`rework`/`reassign`/`cancel` **不**上报分支 —— 一个事件只产生一条请求，不存在「同一事件既走这条又走那条」。
+
+**无 Hub 投影的工具（刻意如此，不是缺口）**：
+`task_get`、`task_list`、`task_history`、`task_query`、`task_worker_sync`、`namespace_*`、`project_init`、`flow_ping`（以及全部 `worker_*` / `doc_*` / `goal_*` / `dag_*` 读接口）。
+其中 `task_get` / `task_list` / `task_history` / `flow_ping` 是**读/诊断**接口，投影它们只会制造无意义的重复写；`task_worker_sync` 的任务状态变化由紧随其后的 `task_transition` 承担。**这条 seam 已删除**（见 §4 与 `docs/SYNC_CONTRACT.md` §4.4）：今天代码里除 `pkg/hub` 之外**只有一个** Hub 出口 —— `pkg/server/hub_project.go` 的 `realHubProjector`，并且它已经接了 4 个触发点。不存在第二条「代码上看着已接通、实际永不开启」的平行路径。
 
 **凭据类工具（不参与任务投影）**：
 
@@ -62,7 +65,9 @@
 
 - `pkg/hub` 联邦客户端重建完成，51 个包内测试全绿；零第三方依赖（纯 stdlib）。
 - 四个生命周期触发点接线完成，note 回填进 MCP 返回值。
-- soft-fail 有四类故障的证据：`500`、`401`、连接拒绝、超时 —— 每种都证明工具调用仍成功、本地状态仍推进、note 记录故障。全部基于 `httptest` 假 Hub + 注入的假凭据，未触碰真实 Hub。
+- `task_transition` = `submit` 额外上报分支 tip，`tip_sha`/`head_sha` 取 `review.commit`：同事看到的占用不再是 `task_prepare_start` 那一刻的旧 tip。
+- soft-fail 有四类故障的证据：`500`、`401`、连接拒绝、超时 —— 每种都证明工具调用仍成功、本地状态仍推进、note 记录故障。全部基于 `httptest` 假 Hub + 注入的假凭据，未触碰真实 Hub。**submit 分支上报这条新路径单独有 `500` + 连接拒绝两例**（`TestTransitionSubmitBranchReportSoftFailKeepsLifecycleMoving`）。
+- 旧的进程内 `HubSyncer` seam 已**整体删除**（`pkg/server/sync.go`、`Server.hub`、`Config.HubEnabled` / `Config.HubBusinessCode`、`noopHubSyncer` 以及 `mcp_test.go` 里依赖它们的 8 个用例）。理由：`cmd/agentflow` 从不设置 `Config.HubEnabled`，那条路径永远零 I/O；它的接口只能返回 `error`，承载不了 note，是个错误的抽象；真实投影已在 4 个触发点落地。今天 Hub 出口只有一个（`pkg/server/hub_project.go`）。
 - 默认关闭有两个零出网证据：**无配置**与 **`HUB_DISABLED=1`**，均在"base URL 指向活体计数服务"的前提下计数为 0（`pkg/server/hub_projection_test.go`）。
 - `pkg/engine` 未 import `pkg/hub`。
 
@@ -76,8 +81,9 @@
 6. **无 H→L**：不拉取、不对账、不解决冲突。
 7. **旧的 `BindTeam` / `StatusSnapshot` 那一代没有复引入**：master 的 `BindNamespaceTeam` / `SnapshotForNamespace` 取代了它们；`hub.BindTeam` 会往 home 写 team code，与 JWT-only home 不变量冲突。`pkg/hub/bind.go` 里今天确实有 `StatusSnapshot` 类型，但那是 master 自己的本地快照结构，不是旧联邦分支那一代。
 8. **`hub_login` 的轮询是一次一拍，没有内部等待/退避**：MCP 调用返回 `pending_approval` 后由**调用方**决定何时再调；服务端没有后台 loop，也没有超时自动放弃。
-9. **分支上报只发生在 `task_prepare_start`**：worker 在 worktree 里 commit 之后**不会**自动上报新 tip；新 tip 只通过任务投影的 `head_sha` 体现。
+9. **分支上报只在两个时刻发生**（`task_prepare_start` 与 `task_transition`=`submit`）：worker 在 submit **之后**又 commit（例如返工期间）仍不会触发上报，要等下一次 `submit`。任务投影的 `head_sha` 同样只在生命周期事件上更新。
 10. **`hub_login` 不支持自选 token 写入位置**：永远写 `~/.agent-hub/config.json`（可用 `HOME`/`USERPROFILE` 重定向，仅测试这么做）。
+11. **`task_worker_sync` 不再有任何 Hub 副作用**：随 seam 一起下线；它的状态变化靠随后的 `task_transition` 投影。若将来需要「不经过 transition 也能投影」，得在 `attachLifecycleHubNotes` 那一层新增挂点，而不是复活旧 seam。
 
 ---
 
@@ -98,7 +104,7 @@
 
 ```powershell
 # 投影接线 + soft-fail + 默认关闭（全部 httptest，零真实出网）
-go test -count=1 -run "Projection|TaskGitRefs|PreferReviewTip" ./pkg/server/
+go test -count=1 -run "Projection|TaskGitRefs|PreferReviewTip|SubmitReportsBranch|TransitionSubmit" ./pkg/server/
 
 # 凭据工具：hub_login 两段式 + hub_list_teams（全部 httptest，隔离 HOME）
 go test -count=1 -run "HubLogin|HubListTeams" -v ./pkg/server/

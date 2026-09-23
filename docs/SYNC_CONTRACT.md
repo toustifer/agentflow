@@ -134,14 +134,16 @@ env HUB_BUSINESS_CODE | HUB_BUSINESS
 
 ## 4. 触发点与 note 回填
 
-### 4.1 四个触发点
+### 4.1 触发点
 
 | 时机 | 入口 | task 投影 | 分支上报 | payload 键 |
 |------|------|-----------|----------|------------|
 | `task_create` | `Handle` → `handleTaskCreate` | ✅ 8 字段 | — | `hub_note` |
 | `task_prepare_start` | `Handle` → `handleTaskPrepareStart` | ✅ 8 字段（带 branch/head） | ✅ `bind_type=task` | `hub_note` + `hub_branch_note` |
-| `task_transition` | `Handle` → `handleTaskTransition`（start/resume 路径与通用路径**两条**都覆盖） | ✅ 8 字段（submit 及之后带 reviewed tip） | — | `hub_note` |
+| `task_transition` | `Handle` → `handleTaskTransition`（start/resume 路径与通用路径**两条**都覆盖） | ✅ 8 字段（submit 及之后带 reviewed tip） | ✅ **仅当 `transition=submit`**（`bind_type=task`，`tip_sha` = `review.commit`） | `hub_note`（submit 时另有 `hub_branch_note`） |
 | `task_create_batch` | `handleTaskCreateBatch` | ✅ **每个** task 一条 | — | 每个 item 的 `hub_note` |
+
+判定由 `submitReportsBranch(input)` 唯一决定（`pkg/server/hub_project.go`），只有 `submit` 返回 true。**一个事件只走一条路径**：`start`/`resume`/`pass`/`rework`/`reassign`/`cancel` 只投影 task row，不重复上报分支。
 
 note 在本地状态**已经提交之后**才计算并回填，所以 Hub 故障对生命周期完全不可见：工具照常返回推进后的 task，只有 note 记录镜像发生了什么。
 
@@ -153,6 +155,9 @@ note 在本地状态**已经提交之后**才计算并回填，所以 Hub 故障
 | `task_prepare_start` | `git.branch` | `git.head_sha`（刚建好的 worktree 顶端） |
 | `task_transition` = `start` / `resume` | `git.branch` | `git.head_sha`（刚刷新，此时 `review.commit` 可能是上一轮的陈旧值） |
 | `task_transition` = `submit` / `pass` / `rework` / `cancel` / `reassign` | `git.branch` | `review.commit`（reviewer 将看到的那一个 tip），缺失时回退 `git.head_sha` |
+| 分支上报（`task_prepare_start` / `submit`） | `git.branch` | 同上，即 `bindings[].head_sha` 与 `branches[].tip_sha` **相同** |
+
+`submit` 上的这个 `review.commit` 就是防撞车的关键：它是 worker「已经落地、reviewer 即将看到」的那个 tip，而不是 `task_prepare_start` 当时的 base tip（`TestTransitionSubmitCarriesReviewedTip` 直接对线上 body 断言 `tip_sha == review.commit != baseTip`）。
 
 ### 4.3 note 的确切格式
 
@@ -184,9 +189,14 @@ op token 只有这六个：`task_sync`、`branch_report`、`auth`、`list_teams`
 
 > `login_start` / `login_finish` 是**两个** op，不是笼统的 `login`：开始设备码与轮询取件是两条独立的路由（`POST /v1/hub/auth/device` / `GET /v1/hub/auth/device/token`），失败时要能分辨是哪一步坏了。由 `pkg/hub/login_test.go` 钉住。
 
-### 4.4 未接线的旧 seam（诚实说明）
+### 4.4 旧 seam 已删除（不再有第二条 Hub 路径）
 
-`task_get` / `task_list` / `task_history` / `task_worker_sync` / `namespace_create` / `namespace_update` / `project_init` / `flow_ping` 走的是进程内的 `pkg/server.HubSyncer` seam（`noopHubSyncer`），它**只在 `Config.HubEnabled` 为 true 时被装上，而 `cmd/agentflow` 从不设置该字段**。因此这些工具**今天零 Hub I/O**。它们与真正的 `pkg/hub` 客户端是两条不同的路径，别把它们当成已接线。
+`task_get` / `task_list` / `task_history` / `task_worker_sync` / `namespace_create` / `namespace_update` / `project_init` / `flow_ping` **没有任何 Hub 副作用**，而且代码里也不再有能被误读成「已接线」的路径：
+
+- 旧的进程内 `pkg/server.HubSyncer` seam（`noopHubSyncer`）连同 `Server.hub` 字段、`Config.HubEnabled`、`Config.HubBusinessCode` 与 `pkg/server/sync.go` 整个文件已**删除**。它只在 `Config.HubEnabled` 为 true 时被装上，而 `cmd/agentflow` 从不设置该字段 ⇒ **从来就是零 I/O 的死路径**。它的接口只能返回 `error`，承载不了 note（`hub.Result`），本身就是错误的抽象。
+- 今天 `pkg/server` 里 Hub 出口**只有一个**：`hubProjector` / `realHubProjector`（`pkg/server/hub_project.go`），已接在 §4.1 的 4 个触发点上。
+- 上述 8 个工具为什么不需要投影：`task_get` / `task_list` / `task_history` / `flow_ping` 是读/诊断接口，投影它们只会产生无意义的重复写；`namespace_*` / `project_init` 的团队绑定真值走的是 `hub_bind_team`（本地 metadata，无网络）；`task_worker_sync` 带来的状态变化由紧随其后的 `task_transition` 承担。
+- 回归证明：`git grep -n "HubSyncer\|noopHubSyncer\|HubEnabled\|HubBusinessCode" -- '*.go'` 在 `pkg/` `cmd/` 下**已无任何代码引用**（只剩 `pkg/server/server.go` 与 `pkg/server/types.go` 里两处解释性**注释**在说明它为何被删除）；`pkg/server/mcp_test.go` 里依赖旧 seam 的 8 个用例（`failingHubSyncer` / `trackingHubSyncer`）作为**预期测试删除**一并移除，这几个工具本身的正向覆盖仍在（`task_get` / `task_list` / `task_history` / `namespace_create` 各有其它用例）。
 
 ### 4.5 凭据类工具（不参与任务投影）
 

@@ -75,10 +75,6 @@ func (s *Server) handleHubBindTeam(ctx context.Context, input map[string]any) (m
 		}, nil
 	}
 
-	if ns, gerr := s.engine.GetNamespace(ctx, nsID); gerr == nil {
-		s.syncNamespace(ctx, ns)
-	}
-
 	return map[string]any{
 		"status":              "ok",
 		"namespace_id":        res.NamespaceID,
