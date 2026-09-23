@@ -175,13 +175,15 @@
 
 | 检查 | 命令 | 结果 |
 | --- | --- | --- |
-| YAML 解析 | tag-tolerant `yaml.safe_load`（备份 vs 现文件） | 两边均 `YAML_PARSE_ERRORS=0` |
-| `toolFilter:` 计数 | 文本 + 结构化双重计数 | `2` / `2` |
-| 两个 `deny` 列表 | 结构化读取 | 各 `5` 项，且 == 保留的 5 项 |
-| 注释行数 | `^\s*#` 计数 | `152` → `152`，相等 |
-| 纯减法 | `git diff --no-index --numstat` | `0  4`（+0 / −4） |
+| YAML 解析（**Node `yaml`**，AC#4 指定） | `node %TEMP%\preset_yaml_probe.mjs <bak> <live>`，`yaml` 从 DSH 自己的 `node_modules/yaml` 解析；因 preset 含 3 处 `!!js` 自定义标签，显式传入 `customTags` 声明 `tag:yaml.org,2002:js` | 备份与 live 均 `YAML_PARSE_ERRORS=0`；`LIVE_AC4_ALL_PASS=true`（exit=0） |
+| YAML 解析（交叉验证，tag-tolerant `yaml.safe_load`） | `python %TEMP%\ac_validate.py <bak> <live>` | 两边均 `YAML_PARSE_ERRORS=0` |
+| `toolFilter:` 计数 | 文本正则 + 结构化遍历 双重计数 | 文本 `2` / 结构化 `2` |
+| 两个 `deny` 列表 | 结构化读取（路径 `[12]/config/[4]/config/toolFilter` 与 `[12]/config/[5]/config/toolFilter`） | 各 `5` 项，且 == 保留的 5 项（`workflow`/`ralph`/`send_message`/`interrupt_agent`/`list_agents`） |
+| 注释行数（**注释零丢失**，AC#5） | `^\s*#` 计数 | `152` → `152`，相等（`comment_lines_equal=true`） |
+| 纯减法（AC#3） | `git diff --no-index --numstat` | `0  4`（+0 / −4） |
 | 尾部换行 | 字节检查 | `True`（保持） |
 | 行尾风格 | 字节扫描 | `CRLF=0 LF_ONLY=473`（原为 `LF_ONLY=477`，风格未变） |
+| 字节数 | `Buffer.byteLength` | `33355` → `33253`（`delta=-102`） |
 
 > ⚠️ 注意 `dsh` **没有**校验 agent preset 的子命令。因此「改动是否生效」**只能**靠 YAML 解析 + 结构 diff + **重启后开新会话确认**。本次交付**未重启任何进程**（按任务要求，生效由用户开新会话验证）。
 
