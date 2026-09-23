@@ -181,13 +181,14 @@ DSH 的子 Agent 通过 `composeFrom` 固定 join 父预设，**无按调用换 
 
 ## 七、Hub MCP（`mcp__hub__*`）—— 试验性多人同步上下文
 
-除 agentflow 自带的两个 hub 工具外，DSH 还可挂载**独立的 Hub MCP server**，
+除 agentflow 自带的四个 hub 工具外，DSH 还可挂载**独立的 Hub MCP server**，
 把 hub 平台（https://hub.stifer.xyz）的完整能力暴露给会话。两者分工不同：
 
 | 工具面 | 来源 | 职责 |
 |--------|------|------|
+| `mcp__agentflow__hub_login` / `hub_list_teams` | agentflow MCP server 内置 | **设备码登录**（两段式拿 JWT，落 `~/.agent-hub/config.json`）+ 列出自己的团队码（需 JWT） |
 | `mcp__agentflow__hub_status` / `hub_bind_team` | agentflow MCP server 内置 | 用已有 JWT 查询/绑定 namespace ↔ 团队码 |
-| `mcp__hub__*` | 独立 Hub MCP server（`hub-mcp/index.js`） | **登录**（设备授权拿 JWT）+ 云端协作操作 |
+| `mcp__hub__*` | 独立 Hub MCP server（`hub-mcp/index.js`） | 云端协作操作（登录能力与内置 `hub_login` 重叠，二选一即可） |
 
 ### 挂载方式（`~/.dsh/profiles/web/cordis.patch.yml`）
 

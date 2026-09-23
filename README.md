@@ -228,10 +228,16 @@ hub_task_sync_failed: status 401 forbidden                 ← 试过了，失�
 ### 怎么打开
 
 ```jsonc
-// 1) 绑定团队（唯一产品真源：namespace metadata）
+// 1) 登录取 JWT（两段式设备码；JWT 落 ~/.agent-hub/config.json）
+//    hub_login({})                 // → code + verification_url
+//    浏览器打开 verification_url 并点 Approve
+//    hub_login({ "code": "<code>" })  // → status=pending_approval 就再调一次；ok 即落盘
+//    hub_list_teams({})            // → 发现你的 4 位 code（需 JWT；只有 API key 会 skipped）
+
+// 2) 绑定团队（唯一产品真源：namespace metadata）
 //    hub_bind_team({ "namespace_id": "insighttutor", "business_code": "z8gw" })
 
-// 2) 提供凭据（env 优先；也可放 {workdir}/.mycompany/hub-client.json）
+// 3) 提供凭据（env 优先；也可放 {workdir}/.mycompany/hub-client.json）
 //    HUB_TOKEN=<Hub JWT>        # 推荐；只有 API key 时部分能力不可用
 //    HUB_BASE_URL=https://hub.stifer.xyz
 ```
@@ -241,7 +247,7 @@ hub_task_sync_failed: status 401 forbidden                 ← 试过了，失�
 ### 边界（照代码写实）
 
 - `~/.agent-hub/config.json` 是 **JWT-only**：它**永远不提供 team code**（否则同机两个 namespace 会争抢同一个团队）。team code 只可能来自 env / namespace metadata / workdir 文件。
-- MCP 工具表里只有 `hub_status` 与 `hub_bind_team` 两个 Hub 工具；**没有 `hub_login` / `hub_list_teams`**，登录需在 Hub 侧完成。
+- MCP 工具表里有四个 Hub 工具：`hub_login`（两段式设备码登录）、`hub_list_teams`（发现团队 code，需 JWT）、`hub_status`、`hub_bind_team`。登录成功后 JWT 落 `~/.agent-hub/config.json`，且**不会**发明 team code。
 - 没有重试队列、没有离线补发、没有顺序保证，也没有 H→L 对账。
 - 完整字段白名单见 [`docs/SYNC_CONTRACT.md`](docs/SYNC_CONTRACT.md)，逐面完成度矩阵见 [`docs/HUB_ALIGNMENT.md`](docs/HUB_ALIGNMENT.md)。
 
@@ -526,7 +532,8 @@ It now combines:
 
 #### Option 3: Agent Hub Multi-host & Multi-agent Collaboration
 Connect with [hub.stifer.xyz](https://hub.stifer.xyz) control plane for team coordination:
-- `hub_login()`: One-click OAuth browser authorization.
+- `hub_login()`: Two-step browser device-code login — no `code` returns a `verification_url` + `code`; calling again with `code` polls until approved, then saves the JWT to `~/.agent-hub/config.json` (JWT-only; no team code is written).
+- `hub_list_teams()`: Discover your team codes. Needs the JWT from `hub_login`; an API key alone returns `skipped`, not `failed`.
 - `hub_bind_team(namespace_id, business_code)`: Bind local workspace with 4-digit team business code.
 - Automatic branch lock prevention, global task board projection, and cross-machine playbook sharing.
 

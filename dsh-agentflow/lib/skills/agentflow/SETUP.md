@@ -281,9 +281,17 @@ CLI 脚本，不靠每轮注入。
 解析顺序：`env` → **namespace** → workdir（**没有 home 团队**）。
 
 ```text
+# JWT 过期/缺失时先登录（两段式设备码，全在 MCP 内完成）
+hub_login({})                                    # → code + verification_url
+# 用浏览器打开 verification_url 并点 Approve
+hub_login({ "code": "<code>" })                  # status=pending_approval 就再调一次；ok 即把 JWT 落到 ~/.agent-hub/config.json
+hub_list_teams({})                               # 发现你的 4 位 code（需 JWT；只有 API key 时返回 skipped）
+
 hub_bind_team({ "namespace_id": "insighttutor", "business_code": "z8gw" })
 hub_status({ "namespace_id": "insighttutor" })  # source=namespace
 ```
+
+`hub_login` 只写 JWT，**永远不会把 team code 写进 home**（home 是 JWT-only）。
 
 多项目 = 多个 namespace 各自绑定，不会抢整机默认团队。  
 详见 `docs/HUB_SOFT_SYNC.md` 与 https://hub.stifer.xyz/agent-setup.md

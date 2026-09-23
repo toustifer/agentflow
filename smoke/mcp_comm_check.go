@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,8 +21,29 @@ func main() {
 	}
 	dbPath := filepath.Join(os.TempDir(), fmt.Sprintf("agentflow-smoke-%d.db", time.Now().UnixNano()))
 	defer os.Remove(dbPath)
+
+	// The Hub credential tools really persist a JWT to <home>/.agent-hub/config.json
+	// on success. Point the child's home at a throwaway dir and its Hub base URL at
+	// a closed loopback port, so the operator's real (machine-wide) credential file
+	// is never read or overwritten and no request can leave the machine. The same
+	// machine's Hub JWT expired on 2026-07-29, so a real request would 401 anyway.
+	homeDir, _ := os.MkdirTemp("", "agentflow-smoke-home-*")
+	defer os.RemoveAll(homeDir)
+
 	cmd := exec.Command(agentflow, "stdio")
-	cmd.Env = append(os.Environ(), "AGENTFLOW_DB_PATH="+dbPath)
+	cmd.Env = smokeEnv(map[string]string{
+		"AGENTFLOW_DB_PATH": dbPath,
+		"HOME":              homeDir,
+		"USERPROFILE":       homeDir,
+		"HUB_BASE_URL":      closedLoopbackURL(),
+		"HUB_TOKEN":         "",
+		"HUB_JWT":           "",
+		"HUB_API_KEY":       "",
+		"HUB_BUSINESS_CODE": "",
+		"HUB_BUSINESS":      "",
+	}, "AGENTFLOW_DB_PATH", "HOME", "USERPROFILE",
+		"HUB_BASE_URL", "HUB_TOKEN", "HUB_JWT", "HUB_API_KEY",
+		"HUB_BUSINESS_CODE", "HUB_BUSINESS")
 	stdin, _ := cmd.StdinPipe()
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
@@ -282,8 +304,61 @@ func main() {
 	t = extract(r)
 	check("backward compat (no actor_role)", t["state"] == "executing", fmt.Sprintf("state=%v", t["state"]))
 
+	// 10. Hub credential tools (hub_login / hub_list_teams) over the real stdio
+	// transport. tools/list must advertise both, with a description that teaches
+	// the two-step device flow; calling them must never produce a JSON-RPC error.
+	send(map[string]any{"jsonrpc": "2.0", "id": 900, "method": "tools/list", "params": map[string]any{}})
+	toolsResp := recv()
+	descriptions := map[string]string{}
+	if result, ok := toolsResp["result"].(map[string]any); ok {
+		if arr, ok := result["tools"].([]any); ok {
+			for _, item := range arr {
+				tool, _ := item.(map[string]any)
+				name, _ := tool["name"].(string)
+				desc, _ := tool["description"].(string)
+				descriptions[name] = desc
+			}
+		}
+	}
+	check("tools/list exposes hub_login", descriptions["hub_login"] != "",
+		fmt.Sprintf("desc=%q", truncateForSmoke(descriptions["hub_login"])))
+	check("tools/list exposes hub_list_teams", descriptions["hub_list_teams"] != "",
+		fmt.Sprintf("desc=%q", truncateForSmoke(descriptions["hub_list_teams"])))
+	check("hub_login description teaches the two-step device flow",
+		strings.Contains(descriptions["hub_login"], "verification_url") &&
+			strings.Contains(descriptions["hub_login"], "pending_approval") &&
+			strings.Contains(descriptions["hub_login"], "Step 1"),
+		"")
+
+	r = toolCall("hub_login", map[string]any{})
+	loginStart := extract(r)
+	check("hub_login({}) callable; unreachable Hub is a soft payload not a JSON-RPC error",
+		loginStart != nil && loginStart["status"] == "failed" && loginStart["_error"] == nil,
+		fmt.Sprintf("%v", loginStart))
+
+	r = toolCall("hub_login", map[string]any{"code": "WDJB-MJHT"})
+	loginFinish := extract(r)
+	check("hub_login({code}) callable; unreachable Hub is a soft payload",
+		loginFinish != nil && loginFinish["status"] == "failed" && loginFinish["_error"] == nil,
+		fmt.Sprintf("%v", loginFinish))
+
+	r = toolCall("hub_list_teams", map[string]any{})
+	listTeams := extract(r)
+	check("hub_list_teams({}) skips without a JWT and points at hub_login",
+		listTeams != nil && listTeams["status"] == "skipped" &&
+			strings.Contains(fmt.Sprint(listTeams["hint"]), "hub_login"),
+		fmt.Sprintf("%v", listTeams))
+
 	stdin.Close()
 	cmd.Wait()
+
+	// The device-flow smoke must not have written any real credential file: the
+	// child's home was a temp dir and it is now checked empty of .agent-hub.
+	if _, err := os.Stat(filepath.Join(homeDir, ".agent-hub", "config.json")); err == nil {
+		check("smoke home stays free of a saved JWT", false, "unexpected token file in the sandbox home")
+	} else {
+		check("smoke home stays free of a saved JWT", true, "no ~/.agent-hub/config.json written")
+	}
 
 	fmt.Printf("\n==============================\n")
 	fmt.Printf("Results: %d PASS, %d FAIL of %d\n", pass, fail, pass+fail)
@@ -292,6 +367,48 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("ALL TESTS PASSED!")
+}
+
+// smokeEnv renders the child environment: everything inherited except the listed
+// keys, which are replaced (or blanked) by extra. Windows does not reliably
+// dedupe duplicate variable names, so the inherited copies are dropped first.
+func smokeEnv(extra map[string]string, drop ...string) []string {
+	dropped := map[string]bool{}
+	for _, k := range drop {
+		dropped[strings.ToUpper(k)] = true
+	}
+	out := make([]string, 0, len(os.Environ())+len(extra))
+	for _, kv := range os.Environ() {
+		key, _, ok := strings.Cut(kv, "=")
+		if ok && dropped[strings.ToUpper(key)] {
+			continue
+		}
+		out = append(out, kv)
+	}
+	for k, v := range extra {
+		out = append(out, k+"="+v)
+	}
+	return out
+}
+
+// closedLoopbackURL returns a http:// URL on a port that is known to be closed,
+// so any request against it fails fast with ECONNREFUSED instead of hanging.
+func closedLoopbackURL() string {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "http://127.0.0.1:1"
+	}
+	addr := listener.Addr().String()
+	_ = listener.Close()
+	return "http://" + addr
+}
+
+// truncateForSmoke keeps a PASS/FAIL detail line short.
+func truncateForSmoke(s string) string {
+	if len(s) > 60 {
+		return s[:60] + "..."
+	}
+	return s
 }
 
 func runGit(dir string, args ...string) {

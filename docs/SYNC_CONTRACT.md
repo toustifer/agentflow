@@ -76,7 +76,7 @@ env HUB_BUSINESS_CODE | HUB_BUSINESS
 
 ### 2.6 鉴权是顾问，不是门闸
 
-`EnsureMembership` 的结果**被忽略**（`_ = c.EnsureMembership(ctx)`）：探针失败也继续尝试写入，真正的 enforcer 是 Hub 服务端。本地任务永远照常推进。`ListMyTeams` 是唯一的例外——它需要 JWT，只有 API key 时返回 `StatusSkipped`。
+`EnsureMembership` 的结果**被忽略**（`_ = c.EnsureMembership(ctx)`）：探针失败也继续尝试写入，真正的 enforcer 是 Hub 服务端。本地任务永远照常推进。`ListMyTeams`（MCP：`hub_list_teams`，见 §4.5）是唯一的例外——它需要 JWT，只有 API key 时返回 `StatusSkipped` 且**零出网**。
 
 ---
 
@@ -171,14 +171,40 @@ hub_branch_report_disabled: HUB_SYNC/HUB_ENABLED off
 hub_branch_report_failed: status 403 forbidden
 hub_branch_report_skipped: empty branch
 hub_auth_skipped / hub_auth_ok / hub_auth_failed: ...
-hub_list_teams_ok: N teams / hub_list_teams_skipped: ...
+hub_list_teams_ok: N teams / hub_list_teams_skipped: not logged in — call hub_login first
+hub_list_teams_failed: status 401 <message>
+hub_login_start_ok: <user code> / hub_login_start_disabled: HUB_SYNC/HUB_ENABLED off
+hub_login_start_failed: status <code> <message> / hub_login_start_failed: <transport error>
+hub_login_finish_ok: token saved to ~/.agent-hub/config.json
+hub_login_finish_skipped: pending approval — open verification URL and click Approve
+hub_login_finish_failed: status <code> <message> / hub_login_finish_failed: <transport error>
 ```
 
-op token 只有这五个：`task_sync`、`branch_report`、`auth`、`list_teams`、`login`。
+op token 只有这六个：`task_sync`、`branch_report`、`auth`、`list_teams`、`login_start`、`login_finish`。
+
+> `login_start` / `login_finish` 是**两个** op，不是笼统的 `login`：开始设备码与轮询取件是两条独立的路由（`POST /v1/hub/auth/device` / `GET /v1/hub/auth/device/token`），失败时要能分辨是哪一步坏了。由 `pkg/hub/login_test.go` 钉住。
 
 ### 4.4 未接线的旧 seam（诚实说明）
 
 `task_get` / `task_list` / `task_history` / `task_worker_sync` / `namespace_create` / `namespace_update` / `project_init` / `flow_ping` 走的是进程内的 `pkg/server.HubSyncer` seam（`noopHubSyncer`），它**只在 `Config.HubEnabled` 为 true 时被装上，而 `cmd/agentflow` 从不设置该字段**。因此这些工具**今天零 Hub I/O**。它们与真正的 `pkg/hub` 客户端是两条不同的路径，别把它们当成已接线。
+
+### 4.5 凭据类工具（不参与任务投影）
+
+`pkg/server/hub_login_tools.go` 暴露两个**凭据**入口。它们不投影任何任务、不写 SQLite，唯一的持久化副作用是 `hub_login` 成功时把 JWT 写进 `~/.agent-hub/config.json`。
+
+| MCP 工具 | 端点 | 入参 | payload 关键字段 |
+|----------|------|------|------------------|
+| `hub_login`（`step=start`） | `POST /v1/hub/auth/device` | 无（`code` 缺省） | `status=pending_approval`、`code`、`verification_url`、`expires_in`、`approved=false` |
+| `hub_login`（`step=finish`） | `GET /v1/hub/auth/device/token?code=` | `code` | 未批准 ⇒ `status=pending_approval`（**不是** `failed`）；成功 ⇒ `status=ok`、`logged_in=true`、`token_saved=true`、`business_code=""`、`home_config_jwt_only=true` |
+| `hub_list_teams` | `GET /v1/hub/me/businesses` | 可选 `namespace_id` / `workdir` | `status`、`count`、`teams[]`、`has_jwt`、`has_api_key` |
+
+三条硬约束：
+
+1. **`pending_approval` 不是失败。** `202 Accepted`、`{"status":"pending"}`、以及 200-但无 token 三种情形都映射成可反复重试的 `pending_approval`，`hint` 里带着原 `code`。
+2. **JWT 绝不回显。** 工具返回值里没有 token 字段（SYNC_CONTRACT §3.3），也不发明 team code —— home 保持 JWT-only（§2.4）。
+3. **API key 不能列团队。** 只有 `HUB_API_KEY` 时 `hub_list_teams` 返回 `status=skipped`，并在 `hint` 里点名 `hub_login`；**零出网**（请求根本不发）。
+
+`hub_login` / `hub_list_teams` 的入参全部可选，且 `namespace_id` / `workdir` 只影响**用哪一层配置去解析 base URL 与凭据**，不影响投影行为。验证：`go test -count=1 -run "HubLogin|HubListTeams" -v ./pkg/server/`（全部 `httptest`，`HOME` 被重定向到 `t.TempDir()`）。
 
 ---
 
@@ -196,10 +222,10 @@ op token 只有这五个：`task_sync`、`branch_report`、`auth`、`list_teams`
 |-------------|------|----------|
 | `POST /v1/hub/dag/{code}` | 任务行 UPSERT | §4.1 四个触发点 |
 | `POST /v1/hub/repos/{code}/branches/report` | 分支 tip + 绑定 | 仅 `task_prepare_start` |
-| `GET /v1/hub/me/businesses` | `EnsureMembership` 探针（JWT）、`ListMyTeams` | 每次投影前（探针，结果被忽略） |
+| `GET /v1/hub/me/businesses` | `EnsureMembership` 探针（JWT）、`ListMyTeams`（`hub_list_teams`） | 每次投影前（探针，结果被忽略）；以及显式调用 `hub_list_teams` 时 |
 | `GET /v1/hub/dag/{code}` | `EnsureMembership` 探针（API key） | 同上 |
-| `POST /v1/hub/auth/device` | 设备码登录开始 | **无 MCP 工具调用它**（见 §7） |
-| `GET /v1/hub/auth/device/token?code=` | 设备码登录完成 | 同上 |
+| `POST /v1/hub/auth/device` | 设备码登录开始 | `hub_login({})`（`step=start`） |
+| `GET /v1/hub/auth/device/token?code=` | 设备码登录完成（轮询一次） | `hub_login({code})`（`step=finish`） |
 
 请求超时 `5s`（`pkg/hub.defaultTimeout`），响应体上限 1 MiB。
 
@@ -209,7 +235,7 @@ op token 只有这五个：`task_sync`、`branch_report`、`auth`、`list_teams`
 
 1. **没有 H→L**：不拉 Hub 状态，不做双向对账。
 2. **没有重试/补偿**（见 §5）。
-3. **登录与团队列表没有 MCP 工具**：`pkg/hub/login.go` 的设备码流程与 `ListMyTeams` 有实现、有单测，但 master 的 MCP 工具表里**只有 `hub_status` 与 `hub_bind_team`**——没有 `hub_login`，也没有 `hub_list_teams`。JWT 需要由 Hub 侧自己的登录入口写进 `~/.agent-hub/config.json`。
+3. **登录与团队列表只有 `httptest` 验证，没有对生产 Hub 跑通**：`hub_login`（设备码两段式）与 `hub_list_teams` 已是 MCP 工具（§4.5），走 `pkg/hub` 的真实实现；但本机 JWT 于 2026-07-29 过期，真实请求必 401，因此两个工具只在 `httptest` 假 Hub 上被验证过。**"能刷新过期 JWT" 这件事尚未在真机端到端证明**。
 4. **未对生产 Hub 做过端到端验证**：本机凭据已于 2026-07-29 过期，任何真实请求都会 401。本次全部验证使用 `net/http/httptest`；`hub.stifer.xyz` **零访问**。
 5. **`repo_url` 未上报**（留空）。
 6. **旧联邦分支那一代 API 未复引入**：`hub.BindTeam` 与旧分支的 `StatusSnapshot` 语义没有回来；master 的等价物是 `BindNamespaceTeam` 与 `SnapshotForNamespace`（`StatusSnapshot` 类型本身是 master 自己的）。

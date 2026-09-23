@@ -13,8 +13,8 @@
 | **团队绑定**（namespace ↔ team） | 无网络（本地 metadata + workdir 文件） | `hub.ResolveBusinessCode` / `BindNamespaceTeam` / `SnapshotForNamespace` | ✅ `hub_bind_team`、`hub_status` | ✅ 已接线（master 既有） | **完整**。写入 `namespaces.metadata["hub.business_code"]`，同时镜像到 `{workdir}/.mycompany/hub-client.json`，并清理 home 里遗留的 legacy team code |
 | **任务大盘投影** | `POST /v1/hub/dag/{code}` | `hub.SyncTask` | 无（由生命周期自动触发） | ✅ **本次接线**（4 个触发点） | **soft 投影可用**；无重试、无顺序保证（`docs/SYNC_CONTRACT.md` §5） |
 | **分支上报 / 防撞车** | `POST /v1/hub/repos/{code}/branches/report` | `hub.ReportBranch` | 无（自动触发） | ✅ **本次接线**（仅 `task_prepare_start`） | **soft 上报可用**；`repo_url` 留空；不含 worktree 路径，只有 `os.Hostname()` |
-| **登录 / 凭据** | `POST /v1/hub/auth/device`、`GET /v1/hub/auth/device/token?code=` | `hub.StartDeviceLogin` / `FinishDeviceLogin`（JWT 落 `~/.agent-hub/config.json`） | ❌ **没有 `hub_login` 工具** | ⚠️ 库内实现 + 单测，**未接线** | 需要由 Hub 侧自己的登录入口获取 JWT；agentflow 这边今天不会替你登录 |
-| **团队成员列表** | `GET /v1/hub/me/businesses` | `hub.ListMyTeams` | ❌ **没有 `hub_list_teams` 工具** | ⚠️ 库内实现 + 单测，**未接线** | 需要 JWT；**只有 API key 时返回 `StatusSkipped`**（`hub_list_teams_skipped: ...`），不会降级成别的凭据 |
+| **登录 / 凭据** | `POST /v1/hub/auth/device`、`GET /v1/hub/auth/device/token?code=` | `hub.StartDeviceLogin` / `FinishDeviceLogin`（JWT 落 `~/.agent-hub/config.json`） | ✅ **`hub_login`（两段式）** | ✅ 已接线（`dag-hub-login-and-mcp`） | **完整**。`hub_login({})` 返回 `code` + `verification_url`；浏览器点 Approve 后 `hub_login({code})` 轮询一次。未批准 = `pending_approval`（**不是** `failed`），可反复轮询；成功才落盘 JWT，**不发明 team code**（home 保持 JWT-only） |
+| **团队成员列表** | `GET /v1/hub/me/businesses` | `hub.ListMyTeams` | ✅ **`hub_list_teams`** | ✅ 已接线（`dag-hub-login-and-mcp`） | **完整**。需要 JWT；**只有 API key 时返回 `skipped`（不是 `failed`）且零出网**，`hint` 指向 `hub_login`；用于发现 `hub_bind_team` 要用的 4 位 code |
 | **成员资格校验** | `GET /v1/hub/me/businesses`（JWT）/ `GET /v1/hub/dag/{code}`（API key） | `hub.EnsureMembership` | 无（内部探针） | ✅ 随投影一起跑 | **顾问而非门闸**：结果被忽略，探针失败也继续写；**冷缓存 = 1 探针 + 1 写** |
 | 本地快照 / 诊断 | 无 | `hub.SnapshotForNamespace` | ✅ `hub_status` | ✅ 已接线 | 报告 code + source（env/namespace/workdir）+ legacy home code |
 | 消费 Hub 侧状态（H→L） | — | — | — | ❌ **不做** | 单向投影是设计决定，不是缺口 |
@@ -32,6 +32,13 @@
 
 **未接线**（走旧的进程内 `HubSyncer` seam，且 `cmd/agentflow` 从不设置 `Config.HubEnabled` ⇒ 今天零 I/O）：
 `task_get`、`task_list`、`task_history`、`task_worker_sync`、`namespace_create`、`namespace_update`、`project_init`、`flow_ping`。
+
+**凭据类工具（不参与任务投影）**：
+
+| MCP 工具 | 入参 | 出网 | 说明 |
+|----------|------|------|------|
+| `hub_login` | 全可选 `code` / `namespace_id` / `workdir` | `POST /v1/hub/auth/device` → `GET /v1/hub/auth/device/token` | 两段式设备码登录；`code` 缺省 = 开始，带 `code` = 轮询一次 |
+| `hub_list_teams` | 全可选 `namespace_id` / `workdir` | `GET /v1/hub/me/businesses` | 需 JWT；API key-only ⇒ `skipped` + 零出网 |
 
 ---
 
@@ -64,12 +71,13 @@
 1. **没有对生产 Hub 做过任何验证。** 全部用 `httptest`；`hub.stifer.xyz` 零访问。凭据 2026-07-29 过期，真打必 401。
 2. **没有重试 / 离线补发**：`failed` 之后要到该任务的下一次生命周期事件才会重试。
 3. **没有顺序保证**：Hub 侧 UPSERT 不比较版本，乱序旧快照可能覆盖新快照。
-4. **`hub_login` / `hub_list_teams` 没有 MCP 工具**：登录设备码流程与 `ListMyTeams` 只是库代码。
+4. **登录 / 团队列表已接线，但仅限 `httptest` 验证**：`hub_login` / `hub_list_teams` 走的是 `pkg/hub` 的真实实现（设备码流程 + `/me/businesses`），但只对 `httptest` 假 Hub 跑过；生产 Hub 的登录从未在本机跑通（见第 1 条）。
 5. **`repo_url` 未上报**（留空）。
 6. **无 H→L**：不拉取、不对账、不解决冲突。
 7. **旧的 `BindTeam` / `StatusSnapshot` 那一代没有复引入**：master 的 `BindNamespaceTeam` / `SnapshotForNamespace` 取代了它们；`hub.BindTeam` 会往 home 写 team code，与 JWT-only home 不变量冲突。`pkg/hub/bind.go` 里今天确实有 `StatusSnapshot` 类型，但那是 master 自己的本地快照结构，不是旧联邦分支那一代。
-8. **`pkg/hub` 客户端里的 `login.go` / `teams.go` 在生产路径上没有被任何 MCP 工具调用**（见上）。
+8. **`hub_login` 的轮询是一次一拍，没有内部等待/退避**：MCP 调用返回 `pending_approval` 后由**调用方**决定何时再调；服务端没有后台 loop，也没有超时自动放弃。
 9. **分支上报只发生在 `task_prepare_start`**：worker 在 worktree 里 commit 之后**不会**自动上报新 tip；新 tip 只通过任务投影的 `head_sha` 体现。
+10. **`hub_login` 不支持自选 token 写入位置**：永远写 `~/.agent-hub/config.json`（可用 `HOME`/`USERPROFILE` 重定向，仅测试这么做）。
 
 ---
 
@@ -92,11 +100,22 @@
 # 投影接线 + soft-fail + 默认关闭（全部 httptest，零真实出网）
 go test -count=1 -run "Projection|TaskGitRefs|PreferReviewTip" ./pkg/server/
 
-# 客户端本体
+# 凭据工具：hub_login 两段式 + hub_list_teams（全部 httptest，隔离 HOME）
+go test -count=1 -run "HubLogin|HubListTeams" -v ./pkg/server/
+
+# 客户端本体（51 个顶层用例）
 go test -count=1 ./pkg/hub/
 
 # 依赖方向
 git grep -n "pkg/hub" -- pkg/engine    # 必须为空
+
+# MCP stdio 烟测（含 hub_login / hub_list_teams 的 tools/list + 调用）
+go build -o $env:TEMP\agentflow.exe ./cmd/agentflow/
+$env:AGENTFLOW_BIN = "$env:TEMP\agentflow.exe"
+go run smoke/mcp_comm_check.go      # 41 PASS
+go run smoke/mcp_ndjson_check.go    # 7 PASS
 ```
 
-四重门禁（pytest 142 / Go 全量单测 / MCP stdio 烟测 34 PASS + NDJSON 7 PASS / pack-skill）见交付报告。
+四重门禁（pytest 142 / Go 全量单测 / MCP stdio 烟测 41 PASS + NDJSON 7 PASS / pack-skill）见交付报告。
+
+> 烟测脚本会把被测进程的 `HOME`/`USERPROFILE` 指向临时目录、`HUB_BASE_URL` 指向一个**已关闭的环回端口**，所以 `hub_login` 即使在烟测里也不可能写到你真实的 `~/.agent-hub/config.json`，也不会有任何请求出网。

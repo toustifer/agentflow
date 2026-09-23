@@ -78,8 +78,26 @@ func truncateReviewDiff(diff, base, branch string) string {
 }
 
 type ToolSpec struct {
-	Name        string         `json:"name"`
+	Name string `json:"name"`
+	// Description is the model-facing usage note. It is omitted for the tools
+	// whose semantics are obvious from the name and schema; the Hub credential
+	// tools set it because their two-phase flow is not guessable from the input.
+	Description string         `json:"description,omitempty"`
 	InputSchema map[string]any `json:"inputSchema"`
+}
+
+// toolDescriptions carries the model-facing usage note for tools whose calling
+// convention is not self-evident. Keyed by tool name.
+var toolDescriptions = map[string]string{
+	"hub_login": "Log in to agent-hub with the browser device-code flow (two steps). " +
+		"Step 1: call with no arguments — returns `code` + `verification_url`. " +
+		"Step 2: open verification_url in a browser and click Approve, then call again with `code` set. " +
+		"An unapproved code returns status `pending_approval` (NOT an error) — call again with the same code until it returns `ok`. " +
+		"On success the JWT is saved to ~/.agent-hub/config.json, which stays JWT-only: no team code is written. " +
+		"Use this whenever hub_list_teams reports status `skipped` or a Hub call fails with 401. Optional `namespace_id`/`workdir` only affect which Hub URL is contacted.",
+	"hub_list_teams": "List the agent-hub teams the logged-in user belongs to (GET /v1/hub/me/businesses), so you can pick the 4-char business_code for hub_bind_team. " +
+		"Requires the JWT from hub_login: an API key alone returns status `skipped` (never `failed`) with a hint to call hub_login first. " +
+		"Needs no business_code of its own. Optional `namespace_id`/`workdir` only affect which credential layers are consulted.",
 }
 
 func (s *Server) Tools() []ToolSpec {
@@ -91,6 +109,8 @@ func (s *Server) Tools() []ToolSpec {
 		{Name: "namespace_list"},
 		{Name: "hub_status"},
 		{Name: "hub_bind_team"},
+		{Name: "hub_login"},
+		{Name: "hub_list_teams"},
 		{Name: "task_create"},
 		{Name: "task_prepare_start"},
 		{Name: "task_transition"},
@@ -150,6 +170,7 @@ func (s *Server) Tools() []ToolSpec {
 		{Name: "flow_ping"},
 	}
 	for i := range tools {
+		tools[i].Description = toolDescriptions[tools[i].Name]
 		tools[i].InputSchema = toolInputSchema(tools[i].Name)
 	}
 	return tools
@@ -192,6 +213,12 @@ func toolInputSchema(name string) map[string]any {
 	case "hub_bind_team":
 		add("namespace_id", "business_code", "workdir")
 		required = []string{"namespace_id", "business_code"}
+	case "hub_login":
+		// Both optional by design: no `code` starts the device flow, `code`
+		// finishes (polls once) it. `namespace_id`/`workdir` only pick the Hub URL.
+		add("code", "namespace_id", "workdir")
+	case "hub_list_teams":
+		add("namespace_id", "workdir")
 	case "namespace_get", "dag_list", "worker_list", "project_next_tasks", "project_blockers", "project_report":
 		add("namespace_id")
 		required = []string{"namespace_id"}
@@ -422,6 +449,10 @@ func (s *Server) Handle(ctx context.Context, tool string, input map[string]any) 
 		return s.handleHubStatus(ctx, input)
 	case "hub_bind_team":
 		return s.handleHubBindTeam(ctx, input)
+	case "hub_login":
+		return s.handleHubLogin(ctx, input)
+	case "hub_list_teams":
+		return s.handleHubListTeams(ctx, input)
 	case "task_create":
 		result, err := s.handleTaskCreate(ctx, input)
 		if err != nil {
