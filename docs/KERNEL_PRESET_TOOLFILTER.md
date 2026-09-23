@@ -216,5 +216,87 @@ Copy-Item -LiteralPath "C:\Users\15775\.dsh\.agent-presets\agentflow-leader\agen
 ## 6. 相关但不属于本次改动
 
 - `agentflow-dev-leader`（`agentflow-dev-leader\agent.cordis.yml`，共 202 行）：同样三个委派工具、**无 `toolFilter`**（实测计数 0）—— 已知可用形态，**本次未改动**，也**不应**改动。
-- `spawn_worker_alt` 的 `agentOptions: { provider: a6api, model: gemini-3.8-flash }`：已在 `~/.dsh/settings.yaml` 只读核实 —— provider `a6api` 定义在第 **74** 行，model `gemini-3.8-flash` 定义在第 **90** 行 —— **两者都存在，该块保留，未删**。
+- `spawn_worker_alt` 的 `agentOptions: { provider: a6api, model: gemini-3.8-flash }`：已在 `~/.dsh/settings.yaml` 只读核实 —— provider `a6api` 定义在第 **74** 行，model `gemini-3.8-flash` 定义在第 **90** 行 —— **两者都存在，该块保留，未删**。（此条描述的是第 3 节当时的现场；该钉**已被第 7 节取代**。）
 - `~/.dsh/settings.yaml`：**本次未改动**。
+
+---
+
+## 7. `spawn_worker_alt` 回退钉改指 `cliproxy-google / kr/deepseek-v4.1-flash`
+
+> 任务：`task-1-alt-pin-kr`（DAG `dag-alt-worker-pin-kr`，P1）
+> 改动文件（**仓外**，不在本仓库）：`C:\Users\15775\.dsh\.agent-presets\agentflow-leader\agent.cordis.yml`
+> 仓库内**没有**承载该改动的文件；本节即为本次改动的归档记录（与第 3 节同一惯例）。
+
+### 7.1 为什么改
+
+`spawn_worker_alt` 是 Worker 的**模型回退通道**。它原先静态钉在 `a6api / gemini-3.8-flash`，而该组合已被移出 `~/.dsh/settings.yaml` 的 `subagent-model-selection.allowedModels` —— 原钉法钉在一条**不在白名单上的路由**上。
+
+用户指示改钉 `cliproxy-google / kr/deepseek-v4.1-flash`（`name: DS V4.1 Flash (首尔中转)`）。该组合**本就在白名单里**，因此无论 `allowedModels` 是否约束工具定义里的 `agentOptions` 静态钉，都不再有「钉到未授权路由」的隐患。
+
+### 7.2 改前核实：路由存在 + 白名单命中
+
+全部为**只读 grep**，`settings.yaml` 全程未改动（改动前后 sha256 均为 `FB9D3E0E177358F823414FDB9290818ED69B3ECEE8996EB9CB657440839EA67C`，8030 字节）：
+
+| 证据 | 行号 | 原文 |
+| --- | --- | --- |
+| provider 定义 | **11** | `    cliproxy-google:` |
+| model 定义（同 provider 块内） | **69** | `        - id: kr/deepseek-v4.1-flash` |
+| model 显示名 | **70** | `          name: DS V4.1 Flash (首尔中转)` |
+| 白名单块 | **219** | `  allowedModels:` |
+| 白名单命中（provider 228 / model 229） | **228–229** | `    - provider: cliproxy-google` / `      model: kr/deepseek-v4.1-flash` |
+
+补充事实（第 7.5 节引用）：`settings.yaml` 第 **3–5** 行 `agent-default-model` 正是 `provider: cliproxy-google` / `model: kr/deepseek-v4.1-flash`。
+
+### 7.3 本次改动（仓外 preset）
+
+备份：`C:\Users\15775\.dsh\.agent-presets\agentflow-leader\agent.cordis.yml.bak-20260923150530`
+备份 sha256：`56F7CEBE075CC9456B0D04AA492E7A4F6CA6E150E0E59E0BE174BDC3AF1954EE`（33253 字节 / 473 行）
+
+`git diff --no-index --numstat <bak> <live>` = `8  2`（**+8 / −2**），全文 diff 只含三处：
+
+1. 第 370–375 行：**新增 6 行注释**（当前口径 + 路由多样性事实说明）；
+2. `agentOptions.provider`：`a6api` → `cliproxy-google`；
+3. `agentOptions.model`：`gemini-3.8-flash` → `kr/deepseek-v4.1-flash`（**斜杠是字面量**，无引号、无转义）。
+
+**主力通道未被触碰**：`tool-subagent-worker`（`toolName: spawn_worker`，第 309–375 行）块内 `^\s*agentOptions:` **计数为 0**（唯一命中是第 361 行那条注释里的散文字样）。主力保持「不钉、跟随会话默认」。
+
+**上一轮的修复未被回退**：两个 `toolFilter.deny` 各仍为 5 项（`workflow` / `ralph` / `send_message` / `interrupt_agent` / `list_agents`），`subagent` / `subagent_fork` **未**被加回。
+
+### 7.4 验证证据（本次交付实测）
+
+| 检查 | 命令 | 结果 |
+| --- | --- | --- |
+| YAML 解析（Node `yaml` 2.9.1，DSH 自带） | `node %TEMP%\preset_yaml_probe_altpin.mjs <bakcopy> <candidate>`（显式声明 preset 自带的 `!!js` 自定义标签） | 备份与候选均 `YAML_PARSE_ERRORS=0`，`PARSED_TOP_LEVEL_KEYS=16`，exit 0 |
+| YAML 解析（Python `yaml`，tag-tolerant `SafeLoader`） | `python %TEMP%\ac_validate_altpin.py <bakcopy> <candidate>` | 双边 `YAML_PARSE_ERRORS=0`，`TOTAL_YAML_ERRORS=0`，exit 0 |
+| `toolFilter:` 计数 | 文本正则 + 结构化遍历（`walk()` 找所有含 `toolFilter` 的 dict） | 文本 `2` / 结构化 `2`，路径 `(12,'config',4,'config')` 与 `(12,'config',5,'config')` |
+| 两个 `deny` 列表 | 结构化读取 + 块内文本读取（双重） | 各 `5` 项，且 == 保留的 5 项 |
+| 主力块无静态钉 | 行区间切片（309..375）内 `^\s*agentOptions:` 正则计数 | `0` |
+| 注释行数变化 | `^\s*#` 计数 | `152` → `158`，`+6` == 新增注释行数，`comment_lines_equal = (158-152 == 6)` |
+| 字节/行数/换行 | 字节读取 | `33253` → `33711`（`+458`）；`473` → `479`（`+6`）；`CRLF=0`、`LF_ONLY`、尾部换行为 `True` —— 行尾风格未变 |
+| 落地一致性 | 替换后对 live 与候选各取 sha256 | `A05FBF9EC29952F7566DE9CDFC436B4CBD8FBC74D5FD9FE06DE0BA202824E64B`，`BITWISE_IDENTICAL=True` |
+
+> ⚠️ 同第 4 节：`dsh` **没有**校验 agent preset 的子命令，「改动是否生效」只能靠 YAML 解析 + 结构 diff + **重启后开新会话确认**。本次**未重启任何进程**（用户开新会话后生效）。
+
+### 7.5 必须知情的事实：本通道**不提供路由多样性**
+
+- 本部署的会话默认模型（`settings.yaml` 第 3–5 行 `agent-default-model`）就是 `cliproxy-google / kr/deepseek-v4.1-flash`。
+- 而 `spawn_worker_alt` 现在也钉在这一条路由上。**当会话默认模型是这条路由时，主力与回退走的是同一条路**：该路配额耗尽时，`spawn_worker_alt` 与主力同时失效，切换过去救不了场。
+- 也就是说：本次改动解决的是「钉到未授权路由」，**没有**解决「回退通道与主力共享配额」。要恢复真正的回退能力，需要把钉指到一条**与当前会话默认模型不同**的白名单路由（例如 `cliproxy-google / gemini-3.8-flash-high` 或 `cliproxy-google / grok-4.7`）—— 这**不在本任务范围**，此处仅记录事实。
+
+### 7.6 回滚步骤
+
+```powershell
+Copy-Item -LiteralPath "C:\Users\15775\.dsh\.agent-presets\agentflow-leader\agent.cordis.yml.bak-20260923150530" -Destination "C:\Users\15775\.dsh\.agent-presets\agentflow-leader\agent.cordis.yml" -Force
+```
+
+回滚后校验：sha256 应为 `56F7CEBE075CC9456B0D04AA492E7A4F6CA6E150E0E59E0BE174BDC3AF1954EE`，字节数应为 `33253`。
+
+回滚演练已实测：把备份复制到 `%TEMP%\altpin_rollback_drill.yml` 比对 sha256，与备份一致（`ROLLBACK_DRILL_MATCH=True`，两边均 33253 字节），证明该命令可用且备份完好。
+
+### 7.7 本次未改动（明确边界）
+
+- `agentflow-dev-leader` 与其它 preset：**未改动**。
+- 主力 `spawn_worker` 通道（`toolFilter`、persona、config）：**未改动**。
+- `~/.dsh/settings.yaml`：**未改动**（只读 grep）。
+- 本仓库内 `skills/agentflow/agents/agentflow-leader/agent.cordis.yml` 及其 `dsh-agentflow/src|lib` 镜像：**未改动**。这些镜像与仓外 live preset **早已不同步**（镜像里 `agentOptions` 仍是更早的 `opencode2 / glm-5.3-flash`，两个 `deny` 仍是 7 项，且缺少第 3–6 节记录的 `modelSelectionSettings` / `thresholdRatio` 等修复）—— 按第 3 节先例，仓外 preset 的改动**只在本节归档**，不向镜像回写，以免把无关的历史差异一并卷进本次提交。
+- 无任何进程被启动或终止；未覆写任何运行中的二进制。
