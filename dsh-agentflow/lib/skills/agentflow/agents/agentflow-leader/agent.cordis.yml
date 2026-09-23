@@ -316,6 +316,11 @@
         # 缺这一行时 settings.yaml 里的白名单会静默失效（DSH 在该 flag 未开时直接把策略置为
         # undefined，不报错也不生效），于是 Leader 无法为 Worker 指定模型。
         modelSelectionSettings: true
+        # 强制钉死 Worker 默认走本地 CPA 的 Gemini 3.8 Flash High，彻底排除 NVIDIA。
+        # 避免 Worker 继承父会话选取的 NVIDIA 模型而撞上 120s 导致整轮任务猝死。
+        agentOptions:
+          provider: cliproxy-google
+          model: gemini-3.8-flash-high
         persona: |-
           You are a domain Worker in an agentflow-managed multi-agent team, powered by the {{model}} model. Your working directory is {{cwd}}.
 
@@ -381,7 +386,7 @@
         backgroundMode: continuable
         agentOptions:
           provider: cliproxy-google
-          model: kr/deepseek-v4.1-flash
+          model: gemini-3.8-flash-high
         persona: |-
           You are a domain Worker in an agentflow-managed multi-agent team, powered by the {{model}} model. Your working directory is {{cwd}}.
 
@@ -477,3 +482,4 @@
   config:
     fetch: false
     searchTimeoutMs: 60000
+

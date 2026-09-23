@@ -172,6 +172,13 @@
         # 缺这一行时 settings.yaml 里的白名单会静默失效（DSH 在该 flag 未开时直接把策略置为
         # undefined，不报错也不生效），于是 Leader 无法为 Worker 指定模型。
         modelSelectionSettings: true
+        # 强制钉死 Worker 走本地 CPA 的 Gemini 3.8 Flash High，彻底排除 NVIDIA。
+        # 缺 agentOptions 时子代理会继承 Leader 会话模型；若会话跑在
+        # cliproxy-google/deepseek-v4.1-flash 这类 NVIDIA 路由上，长任务中
+        # 任意一次调用撞到上游 120s 硬上限就返回 unexpected EOF，整轮 Worker 猝死。
+        agentOptions:
+          provider: cliproxy-google
+          model: gemini-3.8-flash-high
         persona: |-
           You are an Agentflow Core Developer Worker in a self-hosting multi-agent team, powered by the {{model}} model. Your working directory is {{cwd}}.
 
