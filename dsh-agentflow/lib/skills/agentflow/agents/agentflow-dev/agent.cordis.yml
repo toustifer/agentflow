@@ -110,6 +110,11 @@
   config:
     - id: compaction-basic
       name: '@deepseek-ai/dsh-compaction-basic'
+      config:
+        # 压缩触发点：已路由上下文窗口的 35%（1M 窗口 => 367k token）。
+        # 不用默认的 0.8：那要涨到 838k 才开始压，而上游摘要请求本身要驮着
+        # 被压掉的那段历史再跑一次，越晚压、单次摘要越重。35% 留足 3 倍余量。
+        thresholdRatio: 0.35
 
     - id: command-compact
       name: '@deepseek-ai/dsh-command-compact'

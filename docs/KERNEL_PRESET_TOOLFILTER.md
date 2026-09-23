@@ -300,3 +300,24 @@ Copy-Item -LiteralPath "C:\Users\15775\.dsh\.agent-presets\agentflow-leader\agen
 - `~/.dsh/settings.yaml`：**未改动**（只读 grep）。
 - 本仓库内 `skills/agentflow/agents/agentflow-leader/agent.cordis.yml` 及其 `dsh-agentflow/src|lib` 镜像：**未改动**。这些镜像与仓外 live preset **早已不同步**（镜像里 `agentOptions` 仍是更早的 `opencode2 / glm-5.3-flash`，两个 `deny` 仍是 7 项，且缺少第 3–6 节记录的 `modelSelectionSettings` / `thresholdRatio` 等修复）—— 按第 3 节先例，仓外 preset 的改动**只在本节归档**，不向镜像回写，以免把无关的历史差异一并卷进本次提交。
 - 无任何进程被启动或终止；未覆写任何运行中的二进制。
+
+## 8. 后续：镜像已对齐（关闭第 7.7 节遗留项）
+
+第 7.7 节记录的"仓库镜像与仓外 live preset 早已不同步"已在后续提交中**收敛**：
+`skills/agentflow/agents/{agentflow-leader,agentflow-worker,agentflow-dev,agentflow-dev-leader}/agent.cordis.yml`
+及其 `dsh-agentflow/src|lib` 两份副本已**逐字节对齐** live preset
+（4 对 sha256 全等；leader 479 行、worker 244 行、dev 148 行、dev-leader 202 行）。
+第 3–6 节与第 7 节对仓外 preset 的改动现已随镜像一并进入仓库。
+
+- 镜像的**唯一**生成机制：`dsh-agentflow/scripts/copy-skill.mjs`
+  （由 `dsh-agentflow/package.json` 的 `postbuild` 与 `pretest` 调用），
+  把 `skills/agentflow` 递归复制到 `dsh-agentflow/src/skills/agentflow` 与
+  `dsh-agentflow/lib/skills/agentflow`。**改 preset 请只改 `skills/agentflow/`，
+  然后跑一次 `node dsh-agentflow/scripts/copy-skill.mjs` 再提交。**
+- 注意：`scripts/sync-skill.ps1` **不同步 preset**（只管 `bt_service` / `trees` /
+  `requirements.txt`），所以 preset 与 `~/.dsh/.agent-presets/` 之间**没有自动同步**，
+  必须靠装后 sha256 校验兜底 —— 见
+  [`dsh-setup.md` §六](./dsh-setup.md) 的「装后校验」小节。
+- 手册侧的规则复述与用户警告（deny 不得点名 preset 自身工具、`agentOptions`
+  的 provider 必须存在、stamp 只以组装文件为键）见
+  [`dsh-setup.md` §六](./dsh-setup.md)。

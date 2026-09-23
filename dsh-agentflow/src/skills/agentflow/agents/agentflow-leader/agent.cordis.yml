@@ -234,6 +234,11 @@
   config:
     - id: compaction-basic
       name: '@deepseek-ai/dsh-compaction-basic'
+      config:
+        # 压缩触发点：已路由上下文窗口的 35%（1M 窗口 => 367k token）。
+        # 不用默认的 0.8：那要涨到 838k 才开始压，而上游摘要请求本身要驮着
+        # 被压掉的那段历史再跑一次，越晚压、单次摘要越重。35% 留足 3 倍余量。
+        thresholdRatio: 0.35
 
     - id: command-compact
       name: '@deepseek-ai/dsh-command-compact'
@@ -280,6 +285,8 @@
         provider: spawn
         toolName: subagent
         backgroundMode: continuable
+        # 采样 Host 的 subagent-model-selection 白名单，让子代理可被钉住到稳定路由
+        modelSelectionSettings: true
 
     - id: tool-subagent-fork
       name: '@deepseek-ai/dsh-tool-subagent'
@@ -287,6 +294,8 @@
         provider: fork
         toolName: subagent_fork
         backgroundMode: continuable
+        # 采样 Host 的 subagent-model-selection 白名单，让子代理可被钉住到稳定路由
+        modelSelectionSettings: true
 
     # `spawn_worker`: the Leader's dedicated tool for spawning a real domain
     # Worker. A child still JOINS this preset's composition (composeFrom) — DSH
@@ -303,6 +312,10 @@
         provider: spawn
         toolName: spawn_worker
         backgroundMode: continuable
+        # 采样 Host 的 subagent-model-selection 白名单，让 Worker 通道也能被钉住到稳定路由。
+        # 缺这一行时 settings.yaml 里的白名单会静默失效（DSH 在该 flag 未开时直接把策略置为
+        # undefined，不报错也不生效），于是 Leader 无法为 Worker 指定模型。
+        modelSelectionSettings: true
         persona: |-
           You are a domain Worker in an agentflow-managed multi-agent team, powered by the {{model}} model. Your working directory is {{cwd}}.
 
@@ -339,8 +352,6 @@
           加载 `agentflow-worker` 技能可查看完整实现模板、Worker 名册与记录规范。
         toolFilter:
           deny:
-            - subagent
-            - subagent_fork
             - workflow
             - ralph
             - send_message
@@ -356,6 +367,12 @@
     # them; if the deployment has no second provider/model at all, DELETE this
     # whole `- id: tool-subagent-worker-alt` block — a spawn pinned to a
     # missing provider/model fails on every use.
+    # In this deployment the pin is cliproxy-google/kr/deepseek-v4.1-flash, which
+    # is also this deployment's `agent-default-model` (settings.yaml lines 3-5).
+    # Fact: while the session default model is that same route, this channel
+    # provides NO routing diversity — primary and fallback travel one route, so
+    # exhausting that route's quota takes both down together and switching to
+    # `spawn_worker_alt` rescues nothing.
     - id: tool-subagent-worker-alt
       name: '@deepseek-ai/dsh-tool-subagent'
       config:
@@ -363,8 +380,8 @@
         toolName: spawn_worker_alt
         backgroundMode: continuable
         agentOptions:
-          provider: opencode2
-          model: glm-5.3-flash
+          provider: cliproxy-google
+          model: kr/deepseek-v4.1-flash
         persona: |-
           You are a domain Worker in an agentflow-managed multi-agent team, powered by the {{model}} model. Your working directory is {{cwd}}.
 
@@ -401,8 +418,6 @@
           加载 `agentflow-worker` 技能可查看完整实现模板、Worker 名册与记录规范。
         toolFilter:
           deny:
-            - subagent
-            - subagent_fork
             - workflow
             - ralph
             - send_message

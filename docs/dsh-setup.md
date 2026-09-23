@@ -165,15 +165,133 @@ cp -a skills/agentflow/agents/agentflow-worker ~/.dsh/.agent-presets/
 
 创建 DSH 会话时选择对应预设（显示名「AgentFlow · Leader」/「AgentFlow · Worker」）。
 
+> ⚠️ **装后校验：`cp -a` 之后必须比对 sha256，不一致一律视为安装失败。**
+>
+> preset 镜像是**人工维护**的：`scripts/sync-skill.ps1` 只同步 `bt_service` /
+> `trees` / `requirements.txt`，**完全不碰 preset**。也就是说仓库里的
+> `agent.cordis.yml` 与 `~/.dsh/.agent-presets/` 下的 live 副本之间
+> **目前没有任何自动同步机制**，脱钩了不会有任何报错——只会静默生效一份错误的预设。
+> 所以每次安装/更新后都要逐 preset 校验（在仓库根执行）：
+>
+> ```bash
+> for p in agentflow-leader agentflow-worker agentflow-dev agentflow-dev-leader; do
+>   repo=$(sha256sum "skills/agentflow/agents/$p/agent.cordis.yml" | cut -c1-64)
+>   live=$(sha256sum "$HOME/.dsh/.agent-presets/$p/agent.cordis.yml" | cut -c1-64)
+>   if [ "$repo" = "$live" ]; then echo "OK   $p $repo"
+>   else echo "FAIL $p repo=$repo live=$live"; fi
+> done
+> ```
+>
+> Windows（PowerShell）等价写法：
+>
+> ```powershell
+> foreach ($p in 'agentflow-leader','agentflow-worker','agentflow-dev','agentflow-dev-leader') {
+>   $repo = (Get-FileHash "skills\agentflow\agents\$p\agent.cordis.yml" -Algorithm SHA256).Hash
+>   $live = (Get-FileHash "$env:USERPROFILE\.dsh\.agent-presets\$p\agent.cordis.yml" -Algorithm SHA256).Hash
+>   if ($repo -eq $live) { "OK   $p" } else { "FAIL $p repo=$repo live=$live" }
+> }
+> ```
+>
+> 出现任何 `FAIL` 即为安装失败：**不要用那份预设创建会话**，先让仓库镜像与 live
+> 对齐（或反过来把 live 收敛回仓库），再重跑校验。
+
 ### 关键工具：`spawn_worker`
 
 DSH 的子 Agent 通过 `composeFrom` 固定 join 父预设，**无按调用换 preset 的机制**。
 因此 `agentflow-leader` 内配一个专属 `spawn_worker` 工具实例，用固定
-`persona` + `toolFilter`（deny `subagent`/`subagent_fork`/`subagent_codex`/
-`subagent_claude_code`/`workflow`/`ralph`/`send_message`/`interrupt_agent`/
-`list_agents`）达成「Worker 人格 + 无编排工具」的边界。
+`persona` + `toolFilter` 达成「Worker 人格 + 无编排工具」的边界。
+
+`toolFilter.deny` 的**实际值恰为 5 项**，一项不多一项不少：
+
+```yaml
+toolFilter:
+  deny:
+    - workflow
+    - ralph
+    - send_message
+    - interrupt_agent
+    - list_agents
+```
 
 - 生成领域 Worker → 用 `spawn_worker`；调研/一般子任务 → 用 `subagent`/`subagent_fork`。
+
+### 🚫 严禁在 `toolFilter.deny` 里点名本 preset 自己贡献的工具
+
+> **`subagent` / `subagent_fork`（以及任何本 preset 自己提供的工具名）
+> 绝对不能出现在 `toolFilter.deny` 里。**
+>
+> 这不是"多禁一个工具"的降级行为，而是**整条委派通道直接宕掉**。
+
+**机理**：DSH 的工具限制由 `@deepseek-ai/dsh-tools` 的 `tools.restrict()` 执行。
+它**只接受"可限制集合"（`restrictableNames`）内的名字**，名字不在集合里就**抛错**，
+而不是静默忽略。源码注释原文（`@deepseek-ai/dsh-tools/lib/index.js`，
+`restrict()` 上方，约 2783–2789 行）：
+
+> Restrict global tools for the calling agent scope. Empty filters, unknown
+> names, scope-local names, and reserved transport names fail. Restrictions
+> intersect; scoped registrations remain visible.
+
+同文件 `restrict()` 体内的抛错点（约 2801–2803 行）：
+
+```js
+const known = this.view(scope).restrictableNames;
+const unknown = [...allow ?? [], ...deny ?? []].filter((name) => !known.has(name));
+if (unknown.length > 0) throw new Error(`tools.restrict() names unknown global tool${...} ...`);
+```
+
+**为什么 `subagent` / `subagent_fork` 会踩中这个 `throw`**：
+它们**正是本 preset 自己贡献的工具**（由 `agentflow-leader` 里那几个
+`@deepseek-ai/dsh-tool-subagent` 行注册），因而不在"可限制集合"里。
+更隐蔽的是，`@deepseek-ai/dsh-tool-subagent` 对这两个工具**只在
+`subagent/provider-added` 事件上注册**：
+
+```js
+runtimeCtx.on("subagent/provider-added", (subagentProvider) => {
+  if (subagentProvider.name === config.provider && mounted === void 0) mount(subagentProvider);
+});
+const present = runtimeCtx.subagents.getProvider(config.provider);
+if (present !== void 0) mount(present);
+else runtimeCtx.logger.info(`subagent provider "..." not registered yet; the "..." tool will register when it appears`);
+```
+
+即 provider 未就绪时**静默不注册**，只打一条 `info` 日志——所以工具名可能
+**连存在都不存在**。而真实注册路径 `mount()` 内部的
+`runtimeCtx.tools.register(...)` 一旦拿到与 deny 冲突的名字，就会在
+`restrict()` 处**抛错 → 工具实例构造失败 → 整个委派通道全废**
+（Leader 无法派发任何子代理；是报错，不是降级）。
+
+**正确做法**：deny 里只写**编排类全局工具名**，绝不写本 preset 自己的贡献物。
+上面那 5 项就是当前 live 与仓库镜像的唯一正确取值。
+
+完整根因、复现与排查记录见
+[`KERNEL_PRESET_TOOLFILTER.md`](./KERNEL_PRESET_TOOLFILTER.md)。
+
+> ⚠️ **`agentOptions` 里钉的 `provider` / `model` 必须真实存在于目标机器的
+> `~/.dsh/settings.yaml`，否则该通道每次用都失败。**
+> 这不是"回退到默认路由"，而是**每次调用都失败**——preset 内的原注释写得很直白：
+>
+> > The provider/model names here MUST exist in this deployment's
+> > `~/.dsh/settings.yaml` (llm-pi-ai.providers). If the names differ, rename
+> > them; if the deployment has no second provider/model at all, DELETE this
+> > whole `- id: ...-worker-alt` block — a spawn pinned to a
+> > missing provider/model **fails on every use**.
+>
+> **本仓库曾有一份现成反例**：仓库镜像把 alt 通道钉成
+> `provider: opencode2` / `model: glm-5.3-flash`，而该机器的 `settings.yaml`
+> 里只有 `opencodego2` / `opencodego1`，**根本不存在 `opencode2` 这个 provider**
+> —— 那条 alt 通道形同报废。正确取值示例：`cliproxy-google` /
+> `kr/deepseek-v4.1-flash`。改 preset 前请先确认 `settings.yaml` 里存在该
+> provider 与该 model。
+
+> ⚠️ **stamp 陷阱：`dsh-agent-presets` 的代际 stamp 只以组装文件为键。**
+> 预设"代际"仅由组装产物 **`agent.cordis.yml`** 决定，依据是它的
+> `{ mtimeMs, size }`（`dsh-agent-presets` 中
+> `COMPOSITION_FILE = "agent.cordis.yml"`，
+> `compositionStamp()` 对 `preset.path` 取 stat，`sameStamp()` 只比这两项）。
+> 因此**旁边顺手改的 `SKILL.md` / `preset.yml` / `README.md` 不会让新会话感知到
+> 变化**（`preset.yml` 只是 `METADATA_FILE`，不参与 stamp），必须等到
+> `agent.cordis.yml` **本身变动**（mtime 或 size 改变）**或进程重启**为止。
+> 修 preset 时请直接改组装文件本身，不要指望改旁边文件能热生效。
 
 ### 完整说明
 
