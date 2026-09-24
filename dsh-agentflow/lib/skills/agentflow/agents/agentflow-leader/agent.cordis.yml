@@ -372,12 +372,17 @@
     # them; if the deployment has no second provider/model at all, DELETE this
     # whole `- id: tool-subagent-worker-alt` block — a spawn pinned to a
     # missing provider/model fails on every use.
-    # In this deployment the pin is cliproxy-google/kr/deepseek-v4.1-flash, which
-    # is also this deployment's `agent-default-model` (settings.yaml lines 3-5).
-    # Fact: while the session default model is that same route, this channel
-    # provides NO routing diversity — primary and fallback travel one route, so
-    # exhausting that route's quota takes both down together and switching to
+    # In this deployment the pin is cliproxy-google/gemini-3.8-flash-high, which
+    # is identical to the primary `spawn_worker` channel (same route and CPA pool).
+    # Fact: this channel currently provides NO routing diversity — primary and
+    # fallback travel the exact same route. If the CPA account pool enters quota
+    # cooldown, exhausting that route takes both down together and switching to
     # `spawn_worker_alt` rescues nothing.
+    # Architectural rationale / lesson: an effective fallback channel requires a
+    # different upstream provider. Keeping them identical is an accepted trade-off
+    # to guarantee elimination of the 120s NVIDIA hard cap across both channels,
+    # but true multi-route resilience will eventually require pointing alt to an
+    # independent provider.
     - id: tool-subagent-worker-alt
       name: '@deepseek-ai/dsh-tool-subagent'
       config:
