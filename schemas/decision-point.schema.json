@@ -1,0 +1,204 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/toustifer/agentflow/schemas/decision-point.schema.json",
+  "title": "DecisionPointDatasetOrItem",
+  "description": "Agentflow Decision Point Schema per PROPOSAL_HISTORY_REPLAY.md §4.1.2",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/decision_point"
+    },
+    {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/decision_point"
+      }
+    }
+  ],
+  "$defs": {
+    "decision_point": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "decision_id",
+        "dag_id",
+        "task_id",
+        "round",
+        "context_before",
+        "decision",
+        "action_result",
+        "outcome",
+        "snapshot"
+      ],
+      "properties": {
+        "decision_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique identifier for this decision point, e.g. dp-20260924-001"
+        },
+        "dag_id": {
+          "type": "string",
+          "description": "Associated DAG identifier"
+        },
+        "task_id": {
+          "type": "string",
+          "description": "Associated Task identifier"
+        },
+        "round": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-based review/execution round"
+        },
+        "context_before": {
+          "type": "object",
+          "required": [
+            "dag_state",
+            "completed_tasks",
+            "pending_tasks",
+            "review_cycle",
+            "known_evidence"
+          ],
+          "properties": {
+            "dag_state": {
+              "type": "string",
+              "description": "DAG status before this decision, e.g. in_progress, planning"
+            },
+            "completed_tasks": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "List of completed task IDs in the DAG"
+            },
+            "pending_tasks": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "List of pending or executing task IDs in the DAG"
+            },
+            "review_cycle": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Current task review cycle index"
+            },
+            "known_evidence": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Key context and failure/success evidence known before decision"
+            }
+          }
+        },
+        "decision": {
+          "type": "object",
+          "required": [
+            "assigned_worker",
+            "model_route",
+            "acceptance_criteria"
+          ],
+          "properties": {
+            "assigned_worker": {
+              "type": "string",
+              "description": "Worker identifier assigned to the task"
+            },
+            "model_route": {
+              "type": "string",
+              "description": "Declared or routed AI model/provider string"
+            },
+            "acceptance_criteria": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "List of acceptance criteria for this decision"
+            }
+          }
+        },
+        "action_result": {
+          "type": "object",
+          "required": [
+            "transition",
+            "exit_code",
+            "duration_seconds"
+          ],
+          "properties": {
+            "transition": {
+              "type": "string",
+              "description": "Transition verb, e.g. submit, start, rework, pass"
+            },
+            "exit_code": {
+              "type": "integer",
+              "description": "Command or task exit code"
+            },
+            "duration_seconds": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Execution duration in seconds"
+            }
+          }
+        },
+        "outcome": {
+          "type": "object",
+          "required": [
+            "final_verdict",
+            "review_rounds",
+            "rework_count",
+            "rework_categories",
+            "evidence_gaps"
+          ],
+          "properties": {
+            "final_verdict": {
+              "type": "string",
+              "description": "Final review outcome: pass, rework, fail, cancelled, etc."
+            },
+            "review_rounds": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of review rounds conducted"
+            },
+            "rework_count": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of times reworked"
+            },
+            "rework_categories": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Categorized rework reasons"
+            },
+            "evidence_gaps": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Identified missing evidence items"
+            }
+          }
+        },
+        "snapshot": {
+          "type": "object",
+          "required": [
+            "worktree_head_commit",
+            "evidence_files"
+          ],
+          "properties": {
+            "worktree_head_commit": {
+              "type": "string",
+              "description": "Git commit SHA of the worktree snapshot"
+            },
+            "evidence_files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Relevant artifact or evidence file paths"
+            }
+          }
+        }
+      }
+    }
+  }
+}
