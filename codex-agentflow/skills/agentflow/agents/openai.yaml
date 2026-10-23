@@ -1,0 +1,6 @@
+interface:
+  display_name: "Agentflow"
+  short_description: "Manage Codex project tasks, worktrees and reviews with agentflow"
+  default_prompt: "Use $agentflow to inspect this project and continue its task workflow."
+policy:
+  allow_implicit_invocation: false

@@ -32,6 +32,16 @@ agentflow 是一个**本地优先、MCP 原生、git/worktree-aware** 的 AI age
 
 ## 核心模型
 
+### Codex 原生适配
+
+现在提供独立的 Codex 技能与 MCP 安装器，复用同一 Go 引擎，使用独立持久数据库。
+
+```sh
+python scripts/install-codex.py
+```
+
+安装后在新 Codex 会话输入 `$agentflow setup`，再通过 `$agentflow` 描述目标。不是 DSH CLI 转接，也不注册自定义斜杠命令。安装前置条件、验证层级、备份与回滚见 [Codex 安装说明](docs/codex-setup.md)。
+
 | 概念 | 含义 |
 |------|------|
 | `namespace` | 一个项目的隔离边界 |
